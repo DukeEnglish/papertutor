@@ -1,0 +1,2682 @@
+Differentiable Discrete Event Simulation
+for Queuing Network Control
+Ethan Che Jing Dong Hongseok Namkoong
+Columbia Business School
+{eche25, jing.dong, namkoong}@gsb.columbia.edu
+Abstract
+Queuingnetworkcontrolisessentialformanagingcongestioninjob-processingsystemssuch
+as service systems, communication networks, and manufacturing processes. Despite growing
+interest in applying reinforcement learning (RL) techniques, queueing network control poses
+distinctchallenges,includinghighstochasticity,largestateandactionspaces,andlackofstabil-
+ity. To tackle these challenges, we propose a scalable framework for policy optimization based
+on differentiable discrete event simulation. Our main insight is that by implementing a well-
+designed smoothing technique for discrete event dynamics, we can compute PATHWISE policy
+gradients for large-scale queueing networks using auto-differentiation software (e.g., Tensor-
+flow, PyTorch) and GPU parallelization. Through extensive empirical experiments, we observe
+that our policy gradient estimators are several orders of magnitude more accurate than typical
+REINFORCE-based estimators. In addition, we propose a new policy architecture, which dras-
+tically improves stability while maintaining the flexibility of neural-network policies. In a wide
+variety of scheduling and admission control tasks, we demonstrate that training control policies
+with pathwise gradients leads to a 50-1000x improvement in sample efficiency over state-of-the-
+art RL methods. Unlike prior tailored approaches to queueing, our methods can flexibly handle
+realistic scenarios, including systems operating in non-stationary environments and those with
+non-exponential interarrival/service times.
+1 Introduction
+Queuing models are a powerful modeling tool to conduct performance analysis and optimize op-
+erational policies in diverse applications such as service systems (e.g., call centers [1], healthcare
+deliverysystems[6], ride-sharingplatforms[9], etc), computerandcommunicationsystems[45,76],
+manufacturing systems [86], and financial systems (e.g., limit order books [24]). Standard tools for
+queuing control analysis involve establishing structural properties of the underlying Markov deci-
+sion process (MDP) or leveraging analytically more tractable approximations such as fluid [28, 18]
+ordiffusionapproximations[47,89,48,68]. Theseanalyticalresultsoftengiverisetosimplecontrol
+policies that are easy to implement and interpret. However, these policies only work under restric-
+tive modeling assumptions and can be highly sub-optimal outside of these settings. Moreover,
+deriving a good policy for a given queuing network model requires substantial queuing expertise
+and can be theoretically challenging.
+Recentadvancesinreinforcementlearning(RL)havespurredgrowinginterestinapplyinglearn-
+ing methodologies to solve queuing control problems, which benefit from increased data and com-
+putational resources [26, 98, 64]. These algorithms hold significant potential for generating effec-
+tive controls for complex, industrial-scale networks encountered in real-world applications, which
+typically fall outside the scope of theoretical analysis. However, standard model-free RL algo-
+rithms [84, 82, 72] often under-perform in queuing control, even when compared to simple queuing
+1
+4202
+peS
+5
+]GL.sc[
+1v04730.9042:viXraFigure 1. Improvements in sample efficiency of our proposed PATHWISE policy gradient estimator
+over a standard model-free RL estimator, REINFORCE. (Left) Samples of policy gradient estimators
+for a parameterized MaxPressure policy in a criss-cross network with traffic intensity ρ = 0.9 (see
+Example 3). Each draw of the REINFORCE estimator is averaged over B = 103 trajectories and is
+equipped with a value function baseline, which is fitted using 106 state transitions. The PATHWISE
+estimator uses only a single trajectory, and no value function. Despite using less data, it is more
+closely aligned with the true gradient. (Right) Average cosine similarity (higher is better) of policy
+gradient estimators with the true policy gradient (see (10) for more details) across different levels
+of traffic intensity for the criss-cross network. For REINFORCE, we plot the cosine similarity of
+the estimator under different batch sizes B = 1,..,104. We see that the efficiency advantages of
+PATHWISE, with only 1 trajectory, are greater under higher traffic intensities, even outperforming
+REINFORCE with a value function baseline and B =104 trajectories.
+policies [78, 64], unless proper modifications are made. This under-performance is primarily due
+to the unique challenges posed by queuing networks, including (1) high stochasticity of the tra-
+jectories, (2) large state and action spaces, and (3) lack of stability guarantees under sub-optimal
+policies [26]. For example, when applying policy gradient methods, typical policy gradient estima-
+tors based on coarse feedback from the environment (observed costs) suffer prohibitive error due
+to high variability (see, e.g., the REINFORCE estimators in Figure 1).
+To tackle the challenges in applying off-the-shelf RL solutions for queuing control, we propose
+a new scalable framework for policy optimization that incorporates domain-specific queuing knowl-
+edge. Our main algorithmic insight is that queueing networks possess key structural properties
+that allow for several orders of magnitude more accurate gradient estimation. By leveraging the
+fact that the dynamics of discrete event simulations of queuing networks are governed by observed
+exogenous randomness (interarrival and service times), we propose a differentiable discrete event
+simulation framework. This framework enables the computation of a PATHWISE gradient of a
+performance objective (e.g., cumulative holding cost) with respect to actions.
+Our proposed gradient estimator, denoted as the PATHWISE estimator, can then be used to
+efficiently optimize the parameters of a control policy through stochastic gradient descent (SGD).
+By utilizing the known structure of queuing network dynamics, our approach provides finer-grained
+feedback on the sensitivity of the performance objective to any action taken along the sample path.
+This offers an infinitesimal counterfactual analysis: how the performance metric would change if
+the scheduling action were slightly perturbed. Rather than relying on analytic prowess to compute
+these gradients, we utilize the rapid advancements in scalable auto-differentiation libraries such
+as PyTorch [77] to efficiently compute gradients over a single sample path or a batch of sample
+2Figure 2. (Left) Pseudo-code of a single gradient step of our proposed PATHWISE estimator.
+Computing the estimator requires only a few lines of code to compute the cost incurred by the
+policy. Once this cost is calculated, the sample path gradient is computed automatically via reverse-
+mode auto-differentiation. Unlike standard methods such as infinitesimal perturbation analysis or
+likelihood-ratioestimation,wecanapplythesamecodeforanynetworkwithoutanybespokemodifi-
+cations. Unlikemodel-freegradientestimatorslikeREINFORCE,ourmethoddoesnotneedaseparate
+value function fitting step, managing a replay buffer, feature/return normalization, generalized ad-
+vantage estimation, etc., as it has a low variance without any modification. (Right) A sample path
+of the total queue length (light blue) for a multi-class queuing network (see Example 2) under a
+randomized priority scheduling policy. Along the path, we display the gradients (dark blue) com-
+puted using our framework of the average cost with respect to each action produced by the policy:
+∇ 1 (cid:80)N−1c(x ,u )τ∗ .
+ukN k=0 k k k+1
+paths. Our proposed approach supports very general control policies, including neural network
+policies,whichhavethepotentialtoimprovewithmoredataandcomputationalresources. Notably,
+our method seamlessly handles large-scale queuing networks and large batches of data via GPU
+parallelization. Unlike off-the-shelf RL solutions whose performance is exceedingly sensitive to
+implementation details [56, 58], our method is easy to implement (see e.g., Figure 2) and requires
+minimal effort for parameter tuning.
+Across a range of queueing networks, we empirically observe that our PATHWISE estimator
+substantiallyimprovesthesampleefficiencyandstabilityoflearningalgorithmsforqueuingnetwork
+control while preserving the flexibility of learning approaches. In Figure 1, we preview our main
+empirical findings which show that PATHWISE gradients lead to a 50-1000x improvement in sample
+efficiency over model-free policy gradient estimators (e.g., REINFORCE [101]). Buoyed by the
+promisingempiricalresults,weprovideseveraltheoreticalinsightsexplainingtheobservedefficiency
+gains.
+Our proposed approach draws inspiration from gradient estimation strategies developed in
+the stochastic modeling and simulation literature, particularly infinitesimal perturbation analy-
+sis (IPA) [35, 52, 60]. While IPA has been shown to provide efficient gradient estimators for
+specific small-scale queuing models (e.g., the G/G/1 queue), it is well-known that unbiased IPA
+estimates cannot be obtained for general multi-class queuing networks due to non-differentiability
+of the sample path [15, 32, 33]. Our framework overcomes this limitation by proposing a novel
+smoothingtechniquebasedoninsightsfromfluidmodels/approximationsforqueuesandtoolsfrom
+the machine learning (ML) literature. To the best of our knowledge, our method is the first to
+3provide a gradient estimation framework capable of handling very general and large-scale queuing
+networks and various control policies. Our modeling approach is based on discrete-event simulation
+models, and as a result, it can accommodate non-stationary and non-Markovian inter-arrival and
+service times, requiring only samples instead of knowledge of the underlying distributions.
+Oursecondcontributionisasimpleyetpowerfulmodificationtothecontrolpolicyarchitecture.
+It has been widely observed that training a standard RL algorithm, such as proximal policy opti-
+mization [84] (PPO), may fail to converge due to instabilities arising from training with random
+initialization. To address this issue, researchers have proposed either switching to a stabilizing
+policy when instability occurs [64] or imitating (behavior cloning) a stabilizing policy at the be-
+ginning [26]. However, both methods limit policy flexibility and introduce additional complexity
+in the training process. We identify a key source of the problem: generic policy parameteriza-
+tions (e.g., neural network policies) do not enforce work conservation, leading to scenarios where
+even optimized policies often assign servers to empty queues. To address this, we propose a mod-
+ification to standard policy parameterizations in deep reinforcement learning, which we refer to
+as the ‘work-conserving softmax’. This modification is compatible with standard reinforcement
+learning algorithms and automatically guarantees work conservation. Although work conservation
+does not always guarantee stability, we empirically observe across many scenarios that it effec-
+tively eliminates instability in the training process, even when starting from a randomly initialized
+neural network policy. This modification not only complements our gradient estimator but is also
+compatible with other model-free RL approaches. We find that while PPO without any modifica-
+tions fails to stabilize large queuing networks and leads to runaway queue lengths, PPO with the
+work-conserving softmax remains stable from random initialization and can learn better scheduling
+policies than traditional queuing policies.
+Since rigorous empirical validation forms the basis of algorithmic progress, we provide a thor-
+ough empirical validation of the effectiveness of the differentiable discrete event simulator for queu-
+ing network control. We construct a wide variety of benchmark control problems, ranging from
+learning the cµ-rule in a simple multi-class queue to scheduling and admission control in large-scale
+networks. Across the board, we find that our proposed PATHWISE gradient estimator achieves
+significantimprovementsinsampleefficiencyovermodel-freealternatives, whichtranslatetodown-
+stream improvements in optimization performance.
+• In a careful empirical study across 10,800 parameter settings, we find that for 94.5% of these
+settings our proposed PATHWISE gradient estimator computed along a single sample path
+achievesgreaterestimationqualitythanREINFORCEwith1000xmoredata(seesection5.1).
+• In a scheduling task in multi-class queues, gradient descent with PATHWISE gradient estima-
+tor better approximates the optimal policy (the cµ-rule) and achieves a smaller average cost
+than REINFORCE with a value function baseline and 1000x more data (see section 5.2).
+• In an admission control task, optimizing the buffer sizes with PATHWISE gradient estimator
+achieves smaller costs than randomized finite differences (SPSA [88]) with 1000x more data,
+particularly for higher-dimensional problem instances (see section 5.3).
+• For large-scale scheduling problems, policy gradient with PATHWISE gradient estimator and
+work-conserving softmax policy architecture achieves a smaller long-run average holding cost
+than traditional queuing policies and state-of-the-art RL methods such as PPO, which use
+50x more data (see section 7). Performance gains are greater for larger networks with non-
+exponential noise.
+4These order-of-magnitude improvements in sample efficiency translate to improved computational
+efficiency when drawing trajectories from a simulator and improved data efficiency if samples of
+event times are collected from a real-world system.
+Overall,theseresultsindicatethatonecanachievesignificantimprovementsinsampleefficiency
+by incorporating the specific structure of queuing networks, which is under-utilized by model-free
+reinforcementlearningmethods. Insection8,weinvestigatetheM/M/1queueasatheoreticalcase
+study and show that even with an optimal baseline, REINFORCE has a sub-optimally large variance
+under heavy traffic compared to a pathwise policy gradient estimator. This analysis identifies some
+of the statistical limitations of REINFORCE, and illustrates that a better understanding of the
+transition dynamics, rather than narrowly estimating the value-function or Q-function, can deliver
+large improvements in statistical efficiency. Given the scarcity of theoretical results comparing the
+statistical efficiency of different policy gradient estimators, this result may be of broader interest.
+Our broad aim with this work is to illustrate a new paradigm for combining the deep, struc-
+tural knowledge of queuing networks developed in the stochastic modeling literature with learn-
+ing and data-driven approaches. Rather than either choosing traditional queuing policies, which
+can be effective for certain queueing control problems but do not improve with data, or choos-
+ing model-free reinforcement learning methods, which learn from data but do not leverage known
+structure, our framework offers a favorable midpoint: we leverage structural insights to extract
+much more informative feedback from the environment, which can nonetheless be used to optimize
+black-box policies and improve reliability. Beyond queuing networks, our algorithmic insight pro-
+vides a general-purpose tool for computing gradients in general discrete-event dynamical systems.
+Considering the widespread use of discrete-event simulators with popular modeling tools such as
+AnyLogic [94] or Simio [87] and open-source alternatives such as SimPy [69], the tools developed in
+this work can potentially be applied to policy optimization problems in broader industrial contexts.
+The organization of this paper is as follows. In section 2, we discuss connections with related
+work. In section 3, we introduce the discrete-event dynamical system model for queuing networks.
+In section 4, we introduce our framework for gradient estimation. In section 5, we perform a
+careful empirical study of our proposed gradient estimator, across estimation and optimization
+tasks. In section 6, we discuss the instability issue in queuing control problems and our proposed
+modification to the policy architecture to address this. In section 7, we empirically investigate the
+performance of our proposed pathwise gradient estimation and work-conserving policy architecture
+in optimizing scheduling policies for large-scale networks. In section 8, we discuss the M/M/1
+queue as a theoretical case study concerning the statistical efficiency of REINFORCE compared to
+PATHWISE estimators. Finally, section 9 concludes the paper and discusses extensions.
+2 Related Work
+We discuss connections to related work in queuing theory, reinforcement learning, and gradient
+estimation in machine learning and operations research.
+Scheduling in Queuing Networks Scheduling is a long-studied control task in the queuing
+literatureformanagingqueueswithmultipleclassesofjobs [48,70]. Standardpoliciesdevelopedin
+the literature include static priority policies such as the cµ-rule [25], threshold policies [80], policies
+derived from fluid approximations [7, 20, 71], including discrete review policies [46, 67], policies
+that have good stability properties such as MaxWeight [89] and MaxPressure [27]. Many of these
+5policies satisfy desirable properties such as throughput optimality [93, 5], or cost minimization [25,
+68]forcertainnetworksand/orincertainasymptoticregimes. Inourwork,weaimtoleveragesome
+of the theoretical insights developed in this literature to design reinforcement learning algorithms
+that can learn faster and with less data than model-free RL alternatives. We also use some of the
+standard policies as benchmark policies when validating the performance of our PATHWISE policy
+gradient algorithm.
+Reinforcement Learning in Queueing Network Control Our research connects with the
+literatureondevelopingreinforcementlearningalgorithmsforqueuingnetworkcontrolproblems[73,
+85, 79, 26, 64, 100, 78]. These works apply standard model-free RL techniques (e.g. Q-learning,
+PPO, value iteration, etc.) but introduce novel modifications to address the unique challenges in
+queuingnetworkcontrolproblems. Ourworkdiffersinthatweproposeanentirelynewmethodology
+forlearningfromtheenvironmentbasedondifferentiablediscreteeventsimulation,whichisdistinct
+from all model-free RL methods. The works [85, 64, 26, 78] observe that RL algorithms tend to
+be unstable and propose fixes to address this, such as introducing a Lyapunov function into the
+rewards, or behavior cloning of a stable policy for initialization. In our work, we propose a simple
+modification to the policy network architecture, denoted as the work-conserving softmax as it is
+designed to ensure work-conservation. We find empirically that work-conserving softmax ensures
+stability with even randomly initialized neural network policies. In our empirical experiments,
+we primarily compare our methodology with the PPO algorithm developed in [26]. In particular,
+we construct a PPO baseline with the same hyper-parameters, neural network architecture, and
+variance reduction techniques as in [26], although with our policy architecture modification that
+improves stability.
+Differentiable Simulation in RL and Operations Research While differentiable simulation
+is a well-studied paradigm for control problems in physics and robotics [50, 55, 90, 53, 81], it has
+only recently been explored for large-scale operations research problems. For instance, [66, 2] study
+inventory control problems and train a neural network using direct back-propagation of the cost,
+as sample paths of the inventory levels are continuous and differentiable in the actions. In our
+work, we study control problems for queuing networks, which are discrete and non-differentiable,
+preventingthedirectapplicationofsuchmethods. Toaddressthis,wedevelopanovelframeworkfor
+computing pathwise derivatives for these non-differentiable systems, which proves highly effective
+for training control policies. Another line of work, including [3, 4], proposes differentiable agent-
+based simulators based on differentiable relaxations. While these relaxations have shown strong
+performanceinoptimizationtasks,theyalsointroduceunpredictablediscrepancieswiththeoriginal
+dynamics. We introduce tailored differentiable relaxations in the back-propagation process only,
+ensuring that the forward simulation remains true to the original dynamics.
+Gradient Estimation in Machine Learning Gradientestimation[74]isanimportantsub-field
+ofthemachinelearningliterature,withapplicationsinprobabilisticmodeling[61,59]andreinforce-
+ment learning [101, 92]. There are two standard strategies for computing stochastic gradients [74].
+The first is the score-function estimator or REINFORCE [101, 92], which only requires the ability
+to compute the gradient of log-likelihood but can have high variance [44]. Another strategy is the
+reparameterization trick [61], which involves decomposing the random variable into the stochastic-
+ity and the parameter of interest, and then taking a pathwise derivative under the realization of
+6thestochasticity. Gradientestimatorsbasedonthereparameterizationtrickcanhavemuchsmaller
+variance [74], but can only be applied in special cases (e.g. Gaussian random variables) that enable
+this decomposition. Our methodology makes a novel observation that for queuing networks, the
+structure of discrete-event dynamical systems gives rise to the reparameterization trick. Neverthe-
+less, the function of interest is non-differentiable, so standard methods cannot be applied. As a
+result, our framework also connects with the literature on gradient estimation for discrete random
+variables [59, 65, 11, 96]. In particular, to properly smooth the non-differentiability of the event
+selection mechanism, we employ the straight-through trick [11], which has been previously used in
+applications such as discrete representation learning [97]. Our work involves a novel application of
+this technique for discrete-event systems, and we find that this is crucial for reducing bias when
+smoothing over long time horizons.
+Gradient Estimation in Operations Research There is extensive literature on gradient esti-
+mation for stochastic systems [35, 36, 39, 14, 33], some with direct application to queuing optimiza-
+tion [63, 42, 33]. Infinitesimal Perturbation Analysis (IPA) [35, 52, 60] is a standard framework
+for constructing pathwise gradient estimators, which takes derivatives through stochastic recur-
+sions that represent the dynamics of the system. While IPA has been applied successfully to some
+specific queuing networks and discrete-event environments more broadly [91], standard IPA tech-
+niquescannotbeappliedtogeneralqueuingnetworkscontrolproblems,ashasbeenobservedin[15].
+There has been much research on outlining sufficient conditions under which IPA is valid, such as
+the commuting condition in [35, 36] or the perturbation conditions in [14], but these conditions
+do not hold in general. Several extensions to IPA have been proposed, but these alternatives re-
+quire knowing the exact characteristics of the sampling distributions and bespoke analysis of event
+paths [33, 32]. Generalized likelihood-ratio estimation [39] is another popular gradient estimation
+framework, which leverages an explicit Markovian formulation of state transitions to estimate pa-
+rameter sensitivities. However, this requires knowledge of the distributions of stochastic inputs,
+and even with this knowledge, it may be difficult to characterize the exact Markov transition kernel
+of the system. Finally, finite differences [31] and finite perturbation analysis [52, 15] are powerful
+methods, particularly when aided with common random numbers [41, 38], as it requires minimal
+knowledgeaboutthesystem. However,ithasbeenobservedthatperformancecanscalepoorlywith
+problem dimension [37, 41], and we also observe this in an admission control task (see Section 5.3).
+Our contribution is proposing a novel, general-purpose framework for computing pathwise gra-
+dients through careful smoothing, which only requires samples of random input (e.g., interarrival
+times and service times) rather than knowledge of their distributions. Given the negative results
+about the applicability of IPA for general queuing network control problems (e.g., general queuing
+network model and scheduling policies), we introduce bias through smoothing to achieve generality.
+It has been observed in [29] that biased IPA surrogates can be surprisingly effective in simulation
+optimization tasks such as ambulance base location selection. Our extensive empirical results con-
+firm this observation and illustrate that while there is some bias, it is very small in practice, even
+over long time horizons (> 105 steps).
+3 Discrete-Event Dynamical System Model for Queuing Networks
+We describe multi-class queuing networks as discrete-event dynamical systems. This is different
+from the standard Markov chain representation, which is only applicable when inter-arrival and
+7servicetimesareexponentiallydistributed. Toaccommodatemoregeneralevent-timedistributions,
+the system description not only involves the queue lengths, but also auxiliary information such as
+residualinter-arrivaltimesandworkloads. Surprisingly, thismoredetailedsystemdescriptionleads
+to a novel gradient estimation strategy (discussed in Section 4) for policy optimization.
+Wefirstprovideabriefoverviewofthebasicschedulingproblem. Wethendescribethediscrete-
+event dynamics of multi-class queuing networks in detail and illustrate with a couple of well-
+known examples. While queuing networks have been treated as members of a more general class
+of Generalized Semi-Markov Processes (GSMPs) that reflect the discrete-event structure of these
+systems[40],weintroduceanewsetofnotationstailoredforqueuingnetworkstoelaborateonsome
+oftheirspecialstructures. Inparticular,werepresentthediscreteeventdynamicsviamatrix-vector
+notation that maps directly to its implementation in auto-differentiation frameworks, allowing for
+the differentiable simulation of large-scale queueing networks through GPU parallelization.
+3.1 The Scheduling Problem
+A multi-class queuing network consists of n queues and m servers. The core state variable is the
+queue lengths associated with each queue, denoted as x(t) ∈ Nn, which evolves over continuous
++
+time. As a discrete-event dynamical system, the state also includes auxiliary data denoted as
+z(t)— consisting of residual inter-arrival times and workloads at time t—which determines state
+transitions but are typically not visible to the controller.
+The goal of the controller is to route jobs to servers, represented by an assignment matrix
+u ∈ {0,1}m×n, to manage congestion. More concretely, the problem is to derive a policy π(x),
+which only depends on the observed queue lengths and selects scheduling actions, to minimize the
+integralofsomeinstantaneouscostsc(x,u). Atypicalinstantaneouscostisalinearholding/waiting
+cost:
+c(x,u) = h⊤x
+for some vector h ∈ Rn. The objective is to find a policy π that minimizes the cumulative cost
++
+over a time horizon:
+(cid:20)(cid:90) T (cid:21)
+minE c(x(t),π(x(t)))dt . (1)
+π
+0
+Optimizinga continuous time objective canbe difficultand may require an expensivediscretization
+procedure. However, discrete-eventdynamicalsystemsaremorestructuredinthatx(t)ispiecewise
+constant and is only updated when an event occurs. For the multi-class queuing networks, events
+are either arrivals to the network or job completions, i.e., a server finishes processing a job.
+It is then sufficient to sample the system only when an event occurs, and we can approximate
+the continuous-time objective with a performance objective in the discrete-event system over N
+events,
+(cid:40) (cid:34)N−1 (cid:35)(cid:41)
+(cid:88)
+min J (π) := E c(x ,π(x ))τ∗ (2)
+N k k k+1
+π
+k=0
+where x is the queue lengths after the kth event update. τ∗ is an inter-event time that measures
+k k+1
+the time between the kth and (k+1)th event, and N is chosen such that the time of the Nth event,
+a random variable denoted as t , is “close” to T.
+N
+Thedynamicsofqueuingnetworksarehighlystochastic,withlargevariationsacrosstrajectories.
+Randomness in the system is driven by the random arrival times of jobs and the random workloads
+8(service requirements) of these jobs. We let ξ = {ξ }N denote a single realization, or ‘trace’, of
+1:N i i=1
+these random variables over the horizon of N events. We can then view the expected cost (2) more
+explicitly as a policy cost averaged over traces. In addition, we focus on a parameterized family of
+policies {π : θ ∈ Θ}, for some Θ ⊆ Rd, in order to optimize (2) efficiently. In this case, we utilize
+θ
+the following shorthand J (θ;ξ ) for the policy cost over a single trace and J (θ) for the average
+N 1:N N
+policy cost under π , which leads to the parameterized control problem:
+θ
+(cid:40) (cid:34)N−1 (cid:35)(cid:41)
+(cid:88)
+min J (θ) := E[J(θ;ξ )] := E c(x ,π (x ))τ∗ . (3)
+N 1:N k θ k k+1
+θ
+k=0
+We now turn to describe the structure of the transition dynamics of multi-class queuing networks,
+to elaborate how scheduling actions affect the queue lengths.
+3.2 System Description
+Recall that the multi-class queuing network consists of n queues and m servers, where each queue
+is associated with a job class, and different servers can be of different compatibilities with various
+job classes. Recall that x(t) ∈ Nn denotes the lengths of the queues at time t ∈ R . The
++ +
+queue lengths x(t) are updated by one of two types of events: job arrivals or job completions.
+Although the process evolves in continuous time, it is sufficient to track the system only when
+an event occurs. We let k ∈ N count the kth event in the system, and let t denote the time
++ k
+immediately after the kth event occurs. By doing so, we arrive at a discrete-time representation
+of the system. Given that we do not assume event times are exponential, the queue lengths x
+k
+alone are not a Markovian descriptor of the system. Instead, we must consider an augmented
+state s = (x ,z ), where x ∈ Nn is the vector of queue lengths and z = (τA,w ),∈ R2n is
+k k k k + k k k +
+an auxiliary state vector that includes residual inter-arrival times τA = {τA }n ∈ Rn and
+k k,j j=1 +
+residual workloads w = {w }n ∈ Rn of the ‘top-of-queue’ jobs in each queue. The auxiliary
+k k,j j=1 +
+state variables determine the sequence of events.
+More explicitly, for each queue j ∈ [n], the residual inter-arrival time τA keeps track of the
+k,j
+time remaining until the next arrival to queue j occurs. Immediately after an arrival to queue j
+occurs, the next inter-arrival time is drawn from a probability distribution FA. When a job arrives
+j
+to queue j, it comes with a workload (service requirement) drawn from a distribution FS. We
+j
+allow the distributions FA’s and FS’s to vary with time, i.e., the interarrival times and service
+j j
+requirements can be time-varying. For notational simplicity, we will not explicitly denote the time
+dependence here. We refer to the residual workload at time t of the top-of-queue job in queue
+k
+j as w , which specifies how much work must be done before the job completion. A job is only
+k,j
+processed if it is routed to a server i ∈ [m], in which case the server processes the job at a constant
+service rate µ ∈ R . We refer to µ ∈ Rm×n as the matrix of service rates. Under this scheduling
+ij + +
+decision, the residual processing time, i.e., the amount of time required to process the job, is
+τS = w /µ .
+k,j k,j ij
+The augmented state s is a valid Markovian descriptor of the system and we now describe the
+k
+corresponding transition function f such that
+s = f(s ,u ,ξ ),
+k+1 k k k+1
+where u is an action taken by the controller and ξ contains external randomness arising from
+k k+1
+new inter-arrival times or workloads drawn from FA’s or FS’s depending on the event type.
+j j
+9Figure 3. One step of the dynamics for the criss-cross network (see Example 3 and Figure 13).
+Thereare3queuesand2servers. Beginningwithqueue-lengthsx =(3,1,4)andworkloadsw , the
+k k
+action u assigns server 1 to queue 3 and server 2 to queue 2. The workloads of the selected queues
+k
+arehighlightedinlightgreen. Asaresult,thevalideventsarearrivalstoqueue1andqueue3(queue
+2 has no external arrivals) and job completions for queue 2 and queue 3 (queue 1 cannot experience
+any job completions because no server is assigned). The arrival event to queue 1 has the minimum
+residualtime (highlighted inred) soit isthe nextevent, and e is aone-hot vectorindicating this.
+k+1
+Since an arrival occurred, the queue-lengths are updated as x =(4,1,4).
+k+1
+The transition is based on the next event, which is the event with the minimum residual time.
+The controller influences the transitions through the processing times, by deciding which jobs get
+routedtowhichservers. WefocusonschedulingproblemswherethespaceofcontrolsU arefeasible
+assignments of servers to queues. Let 1 ∈ Rn denote an n-dimensional vector consisting of all
+n
+ones. The action space is,
+(cid:110) (cid:111)
+U := u ∈ {0,1}m×n : u1 = 1 ,1⊤u = 1 ,u ≤ M , (4)
+n m m n
+whereM ∈ {0,1}m×n isthetopologyofthenetwork,whichindicateswhichjobclasscanbeserved
+by which server. Following existing works on scheduling in queuing networks [70], we consider
+networks for which each job class has exactly 1 compatible server.
+Assumption A. For every queue j, there is 1 compatible server, i.e.,
+(cid:80)m
+M = 1.
+i=1 ij
+Given an action u, the residual processing time is w /µ when u = 1 and ∞ when u = 0.
+k,j ij ij ij
+This can be written compactly as
+w w
+τS ≡ k,j = k,j , (5)
+k,j (cid:80)m u µ diag(u⊤µ)
+i=1 ij ij j,j
+where diag(u⊤µ) ∈ Rn×n extracts the diagonal entries of the matrix u⊤µ ∈ Rn×n.
+As a result, at time t the residual event times τ ∈ R2n consists of the residual inter-arrival
+k k +
+and processing times,
+τ ≡ (τA,τS) = (τA,diag(u⊤µ)−1w )
+k k k k k k
+We emphasize that τ depends on the action u. The core operation in the transition dynamics is
+k
+the event selection mechanism. The next event is the one with the minimum residual time in τ .
+k
+We define e ∈ {0,1}2n to be a one-hot vector representing the argmin of τ – the position of the
+k+1 k
+minimum in τ :
+k
+e (z ,u ) ≡ argmin(τ ) ∈ {0,1}2n (Event Select)
+k+1 k k k
+10e (z ,u ) indicates the type of the (k+1)th event. In particular, if the minimum residual event
+k+1 k k
+time is a residual inter-arrival time, then the next event is an arrival to the system. If it is a
+residual job processing time, then the next event is a job completion. We denote τ∗ to be the
+k+1
+inter-event time, which is equal to the minimum residual time:
+τ∗ (z ,u ) = min{τ } (Event Time)
+k+1 k k k
+τ∗ (z ,u ) is the time between the kth and (k+1)th event, i.e. t −t .
+k+1 k k k+1 k
+After the job is processed by a server, it either leaves the system or proceeds to another queue.
+Let R ∈ Rn×n denote the routing matrix, where the jth column, R details the change in the
+j
+queue lengths when a job in class j finishes service. For example, for a tandem queue with two
+queues, the routing matrix is
+(cid:20) (cid:21)
+−1 0
+R =
+1 −1
+indicating that when a job in the first queue completes service, it leaves its own queue and joins
+the second queue. When a job in the second queue completes service, it leaves the system.
+We define the event matrix D as a block matrix of the form
+D = [ I R ],
+n
+whereI isthen×nidentitymatrix. Theeventmatrixdeterminestheupdatetothequeuelengths,
+n
+depending on which event took place. In particular, when the (k+1)th event occurs, the update
+to the queue lengths is
+x = x +De (z ,u ) (Queue Update)
+k+1 k k+1 k k
+Intuitively, the queue length of queue j increases by 1 when the next event is a class j job arrival;
+the queue lengths update according to R when the next event is a queue j job completion.
+j
+The updates to the auxiliary state z = (τA,w ) ∈ R2n is typically given by
+k k k +
+(cid:20) τA (cid:21) (cid:20) τA (cid:21) (cid:20) 1 (cid:21) (cid:20) T (cid:21)
+k+1 = k −τ∗ n + k+1 ⊙e (Aux Update)
+w w k+1 diag(u⊤µ) W k+1
+k+1 k k k+1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+reduceresidualtimes drawnewtimes/workloads
+where ⊙ is the element-wise product and T = {T }n ∈ Rn are new inter-arrival times
+k+1 (k+1),j j=1
+T ∼ FA and W = {W }n ∈ Rn are workloads W ∼ FS. Intuitively, after
+(k+1),j j k+1 k+1,j j=1 k+1,j j
+an event occurs, we reduce the residual inter-arrival times by the inter-event time. We reduce
+workloads by the amount of work applied to the job, i.e., the inter-event time multiplied by the
+service rate of the allocated server. Finally, if an arrival occurred we draw a new inter-arrival time;
+ifajobwascompleted,wedrawanewworkloadforthetop-of-queuejob(ifthequeueisnon-empty).
+There are two boundary cases that make the update
+slightly different from (Aux Update). First, if a new job
+arrives at an empty queue j (either an external arrival
+or a transition from a job completion), we also need to
+updatew toW . Second,ifaqueuej jobcomple-
+k+1,j k+1,j
+tion leaves an empty queue behind, we set w = ∞, Figure 4: M/M/1 queue.
+k+1,j
+indicating that no completions can occur for an empty
+queue.
+11Let ξ denote exogenous noise in the environment, which consists of the sampled inter-arrival
+k
+times and workloads for resetting the time of a completed event,
+ξ = (T ,W ) ∈ R2n.
+k k k +
+Wefinallyarriveatthestatedgoalofdescribingthetransitiondynamicsofs = (x ,z )intermsof
+k k k
+a function f(s ,u ,ξ ). Notably, all the stochasticity is captured by ξ ’s, which are independent
+k k k+1 k
+of the states and actions.
+It is worth mentioning a few features of this discrete-event representation.
+• While auxiliary data z = (τA,w ) is necessary for s = (x ,z ) to be a valid Markovian
+k k k k k k
+system descriptor, this information is typically not available to the controller. We assume the
+controller only observes the queue lengths, i.e., the control policy π only depends on x .
+k
+• The representation can flexibly accommodate non-stationary and non-exponential event-time
+distributions, i.e., FA’s and FS’s can be general and time-varying.
+j j
+• This model enables purely data-driven simulation, as it only requires samples of the event
+times ξ . One does not need to know the event time distributions FA’s and FS’s to simulate
+k j j
+the system if data of these event times are available.
+• The matrix-vector representation enables GPU parallelism, which can greatly speed up the
+simulation of large-scale networks.
+• As we will explain later, this representation enables new gradient estimation strategies.
+Queuing Network Examples Asaconcreteillustration,weshowhowafewwell-knownqueuing
+networks are described as discrete-event dynamical systems.
+Example 1: The M/M/1 queue (see Figure 4) with arrival rate λ > 0 and service rate µ ≥ λ
+features a single queue n = 1 and a single server m = 1, and exponentially distributed inter-arrival
+times and workloads, i.e., T ∼ Exp(λ) and W ∼ Exp(1) respectively. The network topology is
+k k
+M = [1], the service rate is µ, and the routing matrix is R = [−1], indicating that jobs leave the
+system after service completion. The scheduling policy is work-conserving, the server always serves
+the queue when it is non-empty, i.e. u = 1{x > 0}. The state update is,
+k k
+(cid:2) (cid:3)⊤
+x = x + 1 −1 e
+k+1 k k+1
+(cid:26) (cid:27)
+e = argmin(cid:8) τA,τS(cid:9) = argmin τA, w k ∈ {0,1}2
+k+1 k k k µ·1{x > 0}
+k
+τ∗ = min(cid:8) τA,τS(cid:9)
+k+1 k k
+(cid:20) τA (cid:21) (cid:20) τA (cid:21) (cid:20) 1 (cid:21) (cid:20) T (cid:21)
+k+1 = k −τ∗ + k+1 ⊙e .
+w w k+1 µ1{x > 0} W k+1
+k+1 k k k+1
+⋄
+Example 2: The multi-class singer-server queue features an n queues and a single server
+m = 1 (see Figure 5). While the inter-arrival times and workloads, i.e., (T ,W )’s are usually
+k k
+exponentially distributed, they can also follow other distributions. The network topology is M =
+[1,...,1] ∈ Rn, theserviceratesareµ = [µ ,...,µ ], andtheroutingmatrixisR = [−1,...,−1] ∈ Rn,
+1 n
+indicating that jobs leave the system after service completion. A well-known scheduling policy for
+12this system is the cµ-rule, a static priority rule. Let h = (h ,...,h ) ∈ Rn denote the holding costs.
+1 n
+The cµ-rule sets
+u = argmax{h µ 1{x > 0}} ∈ {0,1}n.
+k j j j
+j∈[n]
+The state update is,
+(cid:2) (cid:3)⊤
+x = x + 1 −1 e
+k+1 k n n k+1
+(cid:26) (cid:27)
+w w
+e = argmin(cid:8) τA ,...,τA ,τS ,...,τS (cid:9) = argmin τA ,...,τA , k,1 ,... k,n
+k+1 k,1 k,n k,1 k,n k,1 k,n µ u µ u
+1 k,1 n k,n
+τ∗ = min(cid:8) τA ,...,τA ,τS ,...,τS (cid:9)
+k+1 k,1 k,n k,1 k,n
+(cid:20) τA (cid:21) (cid:20) τA (cid:21) (cid:20) 1 (cid:21) (cid:20) T (cid:21)
+k+1 = k −τ∗ n + k+1 ⊙e .
+w w k+1 µ⊙u W k+1
+k+1 k k k+1
+⋄
+Example 3: The criss-cross network [49] features n = 3 queues and m = 2 servers (see
+Figure 13). External jobs arrive to queues 1 and 3. The first server can serve queues 1 and 3 with
+service rates µ and µ respectively, while the second server is dedicated to serving queue 2 with
+11 13
+service rate µ . After jobs from queue 1 are processed, they are routed to queue 2; jobs from
+22
+queues 2 and 3 exit the system after service completion. The inter-arrival times and workloads,
+i.e., (T ,W )’s, can follow general distributions. The network topology M, service rate matrix, and
+k k
+the routing matrix R are:
+ 
+(cid:20) (cid:21) (cid:20) (cid:21) −1 0 0
+1 0 1 µ 0 µ
+M = , µ = 11 13 , R =  1 −1 0 
+0 1 0 0 µ 0
+22 0 0 −1
+Harrison and Wein [49] develop a work-conserving threshold policy for this system. For a threshold
+a ∈ N , server 1 prioritizes jobs in queue 1 if the number of jobs in queue 2 is below a. Otherwise,
++
+it prioritizes queue 3. This gives the scheduling action
+u = 1{x ≤ a}, u = 1{x > 0}, u = (1−u )1{x > 0},
+k,11 k,2 k,22 k,2 k,13 k,11 k,3
+and the transition dynamics
+(cid:2) (cid:3)
+x = x + I R e
+k+1 k 3 k+1
+(cid:26) (cid:27)
+w w w
+e = argmin(cid:8) τA ,∞,τA ,τS ,τS ,τS (cid:9) = argmin τA ,∞,τA , k,1 , k,2 , k,3
+k+1 k,1 k,3 k,1 k,2 k,3 k,1 k,3 µ u µ u µ u
+11 k,11 22 k,22 13 k,13
+τ∗ = min(cid:8) τA ,∞,τA ,τS ,τS ,τS (cid:9)
+k+1 k,1 k,3 k,1 k,2 k,3
+(cid:20) τA (cid:21) (cid:20) τA (cid:21) (cid:20) 1 (cid:21) (cid:20) T (cid:21)
+k+1 = k −τ∗ 3 + k+1 ⊙e .
+w w k+1 diag(u⊤µ) W k+1
+k+1 k k k+1
+Here, τA = ∞ since queue 2 has no external arrivals. ⋄
+k,2
+4 Gradient Estimation
+Inthissection, weintroduceourproposedapproachforestimatingthegradientoftheobjective(3),
+∇J (θ). Westartwithabriefdiscussionofexistingmethodsforgradientestimation,includingtheir
+N
+13advantagesandlimitations. Wethenoutlinethemainchallengesforcomputingpathwisederivatives
+inmulti-classqueuingnetworks,andintroduceourstrategyforovercomingthesechallenges. Finally,
+we formally define our gradient estimation framework and discuss its computational and statistical
+properties. Later in section 5, we perform a comprehensive empirical study and find that our
+gradient estimation framework is able to overcome many of the limitations of existing methods in
+that (1) it is capable of estimating gradients for general queuing networks, (2) it provides stable
+gradient estimations over very long horizons (> 105 steps), (3) it provides greater estimation
+accuracy than model-free policy gradient methods with 1000x less data, and (4) when applying
+to policy optimization, it drastically improves the performance of the policy gradient algorithm for
+various scheduling and admission control tasks.
+Our goal is to optimize the parameterized control problem (3).
+A standard optimization algorithm is (stochastic) gradient descent,
+which has been considered for policy optimization and reinforce-
+ment learning [92, 8]. The core challenge for estimating policy gra-
+dient ∇J (θ) = ∇E[J(θ;ξ )] from sample paths of the queuing
+N 1:N
+network is that the sample path cost J(θ,ξ ) is in general not
+1:N
+differentiable in θ. As a consequence, one cannot change the order
+of differentiation and expectation, i.e.,
+∇J (θ) = ∇E[J (θ;ξ )] ̸= E[∇J (θ;ξ )],
+N N 1:N N 1:N
+Figure 5. Multi-class,
+where ∇J (θ;ξ ) is not even well-defined. The non-
+N 1:N
+single-server queue.
+differentiability of these discrete-event dynamical systems emerges
+from two sources. First, actions u are discrete scheduling decisions, and small perturbations in
+1:N
+the policy can result in large changes in the scheduling decisions produced by the policy. Second,
+the actions affect the dynamics through the event times. The ordering of events is based on the
+‘argmin’ of the residual event times, which is not differentiable.
+In the stochastic simulation literature, there are two popular methods for gradient estimation:
+infinitesimal perturbation analysis (IPA) and generalized likelihood ratio (LR) gradient
+estimation. To illustrate, consider abstractly and with a little abuse of notation a system following
+the dynamics s = f(s ,θ,ξ ), where s ∈ R is the state, θ ∈ R is the parameter of interest, ξ
+k+1 k k+1 k k
+is exogenous stochastic noise, and f is a differentiable function. Then, the IPA estimator computes
+a sample-path derivative estimator by constructing a derivative process D = ∂s /∂θ via the
+k k
+recursion:
+∂ ∂
+D = f(s ,θ,ξ )+ f(s ,θ,ξ )·D (IPA)
+k+1 k k+1 k k+1 k
+∂θ ∂s
+k
+Likelihood-ratio gradient estimation on the other hand uses knowledge of the distribution of ξ to
+k
+form the gradient estimator. Suppose that s is a Markov chain for which the transition kernel is
+k
+parameterized by θ, i.e., s ∼ p (·|s ). For a fixed θ , let
+k+1 θ k 0
+∂
+E [s ] =
+∂
+E [s L (θ)] = E
+(cid:20)
+s
+∂
+L
+(θ)(cid:21)
+where L (θ) :=
+(cid:81)k j=− 11p θ(s j+1|s j)
+.
+∂θ θ k ∂θ θ0 k k θ0 k ∂θ k k (cid:81)k−1p (s |s )
+j=1 θ0 j+1 j
+This allows one to obtain the following gradient estimator:
+D = s
+(cid:88)k−1 ∂∂ θp θ(s j+1|s j)
+L (θ), where s ∼ p (·|s ),∀j ≤ k. (LR)
+k k
+p (s |s )
+k j+1 θ0 j
+j=1
+θ0 j+1 j
+14Despite their popularity, there are limitations to applying these methods to general multi-class
+queuing networks. While IPA has been proven efficient for simple queuing models, such as the
+G/G/1 queue through the Lindley recursion, it is well-known that unbiased IPA estimates cannot
+be obtained for general queuing networks [15, 32, 33]. The implementation of LR gradient estima-
+tion hinges on precise knowledge of the system’s Markovian transition kernel [39]. This requires
+knowledge of the inter-arrival time and workload distributions, and even with this knowledge, it is
+non-trivial to specify the transition kernel of the queue lengths and residual event times in generic
+systems. Modifications to IPA [32, 33] also require precise knowledge of event time distributions
+and often involve analyzing specific ordering of events which must be done on a case-by-case basis.
+As a result, none of these methods can reliably provide gradient estimation for complex queuing
+networksundergeneralschedulingpoliciesandwithpossiblyunknowninter-arrivalandservicetime
+distributions. Yet, the ability to handle such instances is important to solve large-scale problems
+arising in many applications.
+Due to the challenges discussed above, existing reinforcement learning (RL) approaches for
+queueingnetworkcontrolmainlyrelyonmodel-freegradientestimators,utilizingeithertheREINFORCE
+estimator and/or Q-function estimation. As we will discuss shortly, these methods do not leverage
+the structural properties of queuing networks and may be highly sample-inefficient, e.g., requiring
+a prohibitively large sample for gradient estimation.
+To address the challenges discussed above, we propose a novel gradient estimation framework
+thatcanhandlegeneral,large-scalemulti-classqueuingnetworksunderanydifferentiablescheduling
+policy, requiring only samples of the event times rather than knowledge of their distributions.
+Most importantly, our approach streamlines the process of gradient estimation, leveraging auto-
+differentiation libraries such as PyTorch [77] or Jax [13] to automatically compute gradients, rather
+than constructing these gradients in a bespoke manner for each network as is required for IPA or
+LR. As shown in Figure 2, computing a gradient in our framework requires only a few lines of
+code. To the best of our knowledge, this is the first scalable alternative to model-free methods for
+gradient estimation in queuing networks.
+4.1 The standard approach: the REINFORCE estimator
+Considering the lack of differentiability in most reinforcement learning environments, the standard
+approach for gradient estimation developed in model-free RL is the score-function or REINFORCE
+estimator [101, 92]. This serves as the basis for modern policy gradient algorithms such as Trust-
+Region Policy Optimization (TRPO) [82] or Proximal Policy Optimization (PPO) [84]. As a result,
+it offers a useful and popular baseline to compare our proposed method with.
+The core idea behind the REINFORCE estimator is to introduce a randomized policy π and dif-
+θ
+ferentiate through the action probabilities induced by the policy. Under mild regularity conditions
+on π and c(x ,u ), the following expression holds for the policy gradient:
+θ k k
+(cid:34)N−1(cid:32)N−1 (cid:33) (cid:35)
+(cid:88) (cid:88)
+∇J (θ) = E c(x ,u )τ∗ ∇ logπ (u |x ) ,
+N k k k+1 θ θ t t
+t=0 k=t
+which leads to the following policy gradient estimator:
+N−1(cid:32)N−1 (cid:33)
+(cid:88) (cid:88)
+∇(cid:98)RJ N(θ;ξ 1:N) = c(x k,u k)τ k∗
++1
+∇ θlogπ θ(u t|x t). (REINFORCE)
+t=0 k=t
+15While being unbiased, the REINFORCE estimator is known to have a very high variance [99].
+The variance arises from two sources. First, the cumulative cost (cid:80)N−1c(x ,u )τ∗ can be very
+k=t k k k+1
+noisy, as has been observed for queuing networks [26]. Second, as the policy converges to the
+optimal policy, the score function ∇ logπ (u |x ) can grow large, magnifying the variance in the
+θ θ t t
+cost term. Practical implementations involve many algorithmic add-ons to reduce variance, e.g.,
+adding a ‘baseline’ term [99] which is usually (an estimate of) the value function V (x ),
+π θ k
+N−1(cid:32)N−1 (cid:33)
+(cid:88) (cid:88)
+∇(cid:98)RBJ N(θ;ξ 1:N) = c(x k,u k)τ k∗ +1−V
+π
+θ(x k) ∇ θlogπ θ(u t|x t). (BASELINE)
+t=0 k=t
+These algorithmic add-ons have led to the increased complexity of existing policy gradient imple-
+mentations [57] and the outsized importance of various hyperparameters [56]. It has even been
+observed that seemingly small implementation “tricks” can have a large impact on performance,
+even more so than the choice of the algorithm itself [30].
+4.2 Our approach: Differentiable Discrete-Event Simulation
+We can view the state trajectory as a repeated composition of the transition function s =
+k+1
+f(s ,u ,ξ ), which is affected by exogenous noise ξ , i.e., stochastic inter-arrival and service
+k k k+1 1:N
+times. If the transition function were differentiable with respect to the actions u , then under
+k
+any fixed trace ξ , one could compute a sample-path derivative of the cost J(θ;ξ ) using auto-
+1:N 1:N
+differentiationframeworkssuchasPyTorch[77]orJax[13]. Auto-differentiationsoftwarecomputes
+gradients efficiently using the chain rule. To illustrate, given a sample path of states, actions, and
+noise (s ,u ,ξ )N−1, we can calculate the gradient of s with respect to u via
+k k k+1 k=0 3 1
+∂s ∂s ∂s ∂f(s ,u ,ξ )∂f(s ,u ,ξ )
+3 3 2 2 2 3 1 1 2
+= = .
+∂u ∂s ∂u ∂s ∂u
+1 2 1 2 1
+This computation is streamlined through a technique known as backpropagation, or reverse-mode
+auto-differentiation. The algorithm involves two steps. The first step, known as the forward pass,
+evaluates the main function or performance metric (in the example, s ’s) and records the partial
+i
+derivatives of all intermediate states relative to their inputs (e.g. ∂s /∂u ). This step constructs
+2 1
+a computational graph, which outlines the dependencies among variables. The second step is
+a backward pass, which traverses the computational graph in reverse. It sequentially multiplies
+and accumulates partial derivatives using the chain rule, propagating these derivatives backward
+through the graph until the gradient concerning the initial input (in this example, u ) is calculated.
+1
+Due to this design, gradients of functions involving nested compositions can be computed in a time
+that is linear in the number of compositions. By systematically applying the chain rule in reverse,
+auto-differentiation avoids the redundancy and computational overhead typically associated with
+numeric differentiation methods.
+However, as mentioned before, the dynamics do not have a meaningful derivative due to the
+non-differentiability of actions and the argmin operation which selects the next event based on the
+minimum residual event time. Yet if we can utilize suitably differentiable surrogates, it would be
+possible to compute meaningful approximate sample-path derivatives using auto-differentiation.
+164.2.1 Capacity sharing relaxation
+First, we address the non-differentiability of the action space. Recall that u ∈ {0,1}m×n are
+k
+scheduling decisions, which assign jobs to servers. Since u lies in a discrete space, a small change
+k
+in the policy parameters can produce a jump in the actions. To alleviate this, we consider the
+transportation polytope as a continuous relaxation of the original action space (4):
+(cid:110) (cid:111)
+U := u ∈ [0,1]m×n : u1 = 1 ,1⊤u = 1 ,u ≤ M . (6)
+n m m n
+The set of extreme points of U coincide with the original, integral action space U. For a fractional
+action u ∈ U, we can interpret it as servers splitting their capacity among multiple job classes
+k
+motivated by the fluid approximation of queues [19]. As a relaxation, it allows servers to serve
+multiple jobs simultaneously. The effective service rate for each job class is equal to the fraction of
+the capacity allocated to the job class multiplied by the corresponding service rate.
+As a result, instead of considering stochastic policies over discrete actions, we approach this
+problem as a continuous control problem and consider deterministic policies over continuous ac-
+tions, i.e., the fractional scheduling decisions. Under this relaxation, the processing times are
+differentiable in the (fractional) scheduling decision. Finally, it is worth mentioning that we only
+usethisrelaxationwhentrainingpolicies. Forpolicyevaluation,weenforcethatactionsareintegral
+scheduling decisions in U. To do so, we treat the fractional action as a probability distribution and
+use it to sample a discrete action.
+Definition 1. Under the capacity sharing relaxation, the service rate for queue j under the
+routing decision u ∈ U is µ⊤u ≡ (cid:80)m µ u . Thus, given workload w , the processing time of the
+j j i=1 ij ij j
+job will be
+w w
+τS = j = j . (7)
+j (cid:80)m u µ diag(u⊤µ)
+i=1 ij ij j,j
+Note that this is identical to the original definition of the processing times in (5). The only
+difference is that we now allow fractional routing actions, under which a server can serve multiple
+jobs at the same time.
+For a concrete example, consider a single server i compatible with two job classes 1 and 2
+with service rates µ = 9 and µ = 15 respectively. Suppose it splits its capacity between job
+i1 i2
+classes 1 and 2 according to u = 1/3 and u = 2/3. Then for residual workloads w and w , the
+i1 i2 1 2
+corresponding processing times are τS = w /3 and τS = w /10. If u = 0 and u = 1 instead,
+1 1 2 2 i1 i2
+then the corresponding processing times are τS = w /0 = ∞ and τS = w /15.
+1 1 2 2
+4.2.2 Differentiable event selection
+Todeterminethenexteventtype,theargminoperationselectsthenexteventbasedontheminimum
+residual event time. This operation does not give a meaningful gradient.
+Pitfalls of ‘naive’ smoothing In order to compute gradients of the sample path, we need to
+smooth the argmin operation. There are multiple ways to do this. A naive approach is to directly
+replace argmin with a differentiable surrogate. One such popular surrogate is softmin. With some
+inverse temperature β > 0, softmin applied to the vector of residual event times τ ∈ R2n returns
+β +
+17Figure 6. Failure modes of ‘naive’ smoothing. (Left) Comparison of sample paths under the
+original dynamics and direct smoothing with β = 1 and β = 1000. Criss-cross network under a
+randomized backpressure policy with identical event times in each path, for N = 200 steps. Even
+under high inverse temperature β = 1000, the trajectory veers off from the original trajectory after
+only a hundred steps. (Right) Comparison of average cosine similarity (higher is better) of gradient
+estimators using direct smoothing with β ∈ {0.2,0.5,1,2,10} for the criss-cross network under a
+randomized MaxWeight policy for N = 1000 steps. The gradient estimators either suffer from high
+bias or high variance and are unable to achieve a high cosine similarity with the true gradient.
+a vector in R2n, which we use to replace the event selection operation e :
++ k+1
+2n
+(cid:88)
+e˜ = softmin (τ ) where softmin (τ) = e−βτj/ e−βτ l. (Direct Smoothing)
+k+1 β k β j
+l=1
+As β → ∞, softmin converges to argmin. Thus, one may expect that for large β, softmin would
+β β
+give a reliable differentiable surrogate.
+However, queuingnetworksinvolveauniquechallengeforthisapproach: onetypicallyconsiders
+very long trajectories when evaluating performance in queuing networks, as one is often interested
+in long-run average or steady-state behavior. Thus, even if one sets β to be very large to closely
+approximate argmin, the smoothing nonetheless results in ‘unphysical’, real-valued queue lengths
+instead of integral ones, and small discrepancies can accumulate over these long horizons and lead
+to entirely different sample paths. This can be observed concretely in the left panel of Figure 6,
+which displays the sample paths of the total queueing length processes for a criss-cross queueing
+network (in Example 3) under the original dynamic and under direct smoothing, using the same
+inter-arrival and service times. We observe that when setting the inverse temperature β = 1, the
+sample path under direct smoothing is completely different from the original one, even though all
+of the stochastic inputs are the same. Even when setting a very high inverse temperature, i.e.,
+β = 1000, for which softmin is almost identical to argmin, the trajectory veers off after only a
+β
+hundred steps.
+This can greatly affect the quality of the gradient estimation. We observe in the right panel
+of Figure 6 that across a range of inverse temperatures, the average cosine similarity between the
+surrogate gradient and the true gradient (defined in (10)) are all somewhat low. In the same plot,
+we also show the average cosine similarity between our proposed gradient estimator, which we will
+discuss shortly, and the true gradient. Our proposed approach substantially improves the gradient
+estimation accuracy, i.e., the average cosine similarity is close to 1, and as we will show later, it
+18does so across a wide range of inverse temperatures.
+Our approach: ‘straight-through’ estimation The failure of the direct smoothing approach
+highlights theimportance ofpreserving theoriginal dynamics, as errorscan quicklybuild upevenif
+the differentiable surrogate is only slightly off. We propose a simple but crucial adjustment to the
+directsmoothingapproach, whichleadstohugeimprovementsinthequalityofgradientestimation.
+Instead of replacing the argmin operation with softmin when generating the sample path, we
+β
+preserve the original dynamics as is, and only replace the Jacobian of argmin with the Jacobian of
+softmin
+β
+when we query gradients. In short, we introduce a gradient operator ∇(cid:98) such that
+e
+k+1
+= argmin(τ k), ∇(cid:98)e
+k+1
+= ∇softmin β(τ k). (8)
+where ∇ is respect to the input τ. This is known as the ‘straight-through’ trick in the machine
+learning literature and is a standard approach for computing approximate gradients in discrete
+environments [11, 97]. To the best of our knowledge, this is the first application of this gradient
+estimation strategy for discrete-event dynamical systems. Using this strategy, we can use the chain
+rule to compute gradients of performance metrics that depend on the event selection. Consider any
+differentiable function g of e ,
+k+1
+∂g(e ) ∂g(e )
+k+1 k+1
+∇(cid:98)g(e k+1) = ∇(cid:98)e k+1∇τ
+k
+= ∇softmin β(τ k)∇τ
+k
+∂e ∂e
+k+1 k+1
+In contrast, direct smoothing involves the derivative ∂g(e˜ )/∂e˜ where e˜ = softmin (τ ).
+k+1 k+1 k+1 β k
+Evaluating the gradient of g at g(e˜ ) is a cause of additional bias.
+k+1
+With these relaxations, the transition function of the system is differentiable. We can now
+compute a gradient of the sample path cost J (θ;ξ ), using the chain rule on the transition
+N 1:N
+functions. Given a sample path of states s = (x ,z ), actions u = π (x ), and ξ = (T ,W ), the
+k k k k θ k k k k
+pathwise gradient of the sample path cost is J (θ;ξ ) with respect to an action u is,
+N 1:N k
+ 
+N
+(cid:88)
+∇(cid:98)u kJ N(θ;ξ 1:N) = ∇
+u
+kc(x k,u k)+ ∇ xc(x t,u t)+∇ uc(x t,u t)∇ xtπ θ(x t)∇
+u
+kx
+t
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+t=k+1
+currentcost futurecosts
+The gradient consists of the sensitivity of the current cost with respect to the action as well the
+sensitivity of future costs via the current action’s impact on future states. The policy gradient with
+respect to θ can then be computed as
+N
+(cid:88) (cid:12)
+∇(cid:98)θJ N(θ;ξ 1:N) = ∇(cid:98)u kJ N(θ;ξ 1:N)(cid:12)
+(cid:12)
+u =π (x
+)∇ θπ θ(x k). (PATHWISE)
+k=1 k θ k
+As a result of the straight-through trick, we do not alter the event selection operation e ’s and thus
+k
+the state trajectory {x }N is unchanged.
+k k=1
+We refer to the gradient estimator (PATHWISE) as the PATHWISE policy gradient estima-
+tor. Although this formula involves iterated products of several gradient expressions, these can be
+computed efficiently through reverse-mode auto-differentiation using libraries such as PyTorch [77]
+or Jax [13] with O(N) time complexity in the time horizon N. This time complexity is of the
+same order as the forward pass, i.e., generating the sample path itself, and is equivalent to the time
+complexity of REINFORCE. The policy gradient algorithm with PATHWISE gradient is summa-
+rized in Algorithm 1. In Section 5, we perform a careful empirical comparison of PATHWISE and
+19Algorithm 1 PATHWISE Policy Gradient (PathPG)
+1: Input: Policy π θ, Number of Iterates T, horizon N, trace ξ 1:N, step-size α > 0.
+2: for each t ∈ 1,...,T do
+3: Compute J N(θ;ξ 1:N) = (cid:80)N k=1c(x k,π θ(x k))τ k∗
++1
+from trace ξ 1:N.
+4: Compute gradient ∇(cid:98)θJ N(θ;ξ 1:N) via (PATHWISE)
+5: Update policy parameters,
+θ
+t+1
+← θ t−α∇(cid:98)θJ N(θ;ξ 1:N)
+6: end for
+7: return π θT
+REINFORCE, and find that PATHWISE can lead to orders of magnitude improvements in sample
+efficiency.
+It is important to re-emphasize that when computing the gradient, we evaluate the policy
+differentlythanwewouldforREINFORCE. Insteadofdrawingarandomdiscreteactionu ∼ π (x),
+k θ
+we use the probabilities output by the policy directly as a fractional routing matrix in U,
+REINFORCE : u ∼ π (x ), u ∈ U
+k θ k k
+PATHWISE : u = π (x ), u ∈ U.
+k θ k k
+However, thisisonlyforgradientcomputation. Whenweevaluatethepolicy, wedrawu ∼ π (x ).
+k θ k
+Bias-variance trade-off for inverse temperature: One-step analysis The inverse temper-
+ature β is a key hyperparameter that determines the fidelity of the softmin approximation to
+β
+argmin. The choice of β poses a bias-variance trade-off, with a higher β leading to a smaller bias
+but a higher variance and a smaller β incurring a higher bias but a lower variance.
+Ingeneral,itisdifficulttoassessthebiassinceweoftendonotknowthetruegradient. However,
+forsomesimpleexamples,wecanevaluatethetruegradientexplicitly. Wenextanalyzethegradient
+of the one-step transition of the M/M/1 queue with respect to the service rate µ,
+λ−µ λ
+∇ E[x −x ] = ∇ E[De ] = ∇ = −2 .
+µ k+1 k µ k+1 µ λ+µ (λ+µ)2
+This permits an exact calculation of the mean and variance of our proposed pathwise gradient
+estimator. Although we can derive analytical expressions for these quantities, we present the
+leading order asymptotics as β → ∞ for conciseness of presentation. While it is straightforward
+to see that almost surely softmin (τ) → argmin(τ) as β → ∞, it is much less clear whether the
+β
+gradient converges, i.e., whether E[∇softmin (τ)] → ∇E[argmin(τ)]. Since argmin has a gradient of
+β
+zero almost everywhere, the expectation and gradient operators cannot be interchanged. Instead,
+we analyze the expectations directly using properties of the exponential distribution.
+Theorem 1. Let ∇(cid:98)µ(x
+k+1
+− x k) = ∇(cid:98)µDe
+k+1
+denote the PATHWISE gradient estimator of the
+one-step transition of the M/M/1 queue with respect to µ. For x ≥ 1, as β → ∞,
+k
+E[∇(cid:98)µDe k+1]−∇ µE[De k+1] = β−2· π2λ(µ 62 (λ− +λ2 µ+ )22µλ) +o(cid:0) β−2(cid:1) ,
+20Figure 7. Bias-variance trade-off for inverse temperature β. (Left) Bias and variance of pathwise
+gradient estimator across a range of inverse temperatures β for the one-step change ∇(cid:98)µ(x k+1−x k)
+compared to true gradient ∇ E[x −x ] = ∇ λ−µ. Blue line specifies the theoretical values for
+µ k+1 k µλ+µ
+the bias and variance. (Right) Average cosine similarity (see (10) for the definition) of PATHWISE
+policy gradients with the true gradient for a randomized max-weight policy (see (9)) in a 6-class
+reentrant network (see Figure 13) across a range of inverse temperatures computed from a single
+trajectory B =1 for N =1000 steps. True gradient is computed by averaging REINFORCE over 106
+trajectories. PATHWISE gradient has almost a perfect cosine similarity ≈ 1 across a wide range of
+inverse temperatures.
+4λ
+Var(∇(cid:98)µDe k+1) = β·
+µ(λ+µ)2
++o(β).
+See section B.1 for the proof. As β → ∞, the bias is O(1/β2) while the variance is O(β). This
+means that one can significantly reduce the bias with only a moderate size of β. The left panel
+of Figure 7 shows the bias-variance trade-off of ∇(cid:98)µ(x k+1−x k) for various inverse temperatures β.
+The blue line is based on the analytical expression for the bias-variance trade-off curve. We observe
+that with the inverse temperature β ∈ [0.5,2], both the bias and the variance are reasonably small.
+Corollary 1. Suppose we compute the sample average of B iid samples of ∇(cid:98)µDe k+1, which are
+denoted as ∇(cid:98)µDe k+1,i, i = 1,...,K. In particular, the estimator takes the form B1 (cid:80)B i=1∇(cid:98)µDe k+1,i.
+The choice of β that minimizes the mean-squared error (MSE) of the estimator is β∗ = O(B1/5)
+and MSE(β∗) = O(B−4/5).
+The PATHWISE estimator provides a more statistically efficient trade-off than other alterna-
+tives. As an example, a standard gradient estimator is the finite-difference estimator in which one
+evaluates the one-step transition at µ−h and µ+h for some small h ∈ (0,∞), and the estimator
+is constructed as
+B
+1 (cid:88) De k+1,i(µ+h)−De k+1,i(µ−h)
+,
+B 2h
+i=1
+where De (µ+h)’s are iid samples of De (µ+h). If we set h = 1/β, it is well-known that
+k+1,i k+1
+the bias scales as O(1/β2) while the variance scales as O(β2). The choice of β that minimizes the
+MSE is β∗ = O(B1/6) and MSE(β∗) = O(B−1/3).
+While this analysis is restricted to the one-step transition of the M/M/1 queue, these insights
+hold for more general systems and control problems. The right panel of Figure 7 displays the
+21average cosine similarity (defined in (10)) between the PATHWISE gradient estimator and the true
+gradient for a policy gradient task in a 6-class reentrant network across different congestion levels
+and for different inverse temperatures. We observe that for a wide range of inverse temperatures,
+β ∈ {0.2,0.5,1,2}, the estimator has near-perfect similarity with the true gradient, while a very
+large inverse temperature suffers due to high variance. This indicates that while there is a bias-
+variance trade-off, the performance of the PATHWISE gradient estimator is not sensitive to the
+choice of the inverse temperature within a reasonable range. In our numerical experiments, we find
+that one can get good performance using the same inverse temperature across different settings
+without the need to tune it for each setting.
+5 Empirical Evaluation of the PATHWISE Gradients
+In the previous section, we introduced the PATHWISE gradient estimator for computing gradients
+of queuing performance metrics with respect to routing actions or routing policy parameters. In
+this section, we study the statistical properties of these gradient estimators and their efficacy
+in downstream policy optimization tasks. We use REINFORCE as the baseline gradient estimator.
+First, in section 5.1 we empirically study the estimation quality across a range of queuing networks,
+traffic intensities, and policies. After that, in section 5.2, we investigate their performance in a
+scheduling task: learning the cµ rule in a multi-class queuing network. Finally, we demonstrate the
+applicabilityofourframeworkbeyondscheduling: weinvestigatetheperformanceofthePATHWISE
+gradient estimator for admission control tasks in section 5.3.
+5.1 Gradient Estimation Efficiency
+In general, it is challenging to theoretically compare the statistical properties of different gradient
+estimators, and very few results exist for systems beyond the M/M/1 queue (see section 8 for
+a theoretical comparison between REINFORCE and PATHWISE for the M/M/1 queue). For this
+reason, we focus on numerical experiments across a range of environments and queuing policies
+typically considered in the queuing literature. Specifically, we will be comparing the statistical
+properties of PATHWISE estimator with the baseline estimator REINFORCE. While PATHWISE
+introduces bias into the estimation, we find in our experiments that this bias is small in practice
+and remains small even over long time horizons. At the same time, the PATHWISE estimator
+delivers dramatic reductions in variance, achieving greater accuracy with a single trajectory than
+REINFORCE with 103 trajectories.
+First, recall that a policy π(x) maps queue-lengths x to assignment between servers and queues,
+represented by an m × n matrix in U (allowing for fractional routing matrices). We visit three
+classical queuing policies: priority policies [25], MaxWeight [93], and MaxPressure [27]. Each
+of these methods selects the routing that solves an optimization problem. This means that the
+routing generated by the policy is deterministic given the state and is not differentiable in the
+policy parameters. In order to apply either REINFORCE or the PATHWISE gradient estimator to
+compute a policy gradient, we require differentiable surrogates of these policies. To this end, we
+define softened and parameterized variants of these policies, denoted as soft priority (sPR), soft
+MaxWeight (sMW), and soft MaxPressure (sMP),
+πsPR(x) = softmax(θ ·µ ), πsMW(x) = softmax(θ x ·µ ), πsMP(x) = softmax((µ⊙R(θx)) )
+θ i j i θ i j j i θ i i
+(9)
+22Figure 8. Comparison of estimation quality between PATHWISE and REINFORCE across several
+settings. Weperformthiscomparisonfor3policies(softMaxPressure,softMaxWeight, softPriority
+in(9)),9networksettings,and4levelsoftrafficintensityforeachnetwork. Foreachcell,werandomly
+draw 100 parameters θ ∈ Rn. For each parameter, we estimate the true gradient by averaging
+the REINFORCE estimator over 106 trajectories (with horizon N = 1000). We then compute the
+PATHWISE estimator with B = 1 trajectory along with the REINFORCE estimator averaged across
+B = 1000 trajectories. In each instance, we draw 100 samples of these estimators to estimate sim,
+i.e., the average cosine similarity with the true gradient. In total, we perform this comparison
+across10,800parameters. Wefindthatacrossallofthesediversesettings,PATHWISEdeliversmuch
+higher fidelity to the true gradient, in many cases achieving an average cosine similarity close to the
+maximum value of 1, despite using orders of magnitude less data, whereas the cosine similarity of
+REINFORCE remains around 0.2-0.6 even with 1000 trajectories.
+whereθ ∈ Rn areavectorofcosts/weightsforeachqueue,µdenotesthematrixofservicerateswith
++
+µ ∈ Rn denoting the service rates associated with server i. The operation ⊙ refers to element-
+i +
+wise multiplication and the softmax operation maps a vector a ∈ Rn into a set of probabilities
+softmax(a)
+i
+= eai/(cid:80)n j=1eaj.
+We are interested in identifying the parameter θ that minimizes long-run average holding cost
+(cid:104) (cid:105)
+where c(x,u) = h⊤x. We use the objective J (θ) = E (cid:80)N−1c(x ,π (x ))τ∗ where N is a large
+N k=0 k θ k k+1
+enough number to approximate the long-run performance, and the goal of the gradient estimation
+is to estimate ∇J (θ).
+N
+We consider the following environments, which appear throughout our computational experi-
+ments and serve as standard benchmarks for control policies in multi-class queuing networks. We
+describe the network structure in detail in Figure 13.
+• Criss-cross: The network introduced in Example 3 (see Figure 13 (c)).
+• Re-entrant 1 (n classes): We consider a family of multi-class re-entrant networks with
+a varying number of classes, which was studied in [12, 26]. The network is composed of
+several layers and each layer has 3 queues. Jobs processed in one layer are sent to the next
+23layer. Arrivals to the system come to queues 1 and 3 in the first layer while queue 2 receives
+re-entered jobs from the last layer (see Figure 13 (a) for a two-layer example).
+• Re-entrant 2 (n classes): We consider another family of re-entrant network architecture
+that was studied in [12]. It also consists of multiple layers with 3 queues in each layer. It
+differs from the Re-entrant 1 environment in that only queue 1 receive external arrivals while
+queues 2 and 3 receive re-entered jobs from the last layer (see Figure 13 (b) for a two-layer
+example).
+For a gradient estimator gˆ, the main performance metric we evaluate is sim(gˆ), which is the
+expected cosine similarity with the ground-truth gradient,
+(cid:20) (cid:21)
+⟨gˆ,∇J (θ)⟩
+sim(gˆ) ≡ E[cos(gˆ,∇J (θ))] = E N ∈ [−1,1] (10)
+N
+∥gˆ∥∥∇J (θ)∥
+N
+where the expectation E is over randomness in gˆ. The higher the similarity is, the more aligned
+gˆ is to the direction of ∇J (θ). This metric incorporates both bias and variance of the gradient
+N
+estimator. If the gradient estimator is unbiased but has a high variance, then each individual
+realization of gˆ is likely to have low correlation with the true gradient, so the average cosine
+similarity will be small even if E[gˆ] = ∇J (θ). At the same time, if the gradient estimator has
+N
+a low variance but a high bias, then the sim(gˆ) could still be small if cos(E[gˆ],∇J (θ)) is small.
+N
+We focus on this metric, because it directly determines how informative the gradient estimates
+are when applying various gradient descent algorithms. For our experiments, we evaluate (a close
+approximation of) the ground-truth gradient ∇J (θ) by using the unbiased REINFORCE gradient
+N
+estimator over exceedingly many trajectories (in our case, 106 trajectories).
+WecomparethesimilarityofPATHWISEwiththatofREINFORCE. WedenoteB asthenumber
+of trajectories we use to calculate each PATHWISE or REINFORCE gradient estimator.
+B
+∇ˆ J (θ;ξ(1) ) ∇ˆRJ (θ;ξ ) := 1 (cid:88) ∇ˆRJ (θ;ξ(b) ) (11)
+θ N 1:N θ N,B 1:N B θ N 1:N
+(cid:124) (cid:123)(cid:122) (cid:125)
+b=1
+PATHWISEwithB=1 (cid:124) (cid:123)(cid:122) (cid:125)
+REINFORCEwithB trajectories
+We compute the PATHWISE gradient with only B = 1 trajectory, while REINFORCE gradient is
+calculated using B = 103 trajectories. For each policy and setting, we compute these gradients for
+100 different randomly generated values of θ, which are drawn from a Lognormal(0,1) distribution
+(as the parameters must be positive in these policies). In total, we compare the gradients in
+10,080 unique parameter settings, and each gradient estimator is computed 100 times to evaluate
+the average cosine similarity. When computing the policy gradient, we consider a time horizon of
+N = 103 steps.
+Figure 8 compares the PATHWISE estimator with B = 1 trajectory with the REINFORCE
+estimator averaged over B = 103 trajectories. For the REINFORCE estimator, costs are computed
+with a discount factor γ = 0.999, as using a lower discount rate introduced significant bias in
+the estimation. For PATHWISE, we use an inverse temperature β = 1 for the softmin relaxation
+across all settings. Each cell in Figure 8 corresponds to a (policy, network, traffic-intensity) and
+the cell value is the average expected cosine similarity of the estimator averaged across the 100
+randomly drawn θ values. We observe that across these diverse settings, the PATHWISE estimator
+consistently has a much higher average cosine similarity with the true gradient despite using only
+a single trajectory. In fact, for 94.5% of the 10,800 parameter settings, PATHWISE has a higher
+24average cosine similarity with 99% confidence than REINFORCE with B = 1000 trajectories. In
+most cases, the cosine similarity of PATHWISE is close to 1, indicating almost perfect alignment
+with the true gradient even under high congestion. REINFORCE on the other hand suffers greatly
+fromhighvariance. Overall, thisdemonstratesthatPATHWISEisabletodelivergreaterestimation
+accuracy with an order of magnitude fewer samples.
+5.2 Learning the cµ rule
+Given the strong improvements in estimation efficiency, we turn to evaluate how these translate
+to a downstream optimization task. In single-server multi-class queues, it is well-known that the
+cµ-rule minimizes the long-run average holding cost [25]. We assess whether gradient descent with
+the REINFORCE or PATHWISE gradients is capable of converging to the cµ-rule, without knowing
+the holding costs h or µ and only using feedback from the environment. Despite its simplicity,
+it has been observed in prior work that this is a difficult learning task, particularly under heavy
+traffic [95].
+We revisit the soft priority policy mentioned before, but with only the parameters θ ∈ Rn, i.e.,
+πsPR(x) = softmax(θ ) (12)
+θ i i
+We also modify the policy to ensure that it is work-conserving, i.e., not assigning the server to an
+empty queue (see section 6 for further discussion).
+We consider a family of multi-class single-server queues with n queues. Holding costs are
+identically h = 1. Inter-arrival and service times are exponentially distributed, the service rates
+j
+are µ = 1+ϵj, for some ϵ > 0, and the arrival rates are identical λ = λ and λ are set such that
+1j j
+the traffic intensity (cid:80)n λ = ρ for some ρ ∈ (0,1). Note that in this case, the cµ-rule prioritizes
+j=1 µ1j
+queues with higher indices j. We consider a grid of gap sizes ϵ ∈ {1.0,0.5,0.1,0.05,0.01} to adjust
+the difficulty of the problem; the smaller ϵ is, the harder it is to learn.
+We compare PATHWISE with B = 1 trajectory and REINFORCE with B = 100 trajectories for
+trajectories of N = 1000 steps. In order to isolate the effect of the gradient estimator from the
+optimization scheme, for both estimators we use an identical stochastic gradient descent scheme
+with normalized gradients (as these two estimators may differ by a scale factor). That is, for
+gradient estimator gˆ, the update under step-size α is
+gˆ
+θ = θ −α .
+t+1 t
+∥gˆ∥
+We run T gradient descent steps for each gradient estimator. To allow for the fact that different
+estimatorsmayhavedifferentperformancesacrossdifferentstepsizes,weconsideragridofstepsizes
+α ∈ {0.01,0.1,0.5,1.0}. Gradient normalization may prevent convergence, so we use the averaged
+iterate θ¯ for T. We then evaluate the long-run average holding cost under a strict priority policy
+T
+determined by θ¯ , i.e., π (x) = argmaxθ¯ .
+TheleftpaneT lofFiguθ¯
+rT
+e9di isplaysthevT a,j
+luesofθ¯ afterT = 50gradientiteratesforPATHWISE
+T
+and REINFORCE with n = 5, ϵ = 0.1, and ρ = 0.99. We observe that while PATHWISE sorts the
+queues in the correct order (it should be increasing with the queue index), REINFORCE even with
+B = 100 trajectories fails to prioritize queues with a higher cµ index. Remarkably, we observe in
+the right panel of the same figure that PATHWISE with just a single trajectory achieves a lower
+average holding cost than REINFORCE uniformly across various step sizes and difficulty levels,
+whereas the performance of REINFORCE varies greatly depending on the step size. This indicates
+25Figure 9. Learning the cµ rule. (Left) Averaged iterate of the policy parameters after 50 gradient
+steps with PATHWISE (B =1) and REINFORCE (B =100) gradients for a 5-class queue with traffic
+intensity ρ = 0.99 and gap-size ϵ = 0.1. The scores obtained by PATHWISE are increasing in the
+queue index, which matches the ordering of the cµ index in this instance. The scores obtained by
+REINFORCE do not achieve the correct ordering despite using more trajectories. (Right) Average
+holdingcostoftheaverageiterateafter20stepsofgradientdescentina10-classqueuewithρ=0.95.
+This figure reports the results averaged over 50 separate runs of gradient descent, across a grid of
+step-sizes (denoted as α). Remarkably, the optimization performance of the PATHWISE estimator is
+highly similar across step-sizes, and uniformly outperforms REINFORCE with different step-sizes α.
+that the improvements in gradient efficiency/accuracy of PATHWISE make it more robust to the
+step-size hyper-parameter. It is also worth mentioning that when gap size ϵ becomes smaller, it
+is more difficult to learn. At the same time, since µ ’s are more similar to each other, the cost
+1j
+difference between different priority rules also diminishes.
+5.3 Admission Control
+While we focus mainly on scheduling tasks in this work, our gradient estimation framework can
+also be applied to admission control, which is another fundamental queuing control task [75, 21,
+22, 34, 62]. To manage congestion, the queuing network may reject new arrivals to the network
+if the queue lengths are above certain thresholds. The admission or buffer control problem is to
+selectthesethresholdstobalancethetrade-offbetweenmanagingcongestionandensuringsufficient
+resource utilization.
+Under fixed buffer sizes L = {L }n , new arrivals to queue j are blocked if x = L . As a
+j j=1 j j
+result, the state update is modified as follows,
+x = min{x +De ,L}. (13)
+k+1 k k+1
+While a small L can greatly reduce congestion, it can impede the system throughput. To account
+forthis, weintroduceacostforrejectinganarrivaltothenetwork. Leto ∈ {0,1}n denotewhether
+k
+an arrival is overflowed, i.e., an arrival is blocked because the buffer is full,
+o = De ·1{x +De > L}. (14)
+k+1 k+1 k k+1
+Given a fixed routing policy, the control task is to choose the buffer sizes L to minimize the holding
+26Figure 10. Gradient descent with PATHWISE for admission control tasks. (Left) Iterates of sign
+gradient descent with the PATHWISE estimator for the buffer size of an M/M/1 queue with holding
+cost h = 1 and overflow cost b = 100. Starting from L = 1, the iterates quickly converge to the
+0
+optimal level of L∗ =14. (Right) buffer sizes obtained by sign gradient descent with the PATHWISE
+estimator for a 2 queue 1 server network with holding cost h=1 and overflow cost b=20. Starting
+from L =(1,1), the iterates quickly converge to the basin of the loss surface.
+0
+and overflow costs:
+N−1
+(cid:88)
+J (L;ξ ) = (h⊤x )τ∗ +b⊤o . (15)
+N 1:N k k+1 k
+k=0
+Similar to the routing control problem, despite the fact that overflow is discrete, our gradient
+estimation framework is capable of computing a PATHWISE gradient of the cost with respect to
+thebuffersizes, whichwedenoteas∇(cid:98)LJ N(L;ξ 1:N), i.e., wecanevaluategradientsatintegralvalues
+ofthebuffersizeandusethistoperformupdates. Sincethebuffersizesmustbeintegral, weupdate
+the buffer sizes via sign gradient descent to preserve integrality:
+(cid:16) (cid:17)
+L
+t+1
+= L t−sign ∇(cid:98)LJ N(L;ξ 1:N) . (16)
+Learning for admission control has been studied in the queuing and simulation literature [16,
+17, 51, 23]. While exact gradient methods are possible in fluid models [16, 17], the standard
+approach for discrete queuing models is finite perturbation analysis [51], given the discrete nature
+ofthebuffersizes. Randomizedfinite-differences,whichisalsoknownasSimultaneousPerturbation
+Stochastic Approximation (SPSA) [88, 31], is a popular optimization method for discrete search
+problems. This method forms a finite-differences gradient through a random perturbation. Let
+η ∼ Rademacher(n,1/2) ∈ {−1,1}n be a random n-dimensional vector where each component is
+an independent Rademacher random variable, taking values in {−1,1} with equal probability. For
+each perturbation η, we evaluate the objective at L±η, i.e., J (L+η;ξ ) and J (L−η;ξ ),
+N 1:N N 1:N
+using the same sample path for both evaluations to reduce variance. For improved performance,
+we average the gradient across a batch of B perturbations, i.e., η(b) for b = 1,...,B, drawing a new
+27(b)
+sample path ξ for each perturbation. The batch SPSA gradient is
+1:N
+B
+∇(cid:98)S LPSA,BJ N(L) = B1 (cid:88) 1
+2
+(cid:16) J N(L+η(b);ξ 1(b :N) )−J N(L−η(b);ξ 1(b :N) )(cid:17) η(b). (17)
+b=1
+We update the buffer sizes L according to the same sign gradient descent algorithm as in (16).
+In comparison with existing works in the queuing literature (e.g. [75, 22, 34]), which derive
+analytical results for simple single-class or multi-class queues, we consider admission control tasks
+for large, re-entrant networks with multiple job classes. Each job class has its own buffer, resulting
+in a high-dimensional optimization problem in large networks. Moreover, the buffer size for one
+job class affects downstream congestion due to the re-entrant nature of the networks. For our
+experiments, we fix the scheduling policy to be the soft priority policy πsPR(x) in (12) due to its
+θ
+simplicityandstrongperformanceinourenvironments. Weemphasizehoweverthatourframework
+can be applied to buffer control tasks under any differentiable routing policy, including neural
+network policies. For each gradient estimator, we perform T = 100 iterations of sign gradient
+descent, and each gradient estimator is computed from trajectories of length N = 1000. For SPSA,
+we consider batch sizes of B = {10,100,1000} whereas we compute PATHWISE with only B = 1
+trajectory. When evaluating the performance, we calculate the long-run average cost with the
+buffer size determined by the last iterate with a longer horizon N = 104 and over 100 trajectories.
+We also average the results across 50 runs of sign gradient descent.
+TheleftpanelofFigure10displaysiteratesofthesigngradientdescentalgorithmwithPATHWISE
+for the M/M/1 queue with holding cost h = 1 and overflow cost b = 100. We observe that sign
+gradient descent with PATHWISE (computed over a horizon of N = 1000 steps) quickly reaches the
+optimal buffer size of L∗ = 14 and remains there, oscillating between L = 14 and 15. The right
+panel shows the iterates for a simple 2-class queue with 1 server, h = 1, and b = 20 under a soft
+priority policy. We again observe that sign gradient descent with PATHWISE quickly converges to
+a near-optimal set of buffer sizes.
+To see how the estimator performs in larger-scale problems, we consider the Re-entrant 1 and
+Re-entrant 2 networks introduced in Section 5.1 with varying number of job classes (i.e., varying
+number of layers). Figure 11 compares the last iterate performance of SPSA and PATHWISE for
+these two families of queuing networks with instances ranging from 6-classes to 21-classes. Holding
+costs are h = 1 and overflow costs are b = 1000 for all queues. We observe that PATHWISE with
+only a single trajectory is able to outperform SPSA with B = 1000 trajectories for larger networks.
+Sign gradient descent using SPSA with only B = 10 trajectories is much less stable, with several of
+the iterations reaching a sub-optimal set of buffer sizes that assign L = 0 to several queues. This
+j
+illustrates the well-known fact that for high-dimensional control problems, zeroth-order methods
+like SPSA must sample many more trajectories to cover the policy space and their performance can
+scale sub-optimally in the dimension. Yet PATHWISE, which is an approximate first-order gradient
+estimator, exhibits much better scalability with dimension and is able to optimize the buffer sizes
+with much less data.
+6 Policy Parameterization
+While our gradient estimation framework offers a sample-efficient alternative for learning from the
+environment, there is another practical issue that degrades the performance of learning algorithms
+for queuing network control: instability. Standard model-free RL algorithms are based on the
+28Figure 11. Last iterate performance of PATHWISE (β =1) and SPSA [88] on admission control for
+re-entrant networks. (Left) Average cost of the last iterate of sign gradient descent (100 iterations)
+for the Re-entrant 1 networks, across different numbers of job classes. While SPSA averaged across
+B = 100 trajectories achieves good performance, using a smaller batch B = 10 leads to instabilities
+that lead to much higher costs. PATHWISE with only 1 trajectory is able to consistently achieve a
+smaller cost, especially for larger networks. (Right) Average cost of the last iterate of sign gradient
+descent (100 iterations) for the Re-entrant 2 networks. Even with B = 1000 trajectories, SPSA is
+unabletoeffectivelyoptimizethebuffersizesforlargernetworks,reachingthesamecostasSPSAwith
+B =10. This illustrates that the performance of finite-difference methods such as SPSA degrade in
+higher-dimensionalproblems,whereasPATHWISEperformswellintheselargerinstancesusingmuch
+less data.
+‘tabula rasa’ principle, which aims to search over a general and unstructured policy class in order
+to find an optimal policy. However, it has been observed that this approach may be unsuitable
+for queuing network control. Due to the lack of structure, the policies visited by the algorithm
+often fail to stabilize the network, which prevents the algorithm from learning and improving. As
+a result, researchers have proposed structural modifications to ensure stability, including behavior
+cloningofastabilizingpolicytofindagoodinitialization[26],switchingtoastabilizingpolicyifthe
+queue lengths exceed some finite thresholds [64], or modifying the costs to be stability-aware [78].
+We investigate the source of instability in various queuing scheduling problems and find a possi-
+ble explanation. We note that many policies obtained by model-free RL algorithms are not work-
+conserving and often allocate servers to empty queues. A scheduling policy is work-conserving if
+it always keeps the server(s) busy when there are compatible jobs waiting to be served. Standard
+policies such as the cµ-rule, MaxPressure, and MaxWeight are all work-conserving, which partly
+explains their success in stabilizing complex networks. We treat work conservation as an ‘inductive
+bias’ and consider a simple modification to the policy architecture that guarantees this property
+without sacrificing the flexibility of the policy class.
+The de-facto approach for parameterizing policies in deep reinforcement learning is to consider
+a function ν (x), which belongs to a general function family, such as neural networks, and outputs
+θ
+real-valued scores. These scores are then fed into a softmax layer, which converts the scores to
+probabilities over actions. Naively, the number of possible routing actions can grow exponentially
+in the number of queues and servers. Nonetheless, one can efficiently sample from the action
+space by having the output of ν (x) ∈ Rm×n be a matrix where row i, denote as ν (x) , contains
+θ θ i
+the scores for matching server i to different queues. Then by applying the softmax for row i,
+29Figure 12. Performance of PPO with and without work-conserving softmax for the Re-entrant 1
+network with 6 classes. Average holding cost of PPO without any modifications, PPO initialized
+from a behavior cloned policy (PPO BC), and PPO with the work-conserving softmax (PPO WC).
+Averagecostofthecµ-ruleaddedforreference. Withoutanymodification,PPOisunabletostabilize
+the queues, resulting in an average queue-length of 103 and does not improve over time. Behavior
+cloningprovidesamuchbetterinitialization,andthepolicyimproveswithtraining. However,itfails
+to improve over the cµ-rule. With the work conserving softmax, even the randomly initialized policy
+is capable of stabilizing the network – achieving an equivalent cost as the cµ-rule – and is able to
+outperform the cµ over the course of training.
+i.e., softmax(ν (x) ), we obtain the probability that server i is assigned to each queue. We then
+θ i
+sample the assignment independently for each server to obtain an action in U. For the purpose of
+computing the PATHWISE estimator, softmax(ν (x) ) also gives a valid fractional routing in U. We
+θ i
+let softmax(ν (x)) ∈ U denote the matrix formed by applying the softmax to each row in ν (x).
+θ θ
+Under this ‘vanilla’ softmax policy, the probability π (x) that server i is routed to queue j (or
+θ ij
+alternatively, the fractional capacity server i allocated to j) is given by
+eν θ(x)ij
+π (x) = softmax(ν (x)) = . (Vanilla Softmax)
+θ ij θ ij (cid:80)n eν θ(x)ij
+j=1
+Many of the policies mentioned earlier can be defined in this way, such as the soft MaxWeight
+policy, ν (x) = {θ x µ }n . This parameterization is highly flexible and ν (x) can be the output
+θ i j j ij j=1 θ
+of a neural network. However, for a general ν (x), there is no guarantee that π(θ)(x) = 0 if
+θ i,j
+x = 0. This means that such policies may waste service capacity by allocating capacity to empty
+j
+queues even when there are non-empty queues that server i could work on.
+We propose a simple fix, which reshapes the actions produced by the policy. We refer to this
+as the work-conserving softmax,
+πWC(x) = softmaxWC(ν (x)) ≡
+eν θ(x)ij1{x
+j
+> 0}∧ϵ
+, (WC-Softmax)
+θ ij θ ij (cid:80)n l=1eν θ(x) il1{x
+l
+> 0}∧ϵ
+where∧istheminimumandϵisasmallnumbertopreventdivisionbyzerowhenthequeuelengths
+are all zero.
+This parameterization is fully compatible with deep reinforcement learning approaches. ν (x)
+θ
+can be a neural network and critically, the work-conserving softmax preserves the differentiability
+30Figure 13. Multi-class queuing networks. This figure displays the architectures for the networks
+considered in sections 5 and 7, and have appeared in previous works (see [26, 12]). This displays
+the re-entrant networks with 6 job classes but we also consider networks with a larger number of
+job classes/queues. For both of these network architectures, the network with n job classes has n/3
+servers, and each job must be processed sequentially by all servers. Each server serves 3 job classes,
+andsomeofthejobsprocessedbythelastserverarefedbackintothefrontofthere-entrantnetwork.
+of πWC(x) with respect to θ. As a result, REINFORCE and PATHWISE estimators can both be
+θ
+computed under this parameterization, since ∇ logπWC(x) and ∇ πWC(x) both exist.
+θ θ θ θ
+Thissimplemodificationdeliverssubstantialimprovementsinperformance. Figure12compares
+theaverageholdingcostacrosspolicyiterationsforPPOwithoutanymodifications,PPOinitialized
+withapolicytrainedtoimitateMaxWeight,andPPOwiththework-conservingsoftmax. Despiteits
+empirical success in many other reinforcement learning problems, PPO without any modifications
+failstostabilizethenetworkandincursanexceedinglyhighcost. Itperformsmuchbetterunderan
+initial behavioral cloning step, which achieves stability but still underperforms the cµ-rule. On the
+other hand, with the work-conserving softmax, even the randomly initialized policy stabilizes the
+networkandoutperformsthecµ-ruleoverthecourseoftraining. Thisillustratesthatanappropriate
+choice of policy architecture, motivated by queuing theory, is decisive in enabling learning-based
+approachestosucceed. Asaresult,forallofthepolicyoptimizationexperimentsinsections5.2,5.3,
+and 7, we equip the policy parameterization with the work-conserving softmax.
+7 Scheduling for Multi-Class Queuing Networks: Benchmarks
+We now benchmark the performance of the policies obtained by PATHWISE policy gradient (Al-
+gorithm 1) with standard queuing policies and policies obtained using state-of-the-art model-free
+reinforcement learning algorithms. We consider networks displayed in Figure 13, which were briefly
+described in section 5.1 and appeared in previous works [26, 12]. Dai and Gluzman [26] used
+Criss-cross and Re-entrant-1 networks to show that PPO can outperform standard queuing poli-
+cies. Bertsimas et al. [12] consider the Re-entrant-2 network, but did not include any RL baselines.
+We consider networks with exponential inter-arrival times and workloads in order to compare with
+previous results. We also consider hyper-exponential distributions to model settings with higher
+coefficients of variation, as has been observed in real applications [43]. The hyper-exponential
+distribution X ∼ HyperExp(λ ,λ ,p) is a mixture of exponential distributions:
+1 2
+d
+X = Y ·E +(1−Y)·E ,
+1 2
+for Y ∼ Bernoulli(p), E ∼ Exp(λ ), E ∼ Exp(λ ), and all are drawn independently of each other.
+1 1 2 2
+We calibrate the parameters of the hyper-exponential distribution to have the same mean as the
+corresponding exponential distribution, but with a 1.5x higher variance. Our empirical validation
+31Figure 14. Comparison of average holding cost of queuing control policies relative to cµ-rule,
+including PPO-WC (ours) and PATHWISE (Algorithm 1). (Left) Average holding cost for the Re-
+entrant-1 networks with 18, 21, 24, 27, and 30 job classes. (Right) Average holding cost for the
+Re-entrant-1 networks with hyper-exponential inter-arrival and service times with 6, 9, 12, 14, 18,
+21 job classes. PATHWISE outperforms PPO-WC for large networks in particular.
+goes beyond the typical settings studied in the reinforcement learning for queuing literature, and
+is enabled by our discrete-event simulation framework.
+Table 1: Criss Cross
+Noise cµ MaxWeight MaxPressure Fluid PPO-DG [26] PPO-WC PATHWISE % improve
+Exp 17.9±0.3 17.8±0.3 19.0±0.3 18.2±2.7 15.4±0.1 15.4±0.2 15.2±0.4 17.8%
+HyperExp 28.4±0.5 28.3±0.8 28.1±0.8 27.1±4.7 N/A 24.0±0.7 22.5±0.7 20.4%
+We now describe the standard queuing policies considered in this section, which can all be
+expressed in the form
+(cid:88)
+π(x) = argmax ρ (x)u
+ij ij
+u∈U
+i∈[m],j∈[n]
+for some index ρ ∈ Rm×n that differs per method.
+• cµ-rule [25]: ρ = h µ 1{x > 0}. Servers prioritize queues with a higher holding cost and
+ij j ij j
+a larger service rate.
+• MaxWeight [93, 89]: ρ (x) = h µ x . Servers prioritize queues that are longer, with a higher
+ij j ij j
+holding cost, and a larger service rate.
+• MaxPressure [93, 27]: ρ = (cid:80)n µ R h x . MaxPressure is a modification of MaxWeight,
+ij ℓ=1 ij jℓ ℓ ℓ
+in the sense that it takes workload externality within the network into account through the
+R terms, e.g., processing a class j job may generate a new class j′ job.
+jl
+• Fluid[10]: Theschedulingpolicyisbasedontheoptimalsequenceofactionsinthefluidrelax-
+ation, which approximates the average evolution of stochastic queue lengths by deterministic
+ordinary differential equations. We aim to solve the continuous-time problem
+(cid:90) T
+min h⊤x(t)dt
+u¯
+0
+32s.t. x˙(t) = λ−R(µ⊙u¯(t)), ∀t ∈ [0,T]
+x(t) ≥ 0, ∀t ∈ [0,T]
+u¯(t) ∈ U, ∀t ∈ [0,T].
+Fortractability,wediscretizetheproblemwithtimeincrement∆t > 0andhorizonH = T/∆t,
+and solve as a linear program. We then set u = u(t ). The linear program is re-solved
+k k
+periodically to improve fidelity with the original stochastic dynamics.
+We next describe the deep reinforcement learning methods considered in this section:
+• PPO-DG [26]: PPO is a standard model-free policy gradient method [84, 56]. Dai and
+Gluzman [26] implement PPO for multi-class queuing networks and show that the policies
+obtainedoutperformseveralstandardqueuingpolicies. Theirimplementationincludesanini-
+tial behavioral cloning for stability and a carefully designed variance-reducing policy gradient
+estimation. We report the results from their paper, although in our experiments we include
+several problem instances not evaluated in their work.
+• PPO-WC (ours): Given the empirical success of PPO with the work-conserving softmax, we
+usethisalgorithmasthemainRLbenchmark. Forthispolicy,weusethesameneuralnetwork
+architecture, hyper-parameters, and variance reduction methods as PPO-DG [26].
+• PATHWISEpolicygradient(Algorithm1): Trainsaneuralnetworkpolicywithwork-conserving
+softmax using the PATHWISE policy gradient estimator. We use an inverse temperature of
+β = 10 for all experiments in this section.
+While value-based methods have also been considered for queuing network control [64, 100], our
+focus in this work is on benchmarking policy gradient algorithms.
+For the reinforcement learning policies, we train each method over 100 episodes, each consisting
+of N = 50,000 environment steps. Following Dai and Gluzman [26]’s implementation, PPO-WC
+was trained with B = 50 actors, while PATHWISE was trained only with B = 1 actor, which means
+that PPO-based methods used 50x more trajectories than PATHWISE. See Appendix A for more
+details on the training process.
+To evaluate each scheduling policy, we run 100 parallel episodes starting from empty queues
+x = 0 withalonghorizonN toestimatethelong-runaverageholdingcost(typicallyN = 200,000
+0 n
+steps). As in previous works (e.g. [26, 12]), we consider holding costs h = 1 in which case the
+n
+holding cost is equivalent to the total queue length. To reiterate, for each policy π we estimate the
+following quantity
+(cid:34) 1 N (cid:88)−1 (cid:35) (cid:34) 1 (cid:90) tN (cid:88)n (cid:35)
+J (π) = E (1⊤x )τ∗ = E x (t)dt (18)
+N t n k k+1 t i
+N N 0
+k=0 i=1
+where t is the time of the Nth event. We measure the standard deviation across the 100 episodes
+N
+to form 95% confidence intervals. For the reinforcement learning policies, we report the average
+holding cost for the best policy encountered during training.
+Tables 1-5 display the results of our benchmarking across the problem instances discussed be-
+fore. Thecolumn‘%improve’recordstherelativereductioninholdingcostachievedbyPATHWISE
+over the best standard queuing policy (either cµ, MaxWeight, MaxPressure, or Fluid). Our main
+observations on the relative performance of the standard policies and policies obtained from rein-
+forcement learning methods are summarized as follows.
+33Table 2: Re-entrant-1 (Exp)
+Classes cµ MaxWeight MaxPressure Fluid PPO-DG [26] PPO-WC PATHWISE % improve
+6 17.4±0.4 17.5±0.4 18.8±0.5 16.8±4.3 14.1±0.2 13.6±0.4 14.9±0.5 14.3%
+9 23.3±0.6 26.1±0.5 24.2±0.6 27.7±4.4 23.3±0.3 22.6±0.4 22.0±0.6 4.3%
+12 33.0±0.8 34.0±1.0 35.1±0.9 40.6±4.8 32.2±0.6 29.7±0.4 30.7±0.7 7.0%
+15 40.2±1.3 43.6±1.1 42.2±1.3 49.8±5.1 39.3±0.6 38.7±0.4 36.2±0.8 9.9%
+18 48.5±1.0 51.0±1.4 52.4±1.6 54.5±4.2 51.4±1.0 47.5±0.5 45.7±0.7 5.7%
+21 55.2±1.1 59.5±1.6 56.0±1.6 63.7±6.7 55.1±1.8 56.3±0.8 52.8±1.2 4.3%
+24 64.9±1.4 69.4±1.6 66.6±2.2 74.0±6.7 N/A 65.8±0.6 60.2±0.9 6.2%
+27 71.1±1.5 77.7±1.9 72.0±2.5 83.1±7.1 N/A 75.8±0.7 67.7±1.3 3.0%
+30 87.7±2.5 84.5±2.1 106.8±2.5 93.6±8.0 N/A 83.1±0.7 77.8±1.3 7.9%
+Table 3: Re-entrant-1 (HyperExp)
+Classes cµ MaxWeight MaxPressure Fluid PPO-WC PATHWISE % improve
+6 37.8±1.3 39.2±1.2 43.8±1.8 43.6±7.5 29.9±0.7 32.2±1.4 6.9%
+9 50.2±1.9 55.5±2.2 68.7±2.7 59.2±8.2 47.5±0.8 45.6±1.6 9.2%
+12 70.0±2.5 72.3±2.8 89.4±3.6 75.6±15.3 64.4±1.2 61.1±2.5 12.7%
+15 81.7±4.0 91.0±3.7 112.0±4.9 97.0±12.9 81.8±1.1 76.9±2.5 5.9%
+18 101.1±4.7 103.9±3.9 126.7±6.2 111.2±14.4 99.8±1.5 91.5±2.5 9.4%
+21 116.3±4.6 123.3±3.9 152.3±6.6 151.0±21.3 118.2±2.0 108.0±3.2 7.2%
+• PPO-WC is a strong reinforcement-learning benchmark. PPOwithourproposedwork-
+conserving softmax is able to efficiently find policies that outperform standard policies across
+all problem instances, as well as the PPO featured in [26] (under the same policy network
+and hyper-parameters). This illustrates that simply ensuring work-conservation is a powerful
+inductive bias that delivers stability.
+• PATHWISE policy gradient outperforms PPO-WC in larger networks, using 50x less
+data. We observe that PPO-WC and PATHWISE achieve similar performances when the
+number of classes is small. However, when the number of job classes gets larger, PATHWISE
+consistently outperforms PPO-WC, as seen in Figure 14. This is likely due to the sample
+efficiency gained by the PATHWISE gradient, enabling the algorithm to find better policies
+with less data.
+• PATHWISE achieves large performance gains over PPO-WC for higher-variance
+problem instances, using 50x less data. We observe that for the Re-entrant-1 net-
+works with hyper-exponential noise, the reduction of holding cost of PATHWISE relative to
+PPO-WC is often equivalent or even larger than the cost reduction of PPO-WC relative to the
+cµ-rule. This illustrates that even among optimized RL policies, there can be significant per-
+34formance differences for difficult problem instances, and the sample efficiency of PATHWISE
+is particularly useful in noisier environments.
+• While standard queuing methods work well, RL methods meaningfully improve
+performance in hard instances. We observe in the ‘% improve’ column that PATHWISE
+achieves a 3-20% improvement over the best standard queuing policy in each setting.
+Altogether, these results illustrate that policy gradient with PATHWISE gradient estimator and
+work-conserving softmax policy architecture can learn effective queuing network control policies
+withsubstantiallylessdatathanmodel-freepolicygradientalgorithmsforlargenetworkswithhigh-
+variance event times, mirroring real-world systems. In particular, the improved sample efficiency
+of the PATHWISE gradient estimator and the stability brought by work-conserving softmax policy
+architecturearethekeystoenablinglearninginlarge-scalesystemswithrealisticdatarequirements.
+Table 4: Re-entrant-2 (Exp)
+Classes cµ MaxWeight MaxPressure Fluid PPO-WC PATHWISE % improve
+6 18.8±0.5 17.4±0.4 24.5±0.7 18.6±2.8 13.7±0.2 14.7±0.6 21.9%
+9 24.2±0.6 25.8±0.7 31.5±1.0 26.7±3.7 22.1±0.3 21.6±0.6 10.7%
+12 35.1±0.9 34.0±1.1 40.3±1.4 35.7±4.6 29.9±0.5 29.8±0.7 15.1%
+15 44.8±1.3 43.8±1.5 50.1±1.6 44.0±5.3 38.0±0.5 36.2±1.0 19.2%
+18 52.4±1.6 48.7±1.3 58.2±2.1 55.2±5.8 46.8±0.5 45.6±0.8 13.0%
+21 56.0±1.6 57.5±1.8 71.3±2.9 62.2±7.5 55.5±0.6 51.4±1.1 8.2%
+24 66.6±2.2 69.0±1.7 76.0±3.0 70.8±7.7 63.2±0.7 59.8±1.4 10.2%
+27 72.0±2.5 75.9±2.1 84.9±3.2 82.9±9.6 70.3±0.9 68.4±1.6 5.0%
+30 80.6±2.7 83.8±1.9 90.6±3.2 91.2±11.3 80.4±0.8 75.5±1.8 6.3%
+Table 5: Re-entrant-2 (HyperExp)
+Classes cµ MaxWeight MaxPressure Fluid PPO-WC PATHWISE % improve
+6 39.4±1.4 39.1±1.9 58.6±2.3 39.8±7.3 30.7±0.8 30.9±1.4 21.6%
+9 52.4±2.1 58±2.7 67.1±3.0 55.5±9.4 45.7±0.8 43.4±1.4 17.2%
+12 70.9±2.7 77.0±3.7 93.0±4.0 72.1±14.4 61.1±1.3 58.9±2.3 16.9%
+15 81.5±2.7 90.5±3.9 109.0±5.4 84.2±18.1 78.0±1.7 73.8±3.6 9.4%
+18 104.3±5.1 103.8±4.3 123.6±5.3 99.5±15.5 93.8±1.3 92.1±2.7 11.7%
+21 116.6±6.0 117.9±5.1 135.6±6.0 118.9±16.6 110.5±1.6 104.2±2.9 10.6%
+358 Why is REINFORCE Sample-Inefficient? A Theoretical Case Study
+for the M/M/1 Queue
+In this section, we provide a theoretical case study explaining how PATHWISE gradients are able
+to learn more from a single observed trajectory compared to REINFORCE. We focus on the spe-
+cial case of the M/M/1 queue to explain how REINFORCE and its actor-critic variants utilizing
+baselines/advantages suffer from sample inefficiency. Although we are only able to analyze a sub-
+stantially simpler setting than the control problems in general multi-class queueing networks we
+are interested in, our theoretical results illustrate the essential statistical benefits of pathwise gra-
+dient estimators. We highlight that while REINFORCE applies to virtually any setting by relying
+on random exploration, it fundamentally struggles to assign credit to actions, especially in noisy
+environments. PATHWISE, on the other hand, is much better at assigning credit to actions. This
+allows us to crystallize why we see such a large improvement in sample efficiency in sections 5
+and 7. We also believe our result may be of broader interest in reinforcement learning, because
+it illustrates a practically relevant instance where REINFORCE, even with an optimal baseline, is
+provably sub-optimal.
+We consider the M/M/1 queue with a fixed arrival rate λ under service rate control u = µ > λ.
+This setting permits an analytic approach to showing that the REINFORCE estimator has a sub-
+optimallylargevariance, particularlyforcongestedsystemswhenρ = λ/µ → 1. Ontheotherhand,
+the PATHWISE estimator achieves an order of magnitude improvement in estimation efficiency. In
+the M/M/1 queue setting, the PATHWISE approach for general queuing networks reduces to IPA
+based on Lindley recursion.
+We consider a simple service-rate control problem where the cost is the steady-state average
+queue length in the M/M/1 queue
+λ ρ
+Q(µ) := E [x(t)] = = .
+∞
+µ−λ 1−ρ
+Given that the service rate is continuous, it is natural to consider a policy that randomizes over
+[µ−h,µ]. One such option is a Beta-distributed policy π : A = µ−hY, where Y ∼ Beta(θ,1) and
+θ
+h > 0. As θ → ∞, the policy frequently sets service rates close to µ and as θ → 0, it concentrates
+more probability mass on service rates close to µ−h. The task is to estimate the following policy
+gradient
+∇ J(θ) = ∇E [Q(A)].
+θ A∼π θ
+The REINFORCE estimator of ∇ J(θ) involves sampling a random service rate from the policy π ,
+θ θ
+and then estimating the steady-state queue length from a trajectory under that service rate. For a
+trajectory with N steps, we denote the steady-state queue length estimator as Q(cid:98)N(A). Then, the
+REINFORCE gradient estimator takes the form
+(cid:18) (cid:19)
+1
+∇(cid:98)RJ N(θ;ξ 1:N) = Q(cid:98)N(µ−hY)∇ θlogπ θ(Y) = Q(cid:98)N(µ−hY) logY + . (19)
+θ
+The standard estimator for the steady-state queue length is simply the queue length averaged over
+a sample path: Q(cid:98)N(a) = N1 (cid:80)N k=1x kτ k∗
++1
+when A = a. As long as µ−h > λ, it is known that as
+N → ∞, Q(cid:98)N(a) → Q(a), which implies that ∇(cid:98)RJ N(θ;ξ 1:N) → ∇J(θ).
+On the other hand, the PATHWISE estimator utilizes the structure of the single server queue.
+First, by inverse transform sampling, Y =d F−1(ω), where ω ∼ Uniform(0,1) and F−1(ω) = ω1/θ.
+θ θ
+36Then, wecansubstituteA = µ−hω1/θ. SinceQ(µ)isdifferentiableandthederivativeisintegrable,
+we can change the order of differentiation and integration
+∇ J(θ) = ∇ E [Q(µ−hω1/θ)] = −E [∇Q(µ−hω1/θ)·h∇ ω1/θ].
+θ θ ω ω θ
+The preceding display involves the gradient of the steady-state queue-length Q(µ) with respect to
+the service rate µ, i.e., ∇Q(µ).
+For the M/M/1 queue, there are consistent sample-path estimators of ∇Q(µ). One such esti-
+mator uses the fact that by Little’s law Q(µ) = E [x(t)] = λE [w(t)] =: λW(µ) where W(µ) is
+∞ ∞
+the steady-state waiting time. The waiting time process W , which denotes the waiting time of the
+i
+ith job arriving to the system, has the following dynamics, known as the Lindley recursion:
+(cid:18)
+S
+(cid:19)+
+i
+W = W −T + , (20)
+i+1 i i+1
+µ
+iid
+where T ∼ Exp(1) is the inter-arrival time of between the ith job and (i + 1)th job, and
+i+1
+iid
+S ∼ Exp(1) is the workload of the ith job. Crucially, this stochastic recursion specifies how the
+i
+service rate affects the waiting time along the sample path, which enables one to derive a pathwise
+derivative via the recursion:
+(cid:18) (cid:19)
+S
+k
+∇(cid:98)W
+i+1
+= −
+µ2
++∇(cid:98)W
+i
+1{W
+i+1
+> 0},
+where ∇(cid:98)W
+i
+together with W
+i
+form a Markov chain following the above recursion. By averaging
+this gradient across jobs and using Little’s law, we have the following gradient estimator for ∇Q,
+which we denote as ∇(cid:98)Q N(µ):
+1
+(cid:88)LN
+∇(cid:98)Q N(µ) = λ ∇(cid:98)W i,
+L
+N
+i=1
+where L is the number of arrivals that occur during a sample path with N events. Using this,
+N
+the PATHWISE policy gradient estimator (a.k.a. IPA estimator) is
+(cid:18) (cid:19)
+1
+∇(cid:98)θJ N(θ;ξ 1:N) = h·∇(cid:98)Q N(µ−hY) Y logY . (21)
+θ
+As long as µ − h > λ, it has been established that ∇(cid:98)Q N(µ) is asymptotically unbiased, i.e., as
+N → ∞, E[∇(cid:98)Q N(µ)] → ∇Q(µ), which implies E[∇(cid:98)θJ N(θ;ξ 1:N)] → ∇J(θ).
+Since both the REINFORCE and PATHWISE gradient estimators give an asymptotically un-
+biased estimation of ∇J(θ), we compare them based on their variances, which determines how
+many samples are needed to reliably estimate the gradient. Although the variances of the esti-
+mators are not precisely known for a finite N, Q(cid:98)N and ∇(cid:98)Q
+N
+both satisfy the central limit theo-
+rem (CLT) with explicitly characterized asymptotic variances, which we denote as Var ∞(Q(cid:98)) and
+Var ∞(∇(cid:98)Q) respectively. This implies that the variance of Q(cid:98)N is approximately Var ∞(Q(cid:98))/N. We
+define Var ∞(∇(cid:98)J N(θ;ξ 1:N)) to be the variance of the gradient estimator when we approximate the
+variance of Q(cid:98)N and ∇(cid:98)Q
+N
+using Var ∞(Q(cid:98))/N and Var ∞(∇(cid:98)Q)/N respectively.
+It is worth reiterating that the REINFORCE estimator only required an estimate of cost Q(µ),
+which does not require any domain knowledge, whereas the PATHWISE gradient required an esti-
+mate of ∇Q(µ) which requires a detailed understanding of how the service rate affected the sample
+path dynamics. Utilizing this structural information can greatly improve the efficiency of gradient
+37estimation. Since ∇(cid:98)θJ N(θ;ξ 1:N) = O(h) almost surely, we have Var(∇(cid:98)θJ N(θ;ξ 1:N)) = O(h2). On
+the other hand, the variance of the REINFORCE estimator can be very large even if h is small.
+To highlight this, consider the extreme case where h = 0 for which the policy gradient ∇J(θ) is
+obviouslyzerosincethepolicydeterministicallysetstheserviceratetoµregardlessofθ. Strikingly,
+REINFORCE does not have zero variance in this case:
+Observation 1. If h = 0, then the variance of the estimators are
+(cid:16) (cid:17) (cid:16) (cid:17)
+Var
+∞
+∇(cid:98)J N(θ;ξ 1:N) = 0, Var
+∞
+∇(cid:98)RJ N(θ;ξ 1:N) = Θ(cid:0) N−1(1−ρ)−4(cid:1)
+Note that even when h = 0, the variance of the REINFORCE estimator can be quite high if the
+queue is congested, i.e. ρ is close to 1, while the pathwise estimator gives the correct estimate of
+zero with zero variance.
+For non-trivial values of h, we focus on the so-called ‘heavy-traffic’ asymptotic regime with
+ρ = λ/µ → 1,whichisofmajortheoreticalandpracticalinterestinthestudyofqueues. Estimating
+steady-state quantities becomes harder as the queue is more congested, so (1−ρ)−1 emerges as a
+key scaling term in the variance. We set h such that h < c and h → c ∈ (0,1) as ρ → 1. This
+µ−λ µ−λ
+resembles the square-root heavy-traffic regime for capacity planning, where the service rate is set
+√
+to be λ+β λ for some β > 0, and one considers the limit as λ → ∞. In this case, if one were
+√ √
+choosing a policy over the square-root capacity rules A ∈ [λ+a λ,λ+b λ] for some b > a > 0,
+√ √ √
+this is equivalent to setting µ = λ+b λ and h = (b−a) λ = O( λ). Note that if c = 0, the
+gradient is zero (identical to Observation 1), and if c ≥ 1, the queue with service rate µ − h is
+unstable.
+Within this regime, we have the following comparison between the gradient estimators, which
+utilizes recent results concerning the asymptotic variance of ∇(cid:98)Q N(µ) [54].
+Theorem 2. Suppose h = c(µ−λ) for c ∈ (0,1) as ρ → 1. Under this scaling ∇J(θ) ∼ (1−ρ)−1,
+and
+(cid:16) (cid:17) (cid:16) (cid:17)
+Var
+∞
+∇(cid:98)J N(θ;ξ 1:N) = O N−1(1−ρ)−3+ (1−ρ)−2 (22)
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+estimation noise policy randomization
+(cid:16) (cid:17) (cid:16) (cid:17)
+Var
+∞
+∇(cid:98)RJ N(θ;ξ 1:N) = Θ N−1(1−ρ)−4+(1−ρ)−2 (23)
+See Appendix B.2 for the proof.
+Overall,thePATHWISEestimatorismuchmoresampleefficientthantheREINFORCEestimator
+as ρ → 1, with the variance scaling as (1−ρ)−3 compared to (1−ρ)−4. The first terms in (22)
+and (23) represent the variance occurring from the Monte Carlo estimation and becomes smaller
+if one generates a longer sample path (larger N), and it scales as N−1. The second terms are the
+variance resulting from randomness in the service rate induced by the policy.
+Theorem2illustratesthatlargeimprovementsinstatisticalefficiencycanbeachievedbyleverag-
+ingthestructureofthesystemdynamics. Anexistingstrategyforincorporatingdomainknowledge
+in REINFORCE is to subtract a baseline b from the cost, which preserves un-biasedness:
+(cid:18) (cid:19)
+1
+∇(cid:98)RBJ N(θ,ξ 1:N) = (Q(cid:98)N(µ−hY)−b) logY + . (24)
+θ
+In this case, one can characterize the optimal variance-reducing baseline in closed form if one has
+38knowledge of the true cost Q(µ). Under h = c(µ−λ),
+E[Q(h−hY)∇ logπ (Y)2]
+b∗ = θ θ
+E[∇ logπ (Y)2]
+θ θ
+=
+λ (cid:2) F2(1,θ,1+θ,c)−2θ2Φ(c,2,θ)+2cθ3Φ(c,3,1+θ)(cid:3)
+µ−λ 1
+= O((1−ρ)−1)
+where F2 is the hypergeometric 2F1 function and Φ is the Lerch Φ transcendental. The optimal
+1
+baseline b∗ is of the same order as Q(µ) as ρ → 1.
+Corollary 2. Consider the REINFORCE estimator with the optimal baseline b∗. As ρ → 1, the
+variance of the estimator scales as
+(cid:16) (cid:17) (cid:16) (cid:17)
+Var
+∞
+∇(cid:98)RBJ N(θ;ξ 1:N) = Θ N−1(1−ρ)−4+(1−ρ)−2
+The proof of Corollary 2 is provided in Appendix B.3. Simply, since the optimal baseline is a
+deterministic input, it is unable to improve upon the (1−ρ)−4 dependence on ρ, which is driven by
+the statistical properties of Q(cid:98)N. This illustrates that the pathwise gradient estimator can offer an
+order of magnitude improvement in sample efficiency than the REINFORCE estimator even with an
+optimized baseline that requires knowledge of the true cost function (and thus precludes the need
+to estimate the cost in the first place).
+Intuitively, the REINFORCE estimator is inefficient because it is unable to leverage the fact that
+Q(µ) ≈ Q(µ+ϵ) when ϵ is small. After all, generic MDPs do not have such a structure; a slight
+change in the action can result in vastly different outcomes. The REINFORCE estimator cannot
+use the estimate of Q(cid:98)N(µ) to say anything about Q(µ + ϵ), and must draw a new sample path
+to estimate Q(µ+ϵ). Meanwhile, using a single sample path, the pathwise estimator can obtain
+an estimate for Q(µ + ϵ) when ϵ is small enough via Q(cid:98)N(µ + ϵ) ≈ Q(cid:98)N(µ) + ϵ∇(cid:98)Q N(µ). In this
+sense, the pathwise estimator can be seen as a infinitesimal counterfactual of the outcome under
+alternative—but similar—actions.
+Even though we only study a single server queue here, we believe the key observations may
+apply more broadly.
+• Highercongestion(ρ → 1)makesitmorechallengingtoestimatetheperformanceofqueueing
+networks based on the sample path. This applies to both gradient estimators and baselines
+that could be used to reduce variance.
+• It is important to reliably estimate the effects of small changes in the policy, as large changes
+can potentially cause instability. Pathwise gradient estimators provide a promising way to
+achieve this. For general networks with known dynamics, their dynamics are often not differ-
+entiable, which requires the development of the PATHWISE estimator.
+9 Conclusion
+Inthiswork,weintroduceanewframeworkforpolicyoptimizationinqueuingnetworkcontrol. This
+framework uses a novel approach for gradient estimation in discrete-event dynamical systems. Our
+proposed PATHWISE policy gradient estimator is observed to be orders of magnitude more efficient
+thanmodel-freeRLalternativessuchasREINFORCEacrossanarrayofcarefullydesignedempirical
+39experiments. In addition, we introduce a new policy architecture, which drastically improves sta-
+bility while maintaining the flexibility of neural network policies. Altogether, these illustrate how
+structural knowledge of queuing networks can be leveraged to accelerate reinforcement learning for
+queuing control problems.
+We next discuss some potential extensions of our approach:
+• We consider policies with preemption. Our proposed method can also handle non-preemptive
+policies by keeping track of the occupied servers as part of the state.
+• We focus on scheduling and admission control problems in queuing network satisfying As-
+sumptions A, but the algorithmic ideas can be extended to more general queuing networks by
+utilizing a larger state space that contains the residual workloads of all jobs in the network,
+rather than only the top-of-queue jobs as is done in this work. A higher dimensional state
+descriptor is required for more general networks as multiple jobs in the same queue can be
+served simultaneously.
+• Beyond queuing network control, our methodology can be extended to control problems in
+otherdiscrete-eventdynamicalsystems. Moreexplicitly,ourmethodologycanhandlesystems
+that involve a state update of the form x = g(x ,e ) where g is a differentiable function
+k+1 k k+1
+and e is the selected event. Recall that in this work, the state update is linear in x and
+k+1 k
+e : x = x +De . We also require that e is differentiable almost surely in the
+k+1 k+1 k k+1 k+1
+action u .
+k
+References
+[1] Z. Aksin, M. Armony, and V. Mehrotra. The modern call center: A multi-disciplinary per-
+spective on operations management research. Production and operations management, 16(6):
+665–688, 2007.
+[2] M. Alvo, D. Russo, and Y. Kanoria. Neural inventory control in networks via hindsight
+differentiable policy optimization. arXiv preprint arXiv:2306.11246, 2023.
+[3] P. Andelfinger. Differentiable agent-based simulation for gradient-guided simulation-based
+optimization. InProceedings of the 2021 ACM SIGSIM Conference on Principles of Advanced
+Discrete Simulation, pages 27–38, 2021.
+[4] P. Andelfinger. Towards differentiable agent-based simulation. ACM Transactions on Mod-
+eling and Computer Simulation, 32(4):1–26, 2023.
+[5] M. Armony and N. Bambos. Queueing dynamics and maximal throughput scheduling in
+switched processing systems. Queueing systems, 44:209–252, 2003.
+[6] M. Armony, S. Israelit, A. Mandelbaum, Y. N. Marmor, Y. Tseytlin, and G. B. Yom-Tov.
+On patient flow in hospitals: A data-based queueing-science perspective. Stochastic systems,
+5(1):146–194, 2015.
+[7] F. Avram, D. Bertsimas, and M. Ricard. An optimal control approach to optimization of
+multiclass queueing networks. In Proceedings of Workshop on Queueing Networks, 1994.
+40[8] L. Baird and A. Moore. Gradient descent for general reinforcement learning. Advances in
+neural information processing systems, 11, 1998.
+[9] S. Banerjee, D. Freund, and T. Lykouris. Pricing and optimization in shared vehicle systems:
+An approximation framework. Operations Research, 70(3):1783–1805, 2022.
+[10] N. B¨auerle. Asymptotic optimality of tracking policies in stochastic networks. The Annals
+of Applied Probability, 10(4):1065–1083, 2000.
+[11] Y. Bengio, N. L´eonard, and A. Courville. Estimating or propagating gradients through
+stochastic neurons for conditional computation. arXiv preprint arXiv:1308.3432, 2013.
+[12] D. Bertsimas, E. Nasrabadi, and I. C. Paschalidis. Robust fluid processing networks. IEEE
+Transactions on Automatic Control, 60(3):715–728, 2014.
+[13] J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula,
+A. Paszke, J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transfor-
+mations of Python+NumPy programs, 2018. URL http://github.com/google/jax.
+[14] X.-R. Cao. Convergence of parameter sensitivity estimates in a stochastic experiment. IEEE
+Transactions on Automatic Control, 30(9):845–853, 1985.
+[15] X.-R. Cao. First-order perturbation analysis of a simple multi-class finite source queue.
+Performance Evaluation, 7(1):31–41, 1987.
+[16] C. G. Cassandras, Y. Wardi, B. Melamed, G. Sun, and C. G. Panayiotou. Perturbation
+analysis for online control and optimization of stochastic fluid models. IEEE Transactions
+on Automatic Control, 47(8):1234–1248, 2002.
+[17] C. G. Cassandras, G. Sun, C. G. Panayiotou, and Y. Wardi. Perturbation analysis and
+control of two-class stochastic fluid models for communication networks. IEEE Transactions
+on Automatic Control, 48(5):770–782, 2003.
+[18] H. Chen and A. Mandelbaum. Discrete flow networks: Bottleneck analysis and fluid approx-
+imations. Mathematics of operations research, 16(2):408–446, 1991.
+[19] H. Chen and A. Mandelbaum. Hierarchical modeling of stochastic networks, part i: Fluid
+models. In Stochastic modeling and analysis of manufacturing systems, pages 47–105.
+Springer, 1994.
+[20] H. Chen and D. D. Yao. Dynamic scheduling of a multiclass fluid network. Operations
+Research, 41(6):1104–1115, 1993.
+[21] N. Chr. Individual and social optimization in a multiserver queue with a general cost-benefit
+structure. Econometrica: Journal of the Econometric Society, pages 515–528, 1972.
+[22] E. B. C¸il, E. L. O¨rmeci, and F. Karaesmen. Effects of system parameters on the optimal
+policystructureinaclassofqueueingcontrolproblems. Queueing Systems, 61:273–304, 2009.
+[23] A. Cohen, V. Subramanian, and Y. Zhang. Learning-based optimal admission control in a
+single-server queuing system. Stochastic Systems, 14(1):69–107, 2024.
+41[24] R. Cont, S. Stoikov, and R. Talreja. A stochastic model for order book dynamics. Operations
+research, 58(3):549–563, 2010.
+[25] D. Cox and W. Smith. Queues. Methuen, London, 5 edition, 1961.
+[26] J. G. Dai and M. Gluzman. Queueing network controls via deep reinforcement learning.
+Stochastic Systems, 12(1):30–67, 2022.
+[27] J. G. Dai and W. Lin. Maximum pressure policies in stochastic processing networks. Opera-
+tions Research, 53(2):197–218, 2005.
+[28] J. G. Dai and S. P. Meyn. Stability and convergence of moments for multiclass queueing
+networksviafluidlimitmodels. IEEE Transactions on Automatic Control, 40(11):1889–1904,
+1995.
+[29] D.J.EckmanandS.G.Henderson. Biasedgradientestimatorsinsimulationoptimization. In
+2020WinterSimulationConference(WSC),pages2935–2946,2020.doi: 10.1109/WSC48552.
+2020.9383938.
+[30] L. Engstrom, A. Ilyas, S. Santurkar, D. Tsipras, F. Janoos, L. Rudolph, and A. Madry.
+Implementation matters in deep policy gradients: A case study on ppo and trpo. arXiv
+preprint arXiv:2005.12729, 2020.
+[31] M. C. FU and S. D. HILL. Optimization of discrete event systems via simultaneous pertur-
+bation stochastic approximation. IIE transactions, 29(3):233–243, 1997.
+[32] M. C. Fu and J.-Q. Hu. Smoothed perturbation analysis derivative estimation for markov
+chains. Operations Research Letters, 15(5):241–251, 1994.
+[33] M. C. Fu and J.-Q. Hu. Conditional Monte Carlo: Gradient estimation and optimization
+applications, volume 392. Springer Science & Business Media, 2012.
+[34] A. P. Ghosh and A. P. Weerasinghe. Optimal buffer size for a stochastic processing network
+in heavy traffic. Queueing Systems, 55(3):147–159, 2007.
+[35] P. Glasserman. Gradient estimation via perturbation analysis, volume 116. Springer Science
+& Business Media, 1990.
+[36] P. Glasserman. Derivative estimates from simulation of continuous-time markov chains. Op-
+erations Research, 40(2):292–308, 1992.
+[37] P. Glasserman. Monte Carlo methods in financial engineering, volume 53. Springer, 2004.
+[38] P. Glasserman and D. D. Yao. Some guidelines and guarantees for common random numbers.
+Management Science, 38(6):884–908, 1992.
+[39] P. W. Glynn. Likelilood ratio gradient estimation: an overview. In Proceedings of the 19th
+Winter conference on simulation, pages 366–375, 1987.
+[40] P. W. GLYNN. A gsmp formalism for discrete event systems. PROCEEDINGS OF THE
+IEEE, 77(1), 1989.
+42[41] P. W. Glynn. Optimization of stochastic systems via simulation. In Proceedings of the 21st
+conference on Winter simulation, pages 90–105, 1989.
+[42] P. W. Glynn. Likelihood ratio gradient estimation for stochastic systems. Communications
+of the ACM, 33(10):75–84, 1990.
+[43] L. V. Green, P. J. Kolesar, and W. Whitt. Coping with time-varying demand when setting
+staffing requirements for a service system. Production and Operations Management, 16(1):
+13–39, 2007.
+[44] E. Greensmith, P. L. Bartlett, and J. Baxter. Variance reduction techniques for gradient
+estimates in reinforcement learning. Journal of Machine Learning Research, 5(9), 2004.
+[45] M. Harchol-Balter. Performance modeling and design of computer systems: queueing theory
+in action. Cambridge University Press, 2013.
+[46] J. M. Harrison. The bigstep approach to flow management in stochastic processing networks.
+Stochastic Networks: Theory and Applications, 4(147-186):4, 1996.
+[47] J.M.Harrison. Heavytrafficanalysisofasystemwithparallelservers: asymptoticoptimality
+of discrete-review policies. The Annals of Applied Probability, 8(3):822–848, 1998.
+[48] J. M. Harrison and L. M. Wein. Scheduling networks of queues: heavy traffic analysis of a
+simple open network. Queueing Systems, 5:265–279, 1989.
+[49] J. M. Harrison and L. M. Wein. Scheduling networks of queues: Heavy traffic analysis of a
+two-station closed network. Operations research, 38(6):1052–1064, 1990.
+[50] E. Heiden, D. Millard, E. Coumans, Y. Sheng, and G. S. Sukhatme. Neuralsim: Augmenting
+differentiable simulators with neural networks. In 2021 IEEE International Conference on
+Robotics and Automation (ICRA), pages 9474–9481. IEEE, 2021.
+[51] Y. Ho, M. Eyler, and T. Chien. A new approach to determine parameter sensitivities of
+transfer lines. Management science, 29(6):700–714, 1983.
+[52] Y.-C. Ho, X. Cao, and C. Cassandras. Infinitesimal and finite perturbation analysis for
+queueing networks. Automatica, 19(4):439–445, 1983.
+[53] T. A. Howell, S. Le Cleac’h, J. Z. Kolter, M. Schwager, and Z. Manchester. Dojo: A differ-
+entiable simulator for robotics. arXiv preprint arXiv:2203.00806, 9(2):4, 2022.
+[54] J.-Q. Hu and T. Lian. On comparison of steady-state infinitesimal perturbation analysis and
+likelihood ratio derivative estimates. Discrete Event Dynamic Systems, 33(2):95–104, 2023.
+[55] Y. Hu, L. Anderson, T.-M. Li, Q. Sun, N. Carr, J. Ragan-Kelley, and F. Durand. Difftaichi:
+Differentiable programming for physical simulation. arXiv preprint arXiv:1910.00935, 2019.
+[56] S. Huang, R. F. J. Dossa, A. Raffin, A. Kanervisto, and W. Wang. The 37 implementation
+details of proximal policy optimization. The ICLR Blog Track 2023, 2022.
+43[57] S. Huang, R. F. J. Dossa, C. Ye, J. Braga, D. Chakraborty, K. Mehta, and J. G. AraA˜ˇsjo.
+Cleanrl: High-quality single-file implementations of deep reinforcement learning algorithms.
+Journal of Machine Learning Research, 23(274):1–18, 2022.
+[58] A. Ilyas, L. Engstrom, S. Santurkar, D. Tsipras, F. Janoos, L. Rudolph, and A. Madry. A
+closer look at deep policy gradients. arXiv preprint arXiv:1811.02553, 2018.
+[59] E. Jang, S. Gu, and B. Poole. Categorical reparameterization with gumbel-softmax. arXiv
+preprint arXiv:1611.01144, 2016.
+[60] M. E. Johnson and J. Jackman. Infinitesimal perturbation analysis: a tool for simulation.
+Journal of the Operational Research Society, 40(3):243–254, 1989.
+[61] D. P. Kingma and M. Welling. Auto-encoding variational bayes. arXiv preprint
+arXiv:1312.6114, 2013.
+[62] Y.L.Koc¸a˘gaandA.R.Ward. Admissioncontrolforamulti-serverqueuewithabandonment.
+Queueing Systems, 65:275–323, 2010.
+[63] P. L’Ecuyer and P. W. Glynn. Stochastic optimization by simulation: Convergence proofs
+for the gi/g/1 queue in steady-state. Management Science, 40(11):1562–1578, 1994.
+[64] B. Liu, Q. Xie, and E. Modiano. Rl-qn: A reinforcement learning framework for optimal
+control of queueing systems. ACM Transactions on Modeling and Performance Evaluation
+of Computing Systems, 7(1):1–35, 2022.
+[65] C.J.Maddison, A.Mnih, andY.W.Teh. Theconcretedistribution: Acontinuousrelaxation
+ofdiscreterandomvariables. InInternational Conference on Learning Representations (ICLR
+2016), 2016.
+[66] D. Madeka, K. Torkkola, C. Eisenach, D. Foster, and A. Luo. Deep inventory management.
+arXiv preprint arXiv:2210.03137, 2022.
+[67] C. Maglaras. Discrete-review policies for scheduling stochastic networks: Trajectory tracking
+andfluid-scaleasymptoticoptimality. TheAnnalsofAppliedProbability,10(3):897–929,2000.
+[68] A.MandelbaumandA.L.Stolyar. Schedulingflexibleserverswithconvexdelaycosts: Heavy-
+traffic optimality of the generalized cµ-rule. Operations Research, 52(6):836–855, 2004.
+[69] N. Matloff. Introduction to discrete-event simulation and the simpy language. Davis, CA.
+Dept of Computer Science. University of California at Davis. Retrieved on August, 2(2009):
+1–33, 2008.
+[70] S. Meyn. Control techniques for complex networks. Cambridge University Press, 2008.
+[71] S. P. Meyn. Sequencing and routing in multiclass queueing networks part i: Feedback regu-
+lation. SIAM Journal on Control and Optimization, 40(3):741–776, 2001.
+[72] V. Mnih, A. P. Badia, M. Mirza, A. Graves, T. Lillicrap, T. Harley, D. Silver, and
+K. Kavukcuoglu. Asynchronous methods for deep reinforcement learning. In International
+conference on machine learning, pages 1928–1937. PMLR, 2016.
+44[73] C. C. Moallemi, S. Kumar, and B. Van Roy. Approximate and data-driven dynamic pro-
+gramming for queueing networks. working paper, 2008.
+[74] S. Mohamed, M. Rosca, M. Figurnov, and A. Mnih. Monte carlo gradient estimation in
+machine learning. The Journal of Machine Learning Research, 21(1):5183–5244, 2020.
+[75] P. Naor. The regulation of queue size by levying tolls. Econometrica: journal of the Econo-
+metric Society, pages 15–24, 1969.
+[76] M. Neely. Stochastic network optimization with application to communication and queueing
+systems. Springer Nature, 2022.
+[77] A. Paszke, S. Gross, S. Chintala, G. Chanan, E. Yang, Z. DeVito, Z. Lin, A. Desmaison,
+L. Antiga, and A. Lerer. Automatic differentiation in pytorch. In Neural Information Pro-
+cessing Systems (NIPS) Workshop on Automatic Differentiation, 2017.
+[78] B. S. Pavse, M. Zurek, Y. Chen, Q. Xie, and J. P. Hanna. Learning to stabilize online
+reinforcement learning in unbounded state spaces. In Forty-first International Conference on
+Machine Learning, 2024.
+[79] G.Qu, A.Wierman, andN.Li. Scalablereinforcementlearningoflocalizedpoliciesformulti-
+agent networked systems. In Learning for Dynamics and Control, pages 256–266. PMLR,
+2020.
+[80] Z. Rosberg, P. Varaiya, and J. Walrand. Optimal control of service in tandem queues. IEEE
+Transactions on Automatic Control, 27(3):600–610, 1982.
+[81] S. Schoenholz and E. D. Cubuk. Jax md: a framework for differentiable physics. Advances
+in Neural Information Processing Systems, 33:11428–11441, 2020.
+[82] J.Schulman,S.Levine,P.Abbeel,M.Jordan,andP.Moritz.Trustregionpolicyoptimization.
+In International conference on machine learning, pages 1889–1897. PMLR, 2015.
+[83] J. Schulman, P. Moritz, S. Levine, M. Jordan, and P. Abbeel. High-dimensional continuous
+control using generalized advantage estimation. arXiv preprint arXiv:1506.02438, 2015.
+[84] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov. Proximal policy optimiza-
+tion algorithms. arXiv preprint arXiv:1707.06347, 2017.
+[85] D.Shah, Q.Xie, andZ.Xu. Stablereinforcementlearningwithunboundedstatespace. arXiv
+preprint arXiv:2006.04353, 2020.
+[86] J. G. Shanthikumar, S. Ding, and M. T. Zhang. Queueing theory for semiconductor manu-
+facturing systems: A survey and open problems. IEEE Transactions on Automation Science
+and Engineering, 4(4):513–522, 2007.
+[87] Simio LLC. Simio simulation software. https://www.simio.com, 2024. Accessed: 2024-06-
+05.
+[88] J.C.Spall. Multivariatestochasticapproximationusingasimultaneousperturbationgradient
+approximation. IEEE transactions on automatic control, 37(3):332–341, 1992.
+45[89] A. L. Stolyar. Maxweight scheduling in a generalized switch: State space collapse and work-
+load minimization in heavy traffic. The Annals of Applied Probability, 14(1):1–53, 2004.
+[90] H.J.Suh, M.Simchowitz, K.Zhang, andR.Tedrake. Dodifferentiable simulatorsgive better
+policy gradients? In International Conference on Machine Learning, pages 20668–20696.
+PMLR, 2022.
+[91] R. Suri. Infinitesimal perturbation analysis for general discrete event systems. Journal of the
+ACM (JACM), 34(3):686–717, 1987.
+[92] R. S. Sutton, D. McAllester, S. Singh, and Y. Mansour. Policy gradient methods for rein-
+forcement learning with function approximation. Advances in neural information processing
+systems, 12, 1999.
+[93] L. Tassiulas and A. Ephremides. Stability properties of constrained queueing systems and
+scheduling policies for maximum throughput in multihop radio networks. In 29th IEEE
+Conference on Decision and Control, pages 2130–2132. IEEE, 1990.
+[94] The AnyLogic Company. Anylogic simulation software. https://www.anylogic.com, 2024.
+Accessed: 2024-06-05.
+[95] T. H. Tran, L. M. Nguyen, and K. Scheinberg. Finding optimal policy for queueing models:
+New parameterization. arXiv preprint arXiv:2206.10073, 2022.
+[96] G. Tucker, A. Mnih, C. J. Maddison, J. Lawson, and J. Sohl-Dickstein. Rebar: Low-variance,
+unbiased gradient estimates for discrete latent variable models. Advances in Neural Informa-
+tion Processing Systems, 30, 2017.
+[97] A. Van Den Oord, O. Vinyals, et al. Neural discrete representation learning. Advances in
+neural information processing systems, 30, 2017.
+[98] N. Walton and K. Xu. Learning and information in stochastic networks and queues. In
+Tutorials in Operations Research: Emerging Optimization Methods and Modeling Techniques
+with Applications, pages 161–198. INFORMS, 2021.
+[99] L.WeaverandN.Tao. Theoptimalrewardbaselineforgradient-basedreinforcementlearning.
+arXiv preprint arXiv:1301.2315, 2013.
+[100] H. Wei, X. Liu, W. Wang, and L. Ying. Sample efficient reinforcement learning in mixed
+systems through augmented samples and its applications to queueing networks. Advances in
+Neural Information Processing Systems, 36, 2024.
+[101] R. J. Williams. Simple statistical gradient-following algorithms for connectionist reinforce-
+ment learning. Machine learning, 8:229–256, 1992.
+46A Training Details
+PPO WC was trained over 100 episodes, each consisting of 50,000 environment steps parallelized
+over 50 actors. We closely follow the hyper-parameters and training setup as in [26]. We used a
+discount factor of 0.998, a GAE [83] parameter of 0.99, and set the Kullback–Leibler divergence
+penalty as 0.03. For the value network, we used a batch size of 2,500, while for the policy network,
+we used the entire rollout buffer (batch size of 50,000) to take one gradient step. We performed
+3 PPO gradient updates on the same rollout data. For all the experiments, we used the Adam
+optimizer with a cosine decaying warming-up learning rate scheduler. The learning rates were set
+to 3×10−4 for the value network and 9×10−4 for the policy network. We used 3% of the training
+horizon to warm up to the maximum learning rate and then cosine decayed to 1×10−5 for both
+networks. We used the same neural network architecture as those in [26], see Appendix E of [26]
+for more details.
+For the PATHWISE policy gradient, we used the same hyperparameters across all experiments.
+We use an inverse temperature of β = 10 for the softmax relaxation of the event selection. We
+updatethepolicyaftereveryepisodewiththeAdamoptimizer, usingconstantstep-sizeof5×10−4,
+momentumparameters(0.8,0.9), andgradientclippingof1. Forthepolicyneuralnetwork, weused
+a multilayer perceptron with 3 hidden layers, each hidden layer consisting of 128 hidden units. We
+use the work-conserving softmax for the final output.
+B Proofs
+B.1 Proof of Theorem 1
+We focus on the case where x ≥ 1. Then,
+k
+x = x +1{τA < w /µ}−1{τA > w /µ}
+k+1 k k k k k
+e−βτ kA e−βw k/µ
+= x + −
+k e−βτ kA +e−βw k/µ e−βτ kA +e−βw k/µ
+e−βτ kA −e−βw k/µ
+= x + .
+k e−βτ kA +e−βw k/µ
+Since the inter-arrival times and workloads are exponentially distributed, by the memoryless prop-
+erty, we have τA ∼ Exp(λ) and w ∼ Exp(1).
+k k
+The true gradient is
+d d λ−µ 2λ
+E[x −x ] = = − .
+dµ k+1 k dµλ+µ (λ+µ)2
+Under our softmin approximation for the event-selection, we have
+β
+(cid:34) (cid:35)
+E
+d e−βτ kA −e−βw k/µ
+dµe−βτ kA +e−βw k/µ
+(cid:34) (cid:35)
+= E −2β
+e−β(τ kA+w k/µ) w
+k
+(e−βτ kA +e−βw k/µ)2 µ2
+(cid:34) (cid:32) (cid:33)(cid:35)
+=
+−2β
+E τS
+eβ(τ kA−τ kS)
+1{τA < τS}+
+eβ(τ kS−τ kA)
+1{τA > τS} ,
+µ k (eβ(τ kA−τ kS)+1)2 k k (eβ(τ kS−τ kA)+1)2 k k
+47for τS = w /µ. Next, note that
+k k
+(cid:34) (cid:35)
+E τS
+eβ(τ kA−τ kS)
+1{τA < τS}
+k (eβ(τ kA−τ kS)+1)2 k k
+(cid:34) (cid:34) (cid:35)(cid:12) (cid:35)
+= E E τS
+eβ(τ kA−τ kS)
+1{τA < τS}
+(cid:12)
+(cid:12)τA = t
+k (eβ(τ kA−τ kS)+1)2 k k (cid:12)
+(cid:12)
+k
+(cid:34) (cid:34) (cid:12) (cid:35) (cid:35)
+= E E τS
+eβ(t−τ kS) (cid:12)
+(cid:12)τA = t,τS > t P(τS > t|τA = t)
+k (eβ(t−τ kS)+1)2(cid:12)
+(cid:12)
+k k k k
+(cid:34) (cid:34) (cid:35) (cid:35)
+e−βS′
+= E E (t+S′) P(τS > t|τA = t) for S′ ∼ Exp(µ)
+(e−βS′ +1)2 k k
+= E(cid:2) (tA(β,µ)+B(β,µ))P(τS > t|τA = t)(cid:3)
+k k
+(cid:104) (cid:105)
+= E (τ kAA(β,µ)+B(β,µ))e−µτ kA
+λ λ
+= A(β,µ)+ B(β,µ)
+(λ+µ)2 (λ+µ)
+where
+(cid:16) (cid:16) (cid:17) (cid:16) (cid:17)(cid:17)
+µ β−µH µ +µH µ − 1
+2β 2β 2
+A(β,µ) =
+2β2
+ 
+µ µ2   (cid:18) µ 1(cid:19) (cid:18) µ (cid:19) 
+= + H − −H 
+2β 2β2  2β 2 2β 
+ 
+(cid:124) (cid:123)(cid:122) (cid:125)
+H˜(β,µ)
+(cid:18) (cid:18) (cid:19) (cid:18) (cid:19) (cid:18) (cid:19) (cid:18) (cid:19)(cid:19)
+µ µ µ 1 β +µ 2β +µ
+B(β,µ) = 2βH −2βH − −µψ(1) +µψ(1)
+4β3 2β 2β 2 2β 2β
+ 
+= − µ H˜(β,µ)+ µ2   ψ(1)(cid:18) 2β +µ(cid:19) −ψ(1)(cid:18) β +µ(cid:19)  
+2β2 4β3  2β 2β 
+ 
+(cid:124) (cid:123)(cid:122) (cid:125)
+ψ˜(1)(β,µ)
+Moreover, note that
+(cid:18) (cid:19) (cid:18) (cid:19)
+µ µ
+H = ψ(0) +1 +γ
+2β 2β
+(cid:18) (cid:19) (cid:18) (cid:19)
+µ 1 µ 1
+H − = ψ(0) + +γ
+2β 2 2β 2
+Note that
+(cid:18) (cid:19) (cid:18) (cid:19) (cid:18) (cid:19)
+µ µ 1 µ 1
+H −H − = log +1 +
+2β 2β 2 2β µ +1
+2β
+(cid:18) (cid:19)
+µ 1 1
+−log + + .
+2β 2 µ +1
+2β
+48Similarly,
+(cid:34) (cid:35)
+E τS
+eβ(τ kS−τ kA)
+1{τA > τS}
+k (eβ(τ kS−τ kA)+1)2 k k
+(cid:34) (cid:34) (cid:12) (cid:35)(cid:35)
+= E E s
+e−β(τ kA−s)
+1{τA >
+s}(cid:12)
+(cid:12)τS = s
+(e−β(τ kA−s)+1)2 k (cid:12)
+(cid:12)
+k
+(cid:34) (cid:34) (cid:12) (cid:35) (cid:35)
+= E E s
+e−β(τ kA−s) (cid:12)
+(cid:12)τA > s,τS = s P(τA > s|τS = s)
+(e−β(τ kA−s)+1)2(cid:12)
+(cid:12)
+k k k k
+(cid:34) (cid:34) (cid:35) (cid:35)
+e−βT′
+= E E s P(τA > s|τS = s) for T′ ∼ Exp(λ)
+(e−βT′ +1)2 k k
+(cid:104) (cid:105)
+= E τ kSA(β,λ)e−λτ kS
+µ
+= A(β,λ).
+(λ+µ)2
+Then,
+(cid:34) (cid:32) (cid:33)(cid:35)
+−2β
+E τS
+eβ(τ kA−τ kS)
+1{τA < τS}+
+eβ(τ kS−τ kA)
+1{τA > τS}
+µ k (eβ(τ kA−τ kS)+1)2 k k (eβ(τ kS−τ kA)+1)2 k k
+(cid:18) (cid:19)
+β λ λ µ
+= −2 A(β,µ)+ B(β,µ)+ A(β,λ)
+µ (λ+µ)2 (λ+µ) (λ+µ)2
+(cid:18) (cid:19)
+β λA(β,µ)+µA(β,λ) λ
+= −2 + B(β,µ)
+µ (λ+µ)2 (λ+µ)
+(cid:32) (cid:33)
+−2λ 2β λµ2H˜(β,µ)+µλ2H˜(β,λ) λµ λ µ2
+= − − H˜(β,µ)+ ψ˜(1)(β,µ) .
+(λ+µ)2 µ 2β2(λ+µ)2 2β2(λ+µ) (λ+µ)4β3
+Note that as β → ∞,
+(cid:18) (cid:19)
+1
+lim H˜(β,µ) = γ +ψ(0) ,
+β→∞ 2
+π2
+lim ψ˜(1)(β,µ) = − .
+β→∞ 3
+This means that the leading order term is O(1/β2). In particular,
+(cid:32) (cid:33)
+2β λµ2H˜(β,µ)+µλ2H˜(β,λ) λµH˜(β,µ) π2λ2(µ−λ)
+− − ∼
+µ 2β2(λ+µ)2 2β2(λ+µ) 6β2(λ+µ)2
+Finally, we have the second-order term
+2β λ µ2 π2λµ
+− ψ˜(1)(β,µ) ∼ .
+µ (λ+µ)4β3 6β2(λ+µ)
+Thus, we have the following characterization of the bias:
+(cid:34) (cid:35)
+E
+d e−βτ kA −e−βw k/µ −(cid:18) −2λ (cid:19)
+∼
+1 π2λ(µ2−λ2+2µλ) +o(cid:18) 1 (cid:19)
+dµe−βτ kA +e−βw k/µ (λ+µ)2 β2 6(λ+µ)2 β2
+49For variance, we have
+ 
+(cid:32) (cid:33)2
+E  −2β
+eβ(τ kA+w k/µ) w
+k 
+(eβτ kA +eβw k/µ)2 µ2
+ 
+=
+E4β2 e2β(τ kA+τ kS)
+τS,2
+ µ2 (cid:16) (cid:17)4 k 
+eβτ kA +eβτ kS
+  
+=
+4β2
+EτS,2
+e2β(τ kA+τ kS)
+1{τA < τS}+
+e2β(τ kA+τ kS)
+1{τA > τS}
+µ2  k (cid:16) (cid:17)4 k k (cid:16) (cid:17)4 k k 
+eβτ kA +eβτ kS eβτ kA +eβτ kS
+  
+=
+4β2
+EτS,2
+e2β(τ kA−τ kS)
+1{τA < τS}+
+e2β(τ kS−τ kA)
+1{τA > τS}.
+µ2  k (cid:16) (cid:17)4 k k (cid:16) (cid:17)4 k k 
+eβ(τ kA−τ kS)+1 eβ(τ kS−τ kA)+1
+Note that
+ 
+EτS,2
+e2β(τ kA−τ kS)
+1{τA < τS}
+ k (cid:16) (cid:17)4 k k 
+eβ(τ kA−τ kS)+1
+  (cid:12) 
+(cid:12)
+= EEτS,2
+e2β(τ kA−τ kS)
+1{t <
+τS}(cid:12)
+(cid:12)τA = t
+  k (cid:16) (cid:17)4 k (cid:12) k 
+eβ(τ kA−τ kS)+1 (cid:12)
+(cid:12)
+(cid:34) (cid:34) (cid:35) (cid:35)
+e−2βS′
+= E E (t+S′)2 P(τS > t|τA = t) for S′ ∼ Exp(µ)
+(e−βS′ +1)4 k k
+(cid:34) (cid:34) (cid:35) (cid:35)
+e−2βS′
+= E E (t2+2S′+S′2) P(S > t|T = t)
+(e−βS′ +1)4 i i
+(cid:104)(cid:16) (cid:17) (cid:105)
+= E t2A˜(β,µ)+tB˜(β,µ)+C˜(β,µ) P(S > t|T = t)
+i i
+(cid:104)(cid:16) (cid:17) (cid:105)
+= E T2A˜(β,µ)+T B˜(β,µ)+C˜(β,µ) e−µTi
+i i
+2λ λ λ
+= A˜(β,µ)+ B˜(β,µ)+ C˜(β,µ).
+(λ+µ)3 (λ+µ)2 (λ+µ)
+Similarly,
+ 
+EτS,2
+e2β(τ kS−τ kA)
+1{τA > τS}
+ k (cid:16) (cid:17)4 k k 
+eβ(τ kS−τ kA)+1
+  (cid:12) 
+(cid:12)
+= EEs2
+e2β(s−τ kA)
+1{τA >
+s}(cid:12)
+(cid:12)τS = s
+  (cid:16) (cid:17)4 k (cid:12) k 
+eβ(s−τ kA)+1 (cid:12)
+(cid:12)
+50(cid:34) (cid:34) (cid:35) (cid:35)
+= E E s2
+e−2β(τ kA−s)
+|τA > s,τS = s P(τA > s|τS = s)
+(e−β(τ kA−s)+1)4 k k k k
+(cid:34) (cid:34) (cid:35) (cid:35)
+e−2βT′
+= E E s2 P(τA > s|τS = s) for T′ ∼ Exp(λ)
+(e−βT′ +1)4 k k
+(cid:104) (cid:105)
+= E A˜(β,λ)τS,2e−λτ kS
+k
+2µ
+= A˜(β,λ).
+(λ+µ)2
+Putting the above two parts together, we have
+  
+4β2
+EτS,2
+e2β(τ kA−τ kS)
+1{τA < τS}+
+e2β(τ kS−τ kA)
+1{τA > τS}
+µ2  k (cid:16) (cid:17)4 k k (cid:16) (cid:17)4 k k 
+eβ(τ kA−τ kS)+1 eβ(τ kS−τ kA)+1
+4β2 (cid:18) 2λ λ λ 2µ (cid:19)
+= A˜(β,µ)+ B˜(β,µ)+ C˜(β,µ)+ A˜(β,λ)
+µ2 (λ+µ)3 (λ+µ)2 (λ+µ) (λ+µ)2
+4βλ
+∼ as β → ∞.
+3µ(λ+µ)2
+B.2 Proof of Theorem 2
+By assumption, h ≤ c(µ−λ) for some c < 1. First, we develop bound for Var (∇ˆRJ (θ;ξ )).
+∞ N 1:N
+We can compute the variance by conditioning on the value of Y:
+(cid:20) (cid:18) (cid:19)(cid:21)
+1 1
+Var (Qˆ (µ−hY)·(logY − )) = E Var Qˆ (µ−hy)(logy− )|Y = y
+∞ N ∞ N
+θ θ
+(cid:18) (cid:20) (cid:21)(cid:19)
+1
++Var E Qˆ (µ−hy)(logy− )|Y = y) .
+N
+θ
+For the first term, note that the asymptotic variance in the CLT for the ergodic estimator Qˆ (µ)
+N
+is Var (Qˆ(µ)) = 2ρ(1+ρ) . Then, we have Var (Qˆ (µ)) = 2ρ(1+ρ) . Since h ≤ µ, Var (Qˆ (µ)) =
+∞ (1−ρ)4 ∞ N N(1−ρ)4 ∞ N
+2ρ(1+ρ)
+. Then,
+N(1−ρ)4
+(cid:20) (cid:18) (cid:19)(cid:21)
+1
+E Var Qˆ (µ−hy)·(logy+ )|Y = y
+∞ N
+θ
+(cid:20) (cid:21)
+1
+= E (logy+ )2Var (Qˆ (µ−hy)|Y = y)
+∞ N
+θ
+(cid:20) (cid:21)
+1 2ρ(1+ρ)
+≥ E (logY + )2
+θ N(1−ρ)4
+=
+1 2ρ(1+ρ)
+=
+Θ(cid:0) (1−ρ)−4(cid:1)
+,
+θ2N(1−ρ)4
+where the last equality uses the fact that for Y ∼ Beta(θ,1),
+1
+E[logY] = ψ(θ)−ψ(θ+1) = −
+θ
+51and
+(cid:20) (cid:21)
+1 1
+E (logY + )2 = Var(logY) = ψ (θ)−ψ (θ+1) = .
+θ 1 1 θ2
+For the second term, we plug in the true estimand as the expectation of Q (µ), i.e. Q(µ) = λ .
+N µ−λ
+Then,
+(cid:18) (cid:20) (cid:21)(cid:19)
+1
+Var E Qˆ (µ−hy)(logy+ )|Y = y)
+N
+θ
+(cid:18) (cid:18) (cid:19)(cid:19)
+λ 1
+= Var logY +
+µ−hY −λ θ
+(cid:34) (cid:35)
+(cid:18)
+λ
+(cid:19)2(cid:18) 1(cid:19)2 (cid:20)(cid:18)
+λ
+(cid:19)(cid:18) 1(cid:19)(cid:21)2
+= E logY + −E logY + .
+µ−hY −λ θ µ−hY −λ θ
+We proceed to evaluate these expectations analytically.
+(cid:20)(cid:18) (cid:19)(cid:18) (cid:19)(cid:21)
+λ 1
+E logY +
+µ−hY −λ θ
+(cid:18) (cid:18) (cid:19) (cid:18) (cid:19)(cid:19)
+ρ Γ(θ) h h
+= F2 1,θ,1+θ, −θΦ ,2,θ
+1−ρ Γ(1+θ) 1 µ−λ µ−λ
+= O((1−ρ)−1),
+where F2 is the Hypergoemetric 2F1 function and Φ is the Lerch transcendental function. We also
+1
+have
+(cid:34) (cid:35)
+(cid:18)
+λ
+(cid:19)2(cid:18) 1(cid:19)2
+E logY +
+µ−hY −λ θ
+λ2 (cid:18) (cid:18) h (cid:19) (cid:18) h (cid:19)
+= 2(µ−λ)+hθ3Φ ,2,θ+1 +hθ3(θ−1)Φ ,3,θ+1
+θ2(µ−λ)3 µ−λ µ−λ
+(cid:18) (cid:19)
+µ−λ h
++(µ−λ) θ −(θ−1)F2(1,θ,1+θ, )
+µ−h−λ 1 µ−λ
+(cid:18) (cid:19)(cid:19)
+h
++2(µ−λ)F3 (2,θ,θ),(1+θ,1+θ),
+2 µ−λ
+= O((1−ρ)−2).
+Taking the difference between the above two parts under the limit as (1−ρ) → 0, we have
+(cid:18) (cid:18) (cid:19)(cid:19)
+λ 1
+Var logY + = O((1−ρ)−2).
+µ−hY −λ θ
+Next, we develop a bound for Var (∇ˆJ (θ;ξ )).
+∞ N 1:N
+(cid:18) (cid:18) (cid:19)(cid:19) (cid:20) (cid:18) (cid:18) (cid:19) (cid:19)(cid:21)
+1 1
+Var h·∇ˆQ (µ−hY) Y logY = E Var h·∇ˆQ (µ−hY) Y logY |Y = y
+∞ N ∞ N
+θ θ
+(cid:18) (cid:20) (cid:18) (cid:19) (cid:21)(cid:19)
+1
++Var E h·∇ˆQ (µ−hY) Y logY |Y = y
+N
+θ
+For the first term, we can use the fact that |Y logY| ≤ 1/e almost surely since Y ∈ [0,1]. We also
+52use recent results in [54], which compute the asymptotic variance of the IPA estimator:
+1+16ρ+27ρ2+2ρ3+6ρ4
+Var (∇ˆQ (µ)) = ≤ 52µ−2N−1(1−ρ)−5
+∞ N µ2N(1+ρ)(1−ρ)5
+Under µ − hy, the congestion factor 1 − λ = µ−hy−λ ≥ µ−cy(µ−λ)−λ = (1 − cy)(1 − ρ) and
+µ−hy µ−hy µ
+µ−hy ≥ µ−h ≥ (1−c)µ. So we have the bound,
+(cid:18) (cid:18) (cid:19) (cid:19)
+1
+Var h∇ˆQ (µ−hY) ylogy |Y = y
+∞ N
+θ
+≤ h2θ−2(ylogy)2Var (∇ˆQ (µ−hy))
+∞ N
+≤ h2µ−2θ−2e−252N−1(1−c)−7(1−ρ)−5
+= O(N−1h2µ−2(1−ρ)−5)
+= O(N−1(1−ρ)−3)
+since h = O(1−ρ).
+For the second term, we plug in the true estimand as the mean of ∇ˆQ (µ), i.e., ∇Q(µ) =
+N
+− ρ ,
+µ(1−ρ)2
+(cid:20) (cid:18) (cid:19) (cid:21)
+1 1 λ
+E h·∇ˆQ (µ−hY) Y logY |Y = y = −h (ylogy) .
+N θ θ (µ−hy−λ)2
+We next evaluate the variance analytically,
+(cid:18) (cid:19)
+1 λ
+Var −h (Y logY)
+θ (µ−hY −λ)2
+(cid:34) (cid:35)
+(cid:18)
+1 λ
+(cid:19)2 (cid:20)
+1 λ
+(cid:21)2
+= E −h (Y logY) −E −h (Y logY)
+θ (µ−hY −λ)2 θ (µ−hY −λ)2
+Since
+(cid:20) (cid:21)
+1 λ
+E −h (Y logY)
+θ (µ−hY −λ)2
+(cid:18) (cid:19)
+h λ h
+= F3 (2,1+θ,1+θ),(2+θ,2+θ),
+(1+θ)2(µ−λ)2 2 µ−λ
+= O((1−ρ)−1)
+and
+(cid:34) (cid:35)
+(cid:18)
+1 λ
+(cid:19)2
+E −h (Y logY)
+θ (µ−hY −λ)2
+λ2 (cid:18) (cid:18) h (cid:19)
+= 2hθ2Γ(θ)3Γ(2+θ)−3 × F4 (3,1+θ,1+θ,1+θ),(2+θ,2+θ,2+θ),
+(µ−λ)2 3 µ−λ
+(cid:18) (cid:19)(cid:19)
+h
+−F4 (4,1+θ,1+θ,1+θ),(2+θ,2+θ,2+θ),
+3 µ−λ
+= O((1−ρ)−2),
+we have
+(cid:18) (cid:19)
+1 λ
+Var −h (Y logY) = O((1−ρ)−2).
+θ (µ−hY −λ)2
+53B.3 Proof of Corollary 2
+First, we can explicitly characterize the optimal baseline:
+E[Q(µ−hY)∇ logπ (Y)2]
+b∗ = θ θ
+E[∇ logπ (Y)2]
+θ θ
+E[Q(µ−hY)(logY +1/θ)2]
+=
+E[(logY +1/θ)2]
+(cid:20) (cid:18) (cid:19) (cid:18) (cid:19) (cid:18) (cid:19)(cid:21)
+λ h h h h
+= F2 1,θ,1+θ, −2θ2Φ ,2,θ +2 θ3Φ ,3,1+θ
+µ−λ 1 µ−λ µ−λ µ−λ µ−λ
+(cid:124) (cid:123)(cid:122) (cid:125)
+b(θ)
+= O((1−ρ)−1).
+Next, we plug this into the REINFORCE estimator.
+(cid:20) (cid:18) (cid:19)(cid:21)
+1 1
+Var ((Qˆ (µ−hY)−b∗)·(logY − )) = E Var (Qˆ (µ−hy)−b∗)(logy− )|Y = y
+∞ N ∞ N
+θ θ
+(cid:18) (cid:20) (cid:21)(cid:19)
+1
++Var E (Qˆ (µ−hy)−b∗)(logy− )|Y = y .
+N
+θ
+Note that since b∗ is a constant, the first term, i.e., the mean of the conditional variance given Y,
+has the same value as in Theorem 2. For the second term, note that since h = c(µ−λ),
+(cid:20)(cid:18) (cid:19)(cid:18) (cid:19)(cid:21)
+λ 1
+Var −b∗ logY +
+µ−hY −λ θ
+(cid:18)
+λ
+(cid:19)2 (cid:20)(cid:18)
+1
+(cid:19)(cid:18) 1(cid:19)(cid:21)
+= Var −b(θ) logY + .
+µ−λ 1−cY θ
+(cid:104)(cid:16) (cid:17) (cid:105)
+Since Var 1 −b(θ) (cid:0) logY + 1(cid:1) > 0 and doesn’t depend on µ or λ, this confirms that the
+1−cY θ
+second term is Θ((1−ρ)−2)
+54
