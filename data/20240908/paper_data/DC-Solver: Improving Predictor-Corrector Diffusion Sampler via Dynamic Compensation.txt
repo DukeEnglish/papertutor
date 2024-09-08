@@ -1,0 +1,1538 @@
+DC-Solver: Improving Predictor-Corrector
+Diffusion Sampler via Dynamic Compensation
+Wenliang Zhao , Haolin Wang , Jie Zhou , and Jiwen Lu ⋆
+1 Department of Automation, Tsinghua University, China
+2 Beijing National Research Center for Information Science and Technology, China
+zhaowl20@mails.tsinghua.edu.cn, wanghowlin@gmail.com,
+{jzhou,lujiwen}@tsinghua.edu.cn
+Abstract. Diffusion probabilistic models (DPMs) have shown remark-
+able performance in visual synthesis but are computationally expensive
+due to the need for multiple evaluations during the sampling. Recent
+predictor-corrector diffusion samplers have significantly reduced the re-
+quirednumberoffunctionevaluations(NFE),butinherentlysufferfrom
+a misalignment issue caused by the extra corrector step, especially with
+alargeclassifier-freeguidancescale(CFG).Inthispaper,weintroducea
+newfastDPMsamplercalledDC-Solver,whichleveragesdynamiccom-
+pensation (DC) to mitigate the misalignment of the predictor-corrector
+samplers. The dynamic compensation is controlled by compensation ra-
+tiosthatareadaptivetothesamplingstepsandcanbeoptimizedononly
+10datapointsbypushingthesamplingtrajectorytowardagroundtruth
+trajectory. We further propose a cascade polynomial regression (CPR)
+whichcaninstantlypredictthecompensationratiosonunseensampling
+configurations.Additionally,wefindthattheproposeddynamiccompen-
+sationcanalsoserveasaplug-and-playmoduletoboosttheperformance
+ofpredictor-onlysamplers.Extensiveexperimentsonbothunconditional
+samplingandconditionalsamplingdemonstratethatourDC-Solvercan
+consistentlyimprovethesamplingqualityoverpreviousmethodsondif-
+ferent DPMs with a wide range of resolutions up to 1024×1024. No-
+tably,weachieve10.38FID(NFE=5)onunconditionalFFHQand0.394
+MSE (NFE=5, CFG=7.5) on Stable-Diffusion-2.1. Code is available at
+https://github.com/wl-zhao/DC-Solver.
+Keywords: Diffusion Model · Fast Sampling · Visual Generation
+1 Introduction
+Diffusion probabilistic models (DPMs) [8,29,34,37] have emerged as the new
+state-of-the-art generative models, demonstrating remarkable quality in vari-
+ousvisualsynthesistasks[3–7,10,17,22–25,27–30,33,39,43].Recentadvancesin
+large-scalepre-trainingofDPMsonimage-textpairsalsoallowthegenerationof
+⋆ Corresponding author
+4202
+peS
+5
+]VC.sc[
+1v55730.9042:viXra2 W. Zhao et al.
+(a)Searchingforthedynamiccompensation(DC)ratio𝜌𝑖 (b)SamplingwithDC-Solverusingsearched𝜌𝑖∗orpredicted𝜌ො𝑖∗
+𝑥𝑡0 𝑥𝑡G 𝑖T
++1
+𝑥0GT 𝜌ො𝑖∗=CPRNFE,CFG,𝑖𝜙1 Equ.(9-11)
+GTtrajectoryon10datapoints 𝜌𝑖∗=arg 𝜌m 𝑖in𝔼 𝑥෤𝑡c 𝑖+1−𝑥𝑡G 𝑖T
++1
+22 𝜌𝑖←𝜌𝑖∗or𝜌𝑖←𝜌ො𝑖∗
+𝑥𝑡0 𝑥෤𝑡c
+𝑖
+𝑥෤𝑡c
+𝑖+1
+𝑥෤0c 𝑥𝑡0 𝑥෤𝑡c 𝑖 𝑥෤𝑡c 𝑖+1 𝑥෤0c
+𝑄𝜌𝑖
+𝑥෤𝑡𝑖+1
+𝑄𝜌𝑖 𝜖𝑡Ƹ𝜌 𝑖𝑖=DC 𝜖 E𝑡Ƹ𝜌
+𝑖
+q𝑖 −∗ − u22 ., (𝜖 6𝑡Ƹ𝜌 )𝑖𝑖 −∗ − 11,𝜖𝜃,𝑡𝑖|𝜌𝑖
+𝑄𝜌𝑖
+𝑥෤𝑡𝑖+1
+𝑄𝜌𝑖
+buffer𝑄𝜌𝑖 ⋯ 𝜖 𝑡Ƹ𝜌 𝑖𝑖 −∗ − 22 𝜖 𝑡Ƹ𝜌 𝑖𝑖 −∗ − 11 𝜖𝑡Ƹ𝜌 𝑖𝑖 ⋯ Predictor Corrector 𝜖𝜃,𝑡𝑖≔𝜖𝜃 𝑥෤𝑡𝑖,𝑡𝑖
+Fig.1: The main idea of DC-Solver. (a) Searching. We propose dynamic com-
+pensation(DC)tomitigatethemisalignmentissueinthepredictor-correctordiffusion
+sampler. The compensation is controlled by the ratios {ρ } which are adaptive to the
+i
+sampling step and can be optimized by pushing the sampling trajectory toward the
+groundtruthtrajectoryononly10datapoints.(b) Sampling.Thecompensationra-
+tios can be either efficiently searched as in (a) or instantly predicted by the cascade
+polynomial regression (CPR) given the desired NFE and CFG.
+high-fidelity images given the text prompts [29]. However, sampling from DPMs
+requires gradually performing denoising from Gaussian noises, leading to multi-
+ple evaluations of the denoising network ϵ , which is computationally expensive
+θ
+and time-consuming. Therefore, it is of great interest to design fast samplers
+of DPMs [20,21,44,46] to improve the sampling quality with few numbers of
+function evaluations (NFE).
+Recent efforts on accelerating the sampling of DPMs can be roughly di-
+vided into training-based methods [18,26,31,36,40] and training-free meth-
+ods[16,20,21,35,44–46].Thelatterfamiliesofapproachesaregenerallypreferred
+in applications because they can be applied to any pre-trained DPMs without
+theneedforfine-tuningordistillingthedenoisingnetwork.Moderntraining-free
+DPM samplers [20,21,44,46] mainly focus on solving the diffusion ODE instead
+of SDE [1,8,37,45], since the stochasticity would deteriorate the sampling qual-
+ity with few NFE. Specifically, [21,44] adopt the exponential integrator [12] to
+significantly reduce the approximation error of the sampling process. More re-
+cently, Zhao et al. [46] proposed a predictor-corrector framework called UniPC,
+which can enhance the sampling quality without extra model evaluations. How-
+ever,theextracorrectorstepwillcauseamisalignmentbetweentheintermediate
+correctedresultx˜c andthereusedmodeloutputϵ (x˜ ,t ).Theinfluenceofthe
+ti θ ti i
+misalignment has been witnessed in an analysis of UniPC [46], and it has been
+proven that re-computing the ϵ (x˜c ,t ) to ensure the alignment is indeed ben-
+θ ti i
+eficial. However, naively re-computing ϵ (x˜c ,t ) would bring extra evaluations
+θ ti i
+of the ϵ and double the total computational costs.
+θ
+In this paper, we propose a new fast sampler for DPMs called DC-Solver,
+whichleveragesdynamiccompensation(DC)tomitigatethemisalignmentissue
+in the predictor-corrector framework. Specifically, we adopt the Lagrange inter-
+polation of previous model outputs at a new timestep, which is controlled by aDC-Solver 3
+(a) DPM-Solver++[21] (b) DEIS[44] (c) UniPC[46] (d) DC-Solver(Ours)
+(MSE0.443) (MSE0.436) (MSE0.434) (MSE0.394)
+Fig.2:QualitativecomparisonsonStable-Diffusion-2.1.Imagesabovearesam-
+pledfromSD2.1(768×768)usingthetextprompt“Aphotoofaserenecoastalcliffwith
+waves crashing against the rocks below" with a classifier-free guidance scale of 7.5 and
+only 5 number of function evaluations (NFE). We provide the generated images from
+4 random initial noises for each method. We show that DC-Solver is able to generate
+high-resolution and photo-realistic images with more details. Best viewed in color.
+learned compensation ratio ρ∗. The compensation ratios are optimized by mini-
+i
+mizing the ℓ -distance between the intermediate sampling results and a ground
+2
+truthtrajectory,whichcanbeachievedinlessthan5minononly10datapoints.
+By examining the learned compensation ratios on different numbers of function
+evaluations (NFE) and classifier-free guidance scale (CFG), we further propose
+a cascade polynomial regression (CPR) that can instantly predict the desired
+compensation ratios on unseen NFE/CFG. Equipped with CPR, our DC-Solver
+allows users to freely adjust the configurations of CFG/NFE and substantially
+accelerates the sampling process. We also illustrate our method in Figure 1.
+We perform extensive experiments on both unconditional sampling and con-
+ditionalsamplingtasks,whereweshowthatDC-Solverconsistentlyoutperforms
+previous methods by large margins in 5∼10 NFE. In the experiments on the
+state-of-the-art Stable-Diffusion [29] (SD), we find DC-Solver can obtain the
+best sampling quality on different CFG (1.5∼7.5), NFE (5∼10) and pre-trained
+models (SD1.4, SD1.5, SD2.1, SDXL). Notably, DC-Solver achieves 0.394 MSE
+on SD2.1 with a guidance scale of 7.5 and only 5 NFE. By performing the cas-
+cade polynomial regression to the compensation ratios searched on only a few
+configurations, our DC-Solver can generalize to unseen NFE/CFG and surpass
+previousmethods.Besides,wefindtheproposeddynamiccompensationcanalso
+serve as a plug-and-play component to boost the performance of predictor-only
+solvers like [21,35]. We provide some qualitative comparisons between our DC-
+Solver and previous methods in Figure 2, where it can be clearly observed that
+DC-Solver can generate high-resolution and photo-realistic images with more
+details in only 5 NFE.
+2 Related Work
+Diffusion probabilistic models.Diffusionprobabilisticmodels(DPMs),orig-
+inallyproposedin[8,34,37],havedemonstratedimpressiveabilityinhigh-fidelity4 W. Zhao et al.
+visual synthesis. The basic idea of DPMs is to train a denoising network ϵ to
+θ
+learnthereverseofaMarkoviandiffusionprocess[8]throughscore-matching[37].
+To reduce the computational costs in high-resolution image generation and add
+more controllability, Rombach et al. [29] propose to learn a DPM on latent
+space and adopt the cross-attention [38] to inject conditioning inputs. Based
+on the latent diffusion models [29], a series of more powerful DPMs called
+Stable-Diffusion [29] are released, which are trained on a large-scale text-image
+datasetLAION-5B[32]andsoonbecomefamousforthehigh-resolutiontext-to-
+imagegeneration.Inpracticalusage,classifier-freeguidance[9](CFG)isusually
+adoptedtoencouragetheadherencebetweenthetextpromptandthegenerated
+image.DespitetheimpressivesynthesisqualityofDPMs,theysufferfromheavy
+computationalcostsduringtheinferenceduetotheneedformultipleevaluations
+ofthedenoisingnetwork.Inthispaper,wefocusondesigningafastsamplerthat
+can accelerate the sampling process of a wide range of DPMs and is suitable to
+different CFG, thus promoting the application of DPMs.
+Fast DPM samplers. Developing fast samplers for DPMs has gained increas-
+ingattractionsincetheprevailingofStableDiffusion[29].Modernfastsamplers
+of DPMs usually work by discretizing the diffusion ODE or SDE. Among those,
+ODE-based methods [20,21,35,46] are shown to be more effective in few-step
+samplingduetotheabsenceofstochasticity.ThewidelyusedDDIM[35]canbe
+viewed as a 1-order approximation of the diffusion ODE. DPM-Solver [20] and
+DEIS [44] adopt exponential integrator to develop high-order solvers and sig-
+nificantly reduce the sampling error. DPM-Solver++ [21] investigates the data-
+prediction parameterization and multistep high-order solver which are proven
+to be useful in practice, especially for conditional sampling. UniPC [46] bor-
+rowsthemeritsofthepredictor-correctorparadigm[11]innumeralanalysisand
+finds the corrector can substantially improve the sampling quality in the few-
+step sampling. However, UniPC [46] suffers from a misalignment issue caused
+by the extra corrector step, which is observed also and mentioned in their orig-
+inal paper. In this work, we aim to mitigate the misalignment through a newly
+proposed approach called dynamic compensation.
+3 Method
+3.1 Preliminaries: Fast Sampling of DPMs
+We start by briefly reviewing the basic ideas of diffusion probabilistic models
+(DPMs) and how to efficiently sample from them. DPMs aim to model the
+data distribution q (x ) by learning the reverse of a forward diffusion process.
+0 0
+Given the noise schedule {α ,σ }T , the diffusion process gradually adds noise
+t t t=0
+to a clean data point x and the equivalent transition can be computed by
+0
+x = α x +σ ϵ,ϵ ∈ N(0,I), and the resulting distribution q (x ) is approx-
+t t 0 t T T
+imately Gaussian. During training, a network ϵ is learned to perform score
+θ
+matching [2] by estimating the ϵ given the current x , timestep t and the condi-
+t
+tion c. Specifically, the training objective is to minimize:
+E (cid:2) w(t)∥ϵ (x ,t,c)−ϵ∥2(cid:3) . (1)
+x0,ϵ,t θ t 2DC-Solver 5
+The above simple objective makes it more stable to train DPMs on large-scale
+image-textpairsandenablesthegenerationofhigh-fidelityvisualcontent.How-
+ever, sampling from DPMs is computationally expensive due to the need for
+multipleevaluationsofthedenoisingnetworkϵ (e.g.,200stepsforDDIM[35]).
+θ
+Modern fast samplers for DPMs [20,21,44] significantly reduce the required
+number of function evaluations (NFE) by solving the diffusion ODE with a
+multistep paradigm, which leverages the model outputs of previous points to
+improve convergence. Recently, UniPC [46] proposes to use a corrector to refine
+theresultateachsamplingstep,whichcanfurtherimprovethesamplingquality.
+Denotethesamplingtimestepsas{t }M andletQbethebuffertostoreprevious
+i i=0
+modeloutputsofthedenoisingnetwork,theupdatelogicofmodernsamplersof
+DPMs from t to t can be summarized as follows:
+i−1 i
+x˜ ←Predictor(x˜c ,Q), (2)
+ti ti−1
+x˜c ←Corrector(x˜ ,ϵ (x˜ ,t ),Q) (optional) (3)
+ti ti θ ti i
+buffer
+Q ← ϵ (x˜ ,t ), (4)
+θ ti i
+where x˜c denote the refined result after the corrector and x˜c = x˜ if no cor-
+ti ti ti
+rector is used as in [21,44].
+3.2 Better Alignment via Dynamic Compensation
+Although the extra corrector step (3) can improve the theoretical convergence
+order,thereexistsamisalignmentbetweenx˜c andϵ (x˜ ,t ),i.e.,theϵ (x˜ ,t )
+ti θ ti i θ ti i
+pushed into the buffer Q is not computed from the corrected intermediate re-
+sult x˜c . It is also witnessed in [46] that replacing the ϵ (x˜ ,t ) with ϵ (x˜c ,t )
+ti θ ti i θ ti i
+(which would bring an extra forward of ϵ ) can further improve the sampling
+θ
+quality. The effects of the misalignment will be further amplified by the large
+guidance scale in the widely used classifier-free guidance [9] (CFG) for condi-
+tional sampling:
+ϵ¯ (x ,t,c)=s·ϵ (x ,t,c)+(1−s)·ϵ (x ,t,), (5)
+θ t θ t θ t
+wheres>1istheguidancescaleands=7.5isusuallyadoptedintext-to-image
+synthesis on Stable-Diffusion [29].
+Dynamic compensation. The aforementioned misalignment issue motivates
+us to seek for a better method to approximate ϵ (x˜c ,t ) after (3) with no extra
+θ ti i
+NFE. To achieve this, we propose a new method called dynamic compensation
+(DC) that leverages the previous model outputs stored in the buffer Q to ap-
+proach the target ϵ (x˜c ,t ). Given a ratio ρ , let t′ = ρ t +(1−ρ )t , we
+θ ti i i i i i i i−1
+adopt the following estimation based on Lagrange interpolation:
+ϵˆρi(x˜c ,t )=(cid:88)K (cid:89) t′ i−t i−l ϵ (x˜ ,t ), (6)
+ti i t −t θ ti−k i−k
+i−k i−l
+k=00≤l≤K
+l̸=k6 W. Zhao et al.
+Algorithm 1 Searching. Algorithm 2 Sampling.
+Require:currenttimestept i,aground Require: sampling timesteps {t i}M i=0,
+lt i enr au te rt nrh m int e gr da rij a ae tc te eto αrr ey ,s nux ulG t t msT b, xN ˜ ec t r, i,N oth f,e ia t( ec rbo aur tr iff oe e nc rt se Q Ld) , . i s bn a yi tt i (i oa 8nl ) on r rao ti dis o ie rs ex c˜ { tc t ρ l0 y∗ i} p∼ M i= re− 0 dN 1 ic( te0 eit, dhI e b) r, ysc (eo 1am 1r )cp .he en d-
+ρ ←1.0, Qcopy ←Q
+i for i=0 to M −1 do
+for l=1 to L do
+if i≥K then
+Qco ρm ip ←ut [e Qϵˆ c [:ρ o −i p 1( y ]x˜ ,c t ϵˆi, ρN i(, xt ˜i c t) i,Nv ,ia t i( )6 ]) Qcom ←pu [Qte [:−ϵˆ 1ρ ]∗ i ,( ϵˆx˜ ρc t ∗ ii (, x˜t i c t) i,v t iia )](6)
+x˜N ←Pred(x˜c,N,Qρi) end if
+ti+1 ti
+xc ti, +N
+1
+←Corr(x˜N ti+1,ϵ θ(x˜N ti,t i),Qρi) x˜
+ti+1
+←Pred(x˜c ti,Q)
+ρ i ←ρ i−α∇ ρi∥xc ti, +N 1 −xG tT,N∥2 2 xc ti+1 ←Corr(x˜ ti+1,ϵ θ(x˜ ti,t i),Q)
+end for end for
+return: ρ i, Qρi return: xc tM
+whereKrepresentstheorderoftheLagrangeinterpolationand{ϵ (x˜ ,t )}K
+θ ti−k i−k k=0
+arepreviousmodeloutputsretrievedfrombufferQ.Theaboveestimationisthen
+used to replace the last item in Q to obtain a new buffer:
+Qρi ←[Q ,ϵˆρi(x˜c ,t )], (7)
+[:−1] ti i
+where Q denotes the elements in Q except the last one. Note that when
+[:−1]
+ρ
+i
+= 1.0 we have ϵˆρi(x˜c ti,t i) = ϵ θ(x˜ ti,t i), which implies that the buffer Q is
+not updated. By varying the ρ i, we can obtain a trajectory of ϵˆρi(x˜c ti,t i) and
+our goal is to find an optimal ρ∗ which can minimize the local error to push
+i
+the sampling trajectory toward the ground truth trajectory. Since the optimal
+compensation ratio ρ∗ is different across the sampling timesteps, we name our
+i
+method dynamic compensation.
+Searching for the optimal ρ∗. The optimal compensation ratios {ρ∗} can be
+i i
+viewed as learnable parameters and optimized through backpropagation. Given
+a DPM, we first obtain ground truth trajectories {xGT} of N initial noises.
+t
+During each sampling step, we minimize the following objective:
+ρ∗ =argminE∥x˜c (x˜c ,Qρi)−xGT ∥2, (8)
+i
+ρi
+ti+1 ti ti+1 2
+where x˜c is computed similar to (2) and (3), and the expectation is approx-
+ti+1
+imated over the N datapoints. The above objective ensures that the local ap-
+proximationerrorontheselectedN datapointsisreducedwithanoptimalcom-
+pensationratioρ∗.WefindinourexperimentsthatN =10issufficientinorder
+i
+to learn the optimal {ρ∗}M which also works well on any other initial noises.
+i i=1
+Besides, we show that both the local and global convergence of DC-Solver are
+guaranteed under mild conditions (see Supplementary). When an optimal ρ∗ is
+i
+searched,wereplacethebufferQwithQρ∗ i andmovetothenextsamplingstep.
+We also list the detailed searching procedure in Algorithm 1.DC-Solver 7
+NFE = 7, CFG = 7.5 NFE = 8, CFG = 7.5 NFE = 9, CFG = 7.5
+2.00 2.00 2.00
+1.75 1.75 1.75
+1.50 1.50 1.50
+1.25 1.25 1.25
+1.00 1.00 1.00
+0.75 0.75 0.75
+0.50 0.50 0.50
+0.25 0.25 0.25
+0.00 0.00 0.00
+0 1 2 3 4 5 6 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 8
+Sampling Step Sampling Step Sampling Step
+(a) CFG=7.5,NFE∈[7,8,9]
+NFE = 10, CFG = 7.5 NFE = 10, CFG = 6.5 NFE = 10, CFG = 5.5
+2.00 2.00 2.00
+1.75 1.75 1.75
+1.50 1.50 1.50
+1.25 1.25 1.25
+1.00 1.00 1.00
+0.75 0.75 0.75
+0.50 0.50 0.50
+0.25 0.25 0.25
+0.00 0.00 0.00
+0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9
+Sampling Step Sampling Step Sampling Step
+(b) NFE=10,CFG∈[7.5,6.5,5.5]
+Fig.3: Relationship between compensation ratios and CFG/NFE. We adopt
+thewidelyusedStable-Diffusion-1.5[29]andsearchfortheoptimalcompensationratios
+fordifferentCFGandNFEandfindthatthecompensationratiosevolvecontinuously
+with the variations in CFG/NFE.
+Sampling with DC-Solver. After obtaining the optimal compensation ratios
+{ρ∗},wecandirectlyapplytheminourDC-Solvertosamplefromthepre-trained
+i
+DPM. Similar to the searching stage, we update the buffer with Qρ∗ i after each
+samplingsteptoimprovethealignmentbetweentheintermediateresultandthe
+model output (see Algorithm 2 for details). Note that the dynamic compensa-
+tion(6)doesnotintroduceanyextraNFE,thustheoverallcomputationalcosts
+are almost unchanged.
+3.3 Generalization to Unseen NFE & CFG
+Although the compensation ratio ρ∗ can be obtained via (8), the optimization
+i
+still requires extra time costs (about 1min for NFE=5). Since the ρ∗ is specifi-
+i
+cally optimized for a diffusion ODE, the optimal choice for ρ∗ is different when
+i
+NFE or CFG varies. This issue would limit the application of conditional sam-
+pling (5), where the users may try different combinations of NFEs and CFGs.
+Therefore, it is vital to design a method to estimate the optimal compensation
+ratioswithoutextratimecostsofsearching.Tothisend,weproposeatechnique
+called cascade polynomial regression that can instantly compute the desired
+compensation ratios given the CFG and NFE.
+Cascade polynomial regression. To investigate how to efficiently estimate
+the compensation ratios, we start by searching for the optimal compensation
+ratios on the widely used Stable-Diffusion-1.5 [29] for different configurations
+of CFG and NFE and plot the relationship between the compensation ratios
+and CFG/NFE in Figure 3. For each configuration, we perform the search for
+oitaR
+noitasnepmoC
+oitaR
+noitasnepmoC
+oitaR
+noitasnepmoC
+oitaR
+noitasnepmoC
+oitaR
+noitasnepmoC
+oitaR
+noitasnepmoC8 W. Zhao et al.
+10 runs and report the averaged results as well as the corresponding standard
+deviation. Our key observation is that the learned optimal compensation ratios
+evolve almost continuously when CFG/NFE changes. Inspired by the shapes of
+the curves in Figure 3, we propose a cascade polynomial regression to directly
+predictthecompensationratios.Formally,definethep-orderpolynomialwiththe
+coefficients ϕ ∈ Rp+1 as f(p)(a|ϕ) = (cid:80)p ϕ aj, we predict the compensation
+j=0 j
+ratios as follows:
+ϕ(2) =f(p1)(NFE|ϕ(1)),0≤j ≤p ,0≤k ≤p (9)
+j,k 1 j,k 3 2
+ϕ(3) =f(p2)(CFG|ϕ(2)),0≤j ≤p (10)
+j 2 j 3
+ρˆ∗ =f(p3)(i|ϕ(3)),2≤i≤NFE−1 (11)
+i 3
+The above formulation indicates that we model the change of compensation
+ratios w.r.t. sampling steps via a polynomial, whose coefficients are determined
+by the CFG, NFE, and the ϕ(1) ∈ R(p3+1)×(p2+1)×(p1+1). As we will show in
+Section4.4,ϕ(1) canbeobtainedbyapplyingtheoff-the-shelfregressiontoolbox
+(suchascurve_fitinscipy)onthepre-computedoptimalcompensationratios
+offewconfigurationsofNFE/CFG.Withcascadepolynomialregression,wecan
+efficientlycomputethecompensationratioswithneglectableextracosts,making
+our DC-Solver more practical in real applications.
+3.4 Discussion
+Recently, a concurrent work DPM-Solver-v3 [47] proposes to learn several co-
+efficients called empirical model statistics (EMS) of the pre-trained model to
+obtain a better parameterization during sampling. Our DC-Solver has several
+distinctive advantages: 1) DPM-Solver-v3 requires extensive computational re-
+sources to optimize and save the EMS parameters (e.g., 1024 datapoints, 11h
+on 8 GPUs, 125MB disk space), while our DC-Solver only needs a scalar com-
+pensation ratio ρ for each step and can be searched more efficiently in both
+i
+time and memory (10 datapoints, <5min on a single GPU). 2) The EMS is
+specific to different CFG, and adjusting CFG requires another training of EMS
+to obtain good results. Our DC-Sovler adopts cascade polynomial regression to
+predict the desired compensation ratios on unseen CFG/NFE instantly. 3) Our
+proposed dynamic compensation is a more general technique that can boost the
+performance of both predictor-only and predictor-corrector samplers.
+4 Experiments
+4.1 Implementation Details
+Our DC-Solver follows the predictor-corrector paradigm by applying the dy-
+namic compensation to UniPC [46]. We set K = 2 in (6) and skip the com-
+pensation when i < K, which is equivalent to ρ = ρ = 1.0. During the
+0 1
+searching stage, we set the number of datapoints N = 10. We use a 999-stepDC-Solver 9
+FFHQ LSUN-Church LSUN-Bedroom
+DPM-Solver++ 18 DPM-Solver++ 18 DPM-Solver++
+30 DEIS 16 DEIS 16 DEIS
+25 UniPC 14 UniPC 14 UniPC
+DC-Solver 12 DC-Solver 12 DC-Solver 20 10 10
+15 8 8
+6 6
+10
+4 4
+5 6 7 8 9 10 5 6 7 8 9 10 5 6 7 8 9 10
+NFE NFE NFE
+Fig.4: Unconditional sampling results. We compare our DC-Solver with previ-
+ous methods on FFHQ [13], LSUN-Church [42], and LSUN-Bedroom [42]. The FID↓
+on different numbers of function evaluations (NFE) is used to measure the sampling
+quality. We show that DC-Solver significantly outperforms other methods, especially
+with few NFE.
+DDIM [35] to generate the ground truth trajectory xGT in the conditional sam-
+t
+plingwhilewefounda200-stepDDIMisenoughforunconditionalsampling.We
+useAdamW [19]tooptimizethe compensationratiosforonly L=40iterations,
+which can be finished in 5min on a single GPU. We use p =p =2 and p =4
+1 2 3
+for the cascade polynomial regression.
+4.2 Main Results
+We perform extensive experiments on both unconditional and conditional sam-
+pling on different datasets to evaluate our DC-Solver. Following common prac-
+tice [21,46], we use FID↓ of the generated images in unconditional sampling
+and MSE↓ between the generated latents and the ground truth latents on 10K
+prompts in conditional sampling. Our experiments demonstrate that our DC-
+Solver achieves better sampling quality than previous methods including DPM-
+Solver++ [21], DEIS [44] and UniPC [46] both qualitatively and quantitatively.
+Unconditional sampling. We start by comparing the unconditional sampling
+quality of different methods. We adopt the widely used latent-diffusion mod-
+els [29] pre-trained on FFHQ [13], LSUN-Bedroom [42], and LSUN-Church [42].
+We use the 3-order version for all the methods and report the FID↓ on 5∼10
+NFE,asshowninFigure4.WefindourDC-Solverconsistentlyoutperformspre-
+viousmethodsondifferentdatasets.Withthedynamiccompensation,DC-Solver
+improves over UniPC significantly, especially with fewer NFE. Compared with
+UniPC,DC-SolverreducestheFIDby8.28,4,51,4.75onFFHQ,LSUN-Church,
+and LSUN-Bedroom respectively when NFE=5.
+Conditionalsampling.WeconductexperimentsonStable-Diffusion-1.5[29]to
+compare the conditional sampling performance of different methods. Following
+common practice [21,46], we report the mean squared error (MSE) between
+the generated latents and the ground truth latents (obtained by a 999-step
+DDIM [35]) on 10K samples. The input prompts for the diffusion models are
+DIF DIF DIF10 W. Zhao et al.
+CFG = 1.5 CFG = 4.5 CFG = 7.5
+0.50
+0.30 DPM-Solver++ DPM-Solver++ 0.80 DPM-Solver++
+0.28 DEIS DEIS DEIS
+UniPC 0.45 UniPC 0.75 UniPC
+00 .. 22 46 DC-Solver 0.40 DC-Solver 0.70 DC-Solver
+0.22 0.65
+0.20 0.35 0.60
+0.18 0.55
+0.16 0.30
+0.50
+5 6 7 8 9 10 5 6 7 8 9 10 5 6 7 8 9 10
+NFE NFE NFE
+Fig.5:Conditionalsamplingresults.Wecomparethesamplingqualityofdifferent
+methodsusingtheStable-Diffusion-1.5withclassifier-freeguidance(CFG)varyingfrom
+1.5to7.5.Thesamplingqualityismeasuredbythemeansquarederror(MSE↓)between
+the generated latents and the ground truth latents obtained by a 999-step DDIM. We
+randomly select 10K captions from MS-COCO2014 as the text prompts. We observe
+that DC-Solver consistently achieves better sampling quality on different NFE/CFG.
+randomly sampled from MS-COCO2014 validation dataset [15]. Apart from the
+default guidance scale CFG for Stable-Diffusion-1.5, we also conducted exper-
+iments with CFG=1.5/4.5. The results in Figure 5 demonstrate that our DC-
+Solver achieves the lowest MSE on all of the three guidance scales. Notably,
+we find that the performance enhancement over UniPC achieved by DC-Solver
+surpasses the differences observed among those three previous methods.
+4.3 Ablation study
+Weconductablationstudiesonthedesignofourmethodandthehyper-parameters
+on FFHQ [13]. The comparisons of the sampling quality measured by FID↓ of
+different configurations are summarized in Table 1.
+Compensation methods. Firstly, we evaluate the effectiveness of the pro-
+posed dynamic compensation in Table 1a. We start from the baseline method
+UniPC [46] and apply different compensation methods. As discussed in Sec-
+tion 3.2, the baseline with no compensation is equivalent to ρ ≡ 1.0,∀i. We
+i
+then conduct experiments by setting ρ to other constants, i.e., ρ ≡ 0.9 or
+i i
+ρ ≡ 1.1, which also corresponds to performing interpolation or extrapolation
+i
+in(6).Sincethecompensationratioisconstantacrossthesamplingsteps,wecall
+these “static compensation”. We find that adjusting the ρ can indeed influence
+i
+the performance significantly, and the static compensation with ρ ≡ 1.1 out-
+i
+performs the baseline method. As shown in the last row, our proposed dynamic
+compensation further improves the sampling quality by large margins.
+Number of datapoints. We investigate how the number of datapoints would
+affecttheperformanceofourDC-Solver.Wecomparethesamplingqualitywhen
+using 5,10,20,30 datapoints and list the results in Table 1b. We also provide the
+memorycostsduringthesearchingstage.WedemonstratethatN =10isenough
+to obtain satisfactory results while further increasing the number of datapoints
+will not bring significant improvement.
+ESM ESM ESMDC-Solver 11
+Table1:Ablationstudies.Weperformablationstudiesonthedesignofourmethod
+and the hyper-parameters. Sampling quality is measured by FID↓ on FFHQ [13]. The
+configurations with the best trade-offs are selected and highlighted in gray.
+(a) Compensationmethod. (b) Numberofdatapoints.
+NFE Memory NFE
+CompensationMethod #Datapoints
+5 6 8 10 (GB) 5 6 8 10
+Baseline[46] 18.66 11.89 8.21 6.99 5 9.15 12.39 9.79 7.05 6.84
+Static(ρi≡0.9) 26.43 16.50 9.84 7.84 10 12.10 10.38 8.39 7.14 6.82
+Static(ρi≡1.1) 13.99 10.21 7.86 6.90 20 18.61 10.37 8.31 7.01 6.63
+Dynamic(ρi=ρ∗ i) 10.38 8.39 7.14 6.82 30 22.44 10.93 8.40 6.95 6.70
+(c) Orderofdynamiccompensation. (d) Numberofoptimizationiterations.
+NFE Time NFE
+DCOrderK #Iterations
+5 6 8 10 (s) 5 6 8 10
+1 12.70 9.44 7.07 6.55 20 11.4 11.34 8.69 6.96 6.55
+2 10.38 8.39 7.14 6.82 40 22.2 10.38 8.39 7.14 6.82
+3 11.63 8.89 6.98 6.72 60 33.4 10.63 8.38 7.00 6.65
+Order of dynamic compensation. According to (6), the order K controls
+how the ϵˆρi(x˜c ti,t i) varies with ρ i. The results in Table 1c indicate that K = 2
+can produce the best sampling quality, indicating that performing Lagrange
+interpolation on a parabola-like trajectory is the optimal choice.
+Number of optimization iterations. We now examine how many iterations
+are required to learn the dynamic compensation ratios. In Table 1d, we report
+the FID of different optimization iterations as well as the time costs for each
+sampling step. We find the optimization converges after about 40 iterations. In
+this case, the actual time cost for each NFE is around (NFE−2)×22.2s since
+we do not need to learn for the first two steps (ρ = ρ = 1.0). Note that the
+0 1
+time costs in the searching stage will not affect the inference speed since we can
+directlypredictthecompensationratiosusingtheCPRdescribedinSection3.3.
+4.4 More Analyses
+In this section, we will provide in-depth analyses of DC-Solver, including some
+favorable properties and more quantitative/qualitative results.
+Comparisons with different pre-trained DPMs. In our main results Sec-
+tion 4.2, we have evaluated the effectiveness of DC-Solver on conditional sam-
+pling using Stable-Diffusion-1.5. We now provide comparisons on more different
+pre-trained DPMs in Table 2, where we report the MSE between the generated
+latents to the ground truth similar to Figure 5. Specifically, we consider three
+versions of Stable-Diffusion (SD): 1) SD1.4 is the previous version of SD1.5,
+which is widely used in [21,46] to evaluate the conditional sampling quality; 2)
+SD2.1istrainedusinganotherparameterizationcalledv-prediction[31]andcan
+generate768×768images;3)SDXListhelatestStable-Diffusionmodelthatcan12 W. Zhao et al.
+Table 2: Comparisons with different DPMs. We compare the sampling quality
+between DC-Solver and previous methods using different pre-trained Stable-Diffusion
+(SD)modelsincludingSD1.4,SD2.1,andSDXL,whichcangenerateimagesofvarious
+resolutionsfrom512×512to1024×1024.WecomparetheMSE↓with5∼10NFEwith
+the default classifier-free guidance scale of each model. We show that our DC-Solver
+consistently outperforms previous methods by large margins.
+NFE
+Method
+5 6 7 8 9 10
+SD1.4,ϵ-prediction,CFG=7.5,512×512
+DPM-Solver++[21] 0.803 0.711 0.642 0.590 0.547 0.510
+DEIS[44] 0.795 0.706 0.636 0.586 0.544 0.508
+UniPC[46] 0.813 0.724 0.658 0.607 0.563 0.525
+DC-Solver(Ours) 0.760 0.684 0.615 0.565 0.527 0.496
+SD2.1,v-prediction,CFG=7.5,768×768
+DPM-Solver++[21] 0.443 0.421 0.404 0.390 0.379 0.370
+DEIS[44] 0.436 0.416 0.400 0.387 0.376 0.368
+UniPC[46] 0.434 0.415 0.400 0.390 0.381 0.373
+DC-Solver(Ours) 0.394 0.364 0.336 0.309 0.315 0.294
+SDXL,ϵ-prediction,CFG=5.0,1024×1024
+DPM-Solver++[21] 0.745 0.659 0.601 0.558 0.527 0.502
+DEIS[44] 0.778 0.683 0.619 0.571 0.538 0.511
+UniPC[46] 0.718 0.645 0.593 0.553 0.524 0.500
+DC-Solver(Ours) 0.689 0.626 0.574 0.529 0.510 0.487
+generaterealisticimagesof1024×1024.NotethatweusethedefaultCFGforall
+the models (CFG=7.5 for SD1.4 and SD2.1, CFG=5.0 for SDXL). We demon-
+strate that DC-Solver consistently outperforms previous methods with 5∼10
+NFE, indicating that our method has a wide application and can be applied to
+any pre-trained DPMs to accelerate the sampling.
+Generalization to unseen NFE & CFG. Based on the observation of the
+optimal compensation ratios and the proposed cascade polynomial regression
+(CPR) in Section 3.3, our DC-Solver can be applied to unseen NFE and CFG
+without extra time costs for the searching stage. This is important because
+the users might frequently adjust the NFE and CFG to generate the desired
+images. To evaluate the effectiveness of the CPR, we first search the optimal
+compensation ratios for CFG∈[1.5,4.5,7.5,10.5] and NFE∈[10,15,20] (which
+coversmostoftheusecasesinrealapplications).Wethenusethecurve_fitin
+thescipylibrarytoobtaintheϕ(1)in(9)andpredictthecompensationratiosρˆ∗
+i
+on unseen configurations where CFG ∈ [3.0,6.0,9.0] and NFE ∈ [12,14,16,18].
+TheresultsofDC-SolverwiththepredictedcompensationratiosonunseenNFE
+andCFGonSD2.1canbefoundinTable3,wherewealsoprovidetheresultsof
+previous methods [21,44,46] for comparisons. We observe that DC-Solver with
+thecompensationratiospredictedbyCPRcanstillachievelowerMSEonallthe
+unseen configurations. These results indicate that in order to use DC-Solver inDC-Solver 13
+Table 3: Generalization to unseen NFE & CFG. By performing the cascade
+polynomialregressiontothecompensationratiossearchedonCFG∈[1.5,4.5,7.5,10.5]
+and NFE ∈ [10,15,20], our DC-Solver can generalize to unseen NFE and CFG and
+outperform previous methods by large margins. The sampling quality is measured by
+the MSE↓ between the generated latents and the ground truth on SD2.1 [29].
+NFE
+CFG Method
+12 14 16 18
+DPM-Solver++[21] 0.212 0.209 0.198 0.196
+DEIS[44] 0.215 0.210 0.199 0.198
+3.0
+UniPC[46] 0.211 0.208 0.206 0.205
+DC-Solver(Ours) 0.103 0.093 0.087 0.083
+DPM-Solver++[21] 0.312 0.304 0.293 0.289
+DEIS[44] 0.312 0.305 0.293 0.290
+6.0
+UniPC[46] 0.311 0.304 0.298 0.296
+DC-Solver(Ours) 0.215 0.196 0.182 0.169
+DPM-Solver++[21] 0.404 0.393 0.385 0.377
+DEIS[44] 0.402 0.391 0.380 0.374
+9.0
+UniPC[46] 0.406 0.394 0.386 0.377
+DC-Solver(Ours) 0.338 0.314 0.293 0.275
+real scenarios, we only need to perform CPR on sparsely selected configurations
+of CFG and NFE.
+Enhanceanysolverwithdynamiccompensation.AlthoughourDC-Solver
+was originally designed to mitigate the misalignment issue in the predictor-
+corrector frameworks, we will show that the dynamic compensation (DC) can
+also boost the performance of predictor-only DPM samplers. Similar to (8), we
+canalsosearchforanoptimalρ∗
+i
+tominimize∥x˜ ti+1(x˜ ti,Qρi)−xG ti+T 1∥2 2.Toverify
+this,weconductexperimentsonDDIM[35]andDPM-Solver++[21]byapplying
+the DC to them and the results are shown in Table 4. The FID↓ on FFHQ [13]
+isreportedastheevaluationmetric.WeshowthatDCcansignificantlyimprove
+the sampling quality of the two baseline predictor-only solvers. These results
+indicatethatourdynamiccompensationcanserveasaplug-and-playmoduleto
+enhance any existing solvers of DPMs.
+Visualizations.WenowprovidesomequalitativecomparisonsbetweenourDC-
+Solver and previous methods on SD2.1 with CFG=7.5 and NFE=5, as shown
+in Figure 2. The images sampled from 4 random initial noises are displayed. We
+find that while other methods tend to produce blurred images with few NFE,
+our DC-Solver can generate photo-realistic images with more details.
+Inference speed and memory. We compare the inference speed and memory
+of DC-Solver with previous methods, as shown in Table 5. For all the methods,
+we sample from the Stable-Diffusion-2.1 [29] using a single NVIDIA RTX 3090
+GPU with a batch size of 1 and NFE=5/10/15. Our results show that DC-
+Solver achieves similar speed and memory to previous methods, indicating that14 W. Zhao et al.
+Table 4: Applying DC to predictor-only solvers. We compare the FID↓ on
+FFHQ [13] using two methods DDIM [35] and DPM-Solver++ [21] as the baselines.
+Weshowthatdynamiccompensation(DC)canalsosignificantlyboosttheperformance
+of predictor-only solvers.
+NFE
+Method
+5 6 7 8 9 10
+DDIM[35] 57.92 42.67 32.82 26.96 23.25 19.09
++DC(Ours) 16.56 15.50 12.51 11.33 9.62 9.21
+DPM-Solver++[21] 27.80 16.01 11.16 9.17 8.04 7.40
++DC(Ours) 11.97 8.64 7.70 7.32 7.10 6.94
+Table 5: Comparisons of inference speed and memory. We compare the in-
+ference speed and memory cost of different sampling methods with batch size 1 on
+SD2.1 [29] using a single NVIDIA RTX 3090 GPU. For inference time, we report the
+mean and std of 10 runs for each method and NFE. Our DC-Solver achieves similar
+speed to previous methods with the same NFE.
+Memory InferenceTime(s)
+Method
+(GB) NFE=5 NFE=10 NFE=15
+DPM-Solver++[21] 14.21 1.515(±0.003) 2.833(±0.007) 4.168(±0.005)
+UniPC[46] 14.37 1.533(±0.004) 2.865(±0.004) 4.203(±0.003)
+DC-Solver(Ours) 14.37 1.532(±0.003) 2.867(±0.005) 4.203(±0.004)
+DC-Solver can improve the sample quality without introducing noticeable extra
+computational costs during the inference.
+Limitations. Despite the effectiveness of DC-Solver, it cannot be used with
+SDE-based samplers [41] because of the stochasticity. How to apply DC-Solver
+to SDE samplers requires future investigation of a stochasticity-aware metric
+instead of the ℓ -distance in (8).
+2
+5 Conclusions
+In this paper, we have proposed a new fast sampler of DPMs called DC-Solver,
+which leverages the dynamic compensation to effectively mitigate the misalign-
+ment issue in previous predictor-corrector samplers. We have shown that the
+optimal compensation ratios can be either searched efficiently using only 10
+datapointsonasingleGPUin5min,orinstantlypredictedbytheproposedcas-
+cade polynomial regression on unseen CFG/NFE. Extensive experiments have
+demonstrated that DC-Solver significantly outperforms previous methods in
+5∼10 NFE, and can be applied to different pre-trained DPMs including SDXL.
+We have also found that the proposed dynamic compensation can also serve as
+a plug-and-play module to boost the performance of predictor-only methods.
+We hope our investigation on dynamic compensation can inspire more effective
+approaches in the few-step sampling of DPMs.DC-Solver 15
+Acknowledgements
+ThisworkwassupportedinpartbytheNationalKeyResearchandDevelopment
+Program of China under Grant 2022ZD0160102, and in part by the National
+Natural Science Foundation of China under Grant 62125603, Grant 62321005,
+Grant 62336004.
+A Detailed Background of Diffusion Models
+A.1 Diffusion Models
+In this section, we will provide a detailed background of diffusion probabilistic
+models (DPMs) [8,37]. DPMs usually contain a forward diffusion process that
+gradually adds noise to the clean data and a backward denoising process that
+progressivelyremovesthenoisetoobtainthecleaneddata.Thediffusionprocess
+canbedefinedeitherdiscretely[8]orcontinuously[37].Wewillfocusonthelatter
+sincecontinuousDPMsareusuallyusedinthecontextofDPMsamplers[20,21,
+46]. Let x be a random variable from the data distribution q (x ), the forward
+0 0 0
+(diffusion) process gradually adds noise via:
+q (x |x )=N(x |α x ,σ2I), (12)
+t|0 t 0 t t 0 t
+where α ,σ control the noise schedule and the signal-to-noise-ratio α2/σ2 is
+t t t t
+decreasing w.r.t t. The noise schedule is designed such that the resulting dis-
+tribution q (x ) is approximately Gaussian. The forward process can be also
+T T
+formulated via an SDE [14]:
+dx =f(t)x dt+g(t)dw , x ∼q (x ) (13)
+t t t 0 0 0
+where f(t) = dlo dg tαt, g2(t) = d dσ tt2 −2dlo dg tαtσ t2 and w
+t
+is the standard Wiener
+process. The reverse process can be analytically computed under some condi-
+tons [37]:
+dx =[f(t)x −g2(t)∇ logq (x )]dt+g(t)dw¯ , (14)
+t t x t t t
+where w¯ is the standard Winer process in the reverse time. DPM is trained to
+t
+estimatethescaledscorefunction−σ ∇ logq (x )viaaneuralnetworkϵ ,and
+t x t t θ
+the corresponding SDE during sampling is
+(cid:20) g2(t) (cid:21)
+dx = f(t)x + ϵ (x ,t) dt+g(t)dw¯ . (15)
+t t σ θ t t
+t
+A.2 ODE-based DPM samplers
+Although one can numerally solve the diffusion SDE by discretizing (15), the
+stochasticity would harm the sampling quality especially when the step size is16 W. Zhao et al.
+large. On the contrary, the probability flow ODE [37] is more practical:
+dx g2(t)
+t =f(t)x − ∇ logq (x ). (16)
+dt t 2 x t t
+Modern fast samplers of DPMs [20,21,46] aim to efficiently solve the above
+ODE with small numbers of function evaluations (NFE) by introducing sev-
+eral useful techniques such as the exponential integrator [20,44], the multi-step
+method [21,44], data-prediction [21], and predictor-corrector paradigm [46]. For
+example, the deterministic version of DDIM [35] can be viewed as a 1-order
+discretization of the diffusion probability flow ODE. DPM-Solver [20] leverages
+an insightful parameterization (logSNR) and exponential integrator to achieve
+a high-order solver. DPM-Solver++ [21] further adopts the multi-step method
+to estimate high-order derivatives. Specifically, one can use a buffer to store
+the outputs of ϵ on previous points and use them to increase the order of
+θ
+accuracy. PNDM [16] modified classical multi-step numerical methods to corre-
+sponding pseudo numerical methods for DPM sampling. UniPC [46] introduces
+a predictor-corrector framework that also uses the model output at the current
+pointtoimprovethesamplingquality,andbypassestheextramodelevaluations
+by re-using the model outputs at the next sampling step. Generally speaking,
+the formulation of existing DPM samplers can be summarized as follows:
+p−1
+(cid:88)
+x˜ =Ati x˜c + Bti β (x˜ ,t ), (17)
+ti ti−1 ti−1 ti−m θ ti−m i−m
+m=1
+p−1
+(cid:88)
+x˜c =Cti x˜c + Dti β (x˜ ,t ), (18)
+ti ti−1 ti−1 ti−m θ ti−m i−m
+m=0
+wherethecorrectorstep(18)isoptionalandxc =x ifnocorrectorisused.We
+ti ti
+use β to represent different parameterizations during the sampling, such as the
+θ
+noise-prediction ϵ [20,44], data-prediction x [21,46], v-prediction v [31], or
+θ θ θ
+the learned parameterization [47]. The coefficients (A,B,C,D) are determined
+by the specific sampler and differ across the sampling steps.
+B Convergence of DC-Solver
+In this section, we shall show that if the original sampler has the convergence
+order p+1 under mild conditions, then the same order of convergence is main-
+tainedwhencombinedwithourDynamicCompensation.Wewillproveforboth
+predictor-only samplers [21,35] and predictor-corrector samplers [46]. For the
+sake of simplicity, we use the ℓ−2 norm by default to study the convergence.
+B.1 Assumptions
+Weintroducesomeassumptionsfortheconvenienceofsubsequentproofs.These
+assumptions are either common in ODE analysis or easy to satisfy.DC-Solver 17
+Assumption 1 The prediction model β (x,t) is Lipschitz continuous w.r.t. x.
+θ
+Assumption 2 h = max h = O(1/M), where h denotes the sampling
+1≤i≤M i i
+step size, and M is the total number of sampling steps.
+Assumption 3 The coefficients in (18) satisfy that 0 < C ≤ ∥Ati ∥ ≤ C ,
+1 ti−1 2 2
+0 < C h ≤ ∥Bti ∥ ≤ C h, 0 < C ≤ ∥Cti ∥ ≤ C and 0 < C h ≤
+3 ti−m 2 4 5 ti−1 2 6 7
+∥Dti ∥ ≤C h for sufficiently small h.
+ti−m 2 8
+Assumption 1 is common in the analysis of ODEs. Assumption 2 assures that
+the step size is basically uniform.
+Assumption 3 can be easily verified by the formulation of the samplers. For
+example, in data-prediction mode of UniPC [46], we have Ati = α /α ,
+ti−1
+(cid:104)
+ti ti−1
+(cid:105)
+whichareconstantsindependentofh i.NotethatB tt ii
+−1
+=σ ti(ehi−1) (cid:80)p
+m=1
+a rmm −1
+and B tt ii
+−m
+= −σ ti(ehi −1)a rmm,m ̸= 1, where a m,r
+m
+∈ O(1), we have B tt ii
+−m
+=
+O(h). For Cti and Dti , we can analogically derive the bound for the two
+ti−1 ti−m
+coefficients. By examining the analytical form of other existing solvers [16,20,
+21,35,44,46], we can similarly find that Theorem 3 always holds.
+B.2 Local Convergence
+Theorem 4. ForanyDPMsamplerofp+1-thorderofaccuracy,i.e.,E∥x˜c −
+ti+1
+x˜ ∥ ≤ Chp+2, applying dynamic compensation with the ratio ρ∗ will reduce
+ti+1 2 i i
+the local truncation error and remain the p+1-th order of accuracy.
+Proof. Denote x˜c,ρi as the intermediate result at the next sampling step by
+ti+1
+using dynamic compensation ratio ρ . Observe that ρ =1.0 is equivalent to the
+i i
+original updating formula without the dynamic compensation, we have
+E∥x˜c,ρ∗ i −x˜ ∥ ≤E∥x˜c,1.0−x˜ ∥
+ti+1 ti+1 2 ti+1 ti+1 2
+=E∥x˜c −x˜ ∥ ≤Chp+2. (19)
+ti+1 ti+1 2 i
+Therefore, the local truncation error is reduced and the order of accuracy after
+the DC is still p+1.
+Note that the proof does not assume the detailed implementation of the sam-
+pler, indicating that the Theorem 4 holds for both predictor-only samplers and
+predictor-corrector samplers.
+B.3 Global Convergence
+We first investigate the global convergence of Dynamic Compensation with a
+p-th order predictor-only sampler.18 W. Zhao et al.
+Corollary 1. Assumethatwehave{x˜ }p−1 and{βρ∗ i−k(x˜ ,t )}p−1 (de-
+ti−k k=1 θ ti−k i−k k=2
+noted as
+{βρ∗ i−k}p−1
+) satisfying E∥x˜ −x ∥ =O(hp),1≤k ≤p−1, and
+θ k=2 ti−k ti−k 2
+E∥βρ∗
+i−k −β (x ,t )∥ =O(hp−1),2≤k ≤p−1. If we use Predictor-p to-
+θ θ ti−k i−k 2
+ρ∗
+gether with Dynamic Compensation to estimate x , we shall get β i−1 and x˜
+ti θ ti
+that satisfy
+E∥βρ∗
+i−1 −β (x ,t )∥ =O(hp−1) and E∥x˜ −x ∥ =O(hp).
+θ θ ti−1 i−1 2 ti ti 2
+Proof. It is obvious that for sufficiently large constants C ,C , we have
+β x
+E∥βρ∗
+i−k −β (x ,t )∥ ≤C hp−1,2≤k ≤p−1 (20)
+θ θ ti−k i−k 2 β
+E∥x˜ −x ∥ ≤C hp,1≤k ≤p−1 (21)
+ti−k ti−k 2 x
+When computer x , we consider 3 different methods in this step. Firstly, if we
+ti
+continue to use Dynamic Compensation, we have
+p−1
+x˜ =Ati x˜ +
+(cid:88)
+Bti
+βρ∗
+i−m. (22)
+ti ti−1 ti−1 ti−m θ
+m=1
+Otherwise, if we use the standard Predictor-p at this step (which means to do
+ρ∗
+not replace the β (x˜ ,t ) with β i−m), we have the following result:
+θ ti−1 i−1 θ
+p−1
+x˜p =Ati x˜ + (cid:88) Bti βρ∗ i−m +Bti β (x˜ ,t ). (23)
+ti ti−1 ti−1 ti−m θ ti−1 θ ti−1 i−1
+m=2
+In the third case, we adopt the Predictor-p to previous points on the ground
+truth trajectory:
+p−1
+(cid:88)
+x¯ =Ati x + Bti β (x ,t ) (24)
+ti ti−1 ti−1 ti−m θ ti−m i−m
+m=1
+Due to the p-th order of accuarcy of Predictor-p, we have
+E∥x¯ −x ∥ =O(hp+1) (25)
+ti ti 2
+Comparing (24) and (23), we obtain
+x˜p −x¯ =Ati (x˜ −x )
+ti ti ti−1 ti−1 ti−1
+p−1
++
+(cid:88)
+Bti
+(cid:104) βρ∗
+i−m −β (x ,t
+)(cid:105)
+(26)
+ti−m θ θ ti−m i−m
+m=2
++Bti (cid:2) β (x˜ ,t )−β (x ,t )(cid:3)
+ti−1 θ ti−1 i−1 θ ti−1 i−1
+Under Assumption 1, Assumption 3, (20) and (21), it follows that,
+E∥x˜p −x¯ ∥ ≤C C hp
+ti ti 2 2 x
+(cid:88)p−1 (27)
++ C C hp+C LC hp+1 =O(hp)
+4 β 4 x
+m=2DC-Solver 19
+By (25) and (27), we have
+E∥x˜p −x ∥ =O(hp) (28)
+ti ti 2
+Observing that DC-Solver-p is equivalent to Predictor-p when ρ = 1.0, we
+i−1
+have
+E∥x˜ −x ∥ ≤E∥x˜p −x ∥ =O(hp). (29)
+ti ti 2 ti ti 2
+Combining with (25), we get
+E∥x˜ −x¯ ∥ =O(hp)≤C hp (30)
+ti ti 2 9
+Subtracting (24) from (22), we have
+x˜ −x¯ =Ati (x˜ −x )
+ti ti ti−1 ti−1 ti−1
+p−1
++
+(cid:88)
+B tt ii
+−m(cid:104)
+β
+θρ∗
+i−m −β θ(x ti−m,t
+i−m)(cid:105)
+(31)
+m=2
++Bti
+(cid:104) βρ∗
+i−1 −β (x ,t
+)(cid:105)
+ti−1 θ θ ti−1 i−1
+Thus, given (30), (20), (21), we obtain
+E(cid:13)
+(cid:13)Bti
+(cid:104) βρ∗
+i−1 −β (x ,t
+)(cid:105)(cid:13)
+(cid:13)
+(cid:13) ti−1 θ θ ti−1 i−1 (cid:13)
+2
+(cid:13)
+=(cid:13)x˜ −x¯ −Ati (x˜ −x )
+(cid:13) ti ti ti−1 ti−1 ti−1
+p−1 (cid:13)
+−
+(cid:88)
+B tt ii
+−m(cid:104)
+β
+θρ∗
+i−m −β θ(x ti−m,t
+i−m)(cid:105)(cid:13)
+(cid:13) (cid:13) (32)
+(cid:13)
+m=2 2
+p−1
+(cid:88)
+≤C hp+C C hp+ C C hp
+9 2 x 4 β
+m=2
+=O(hp)
+Note that ∥Bti ∥ ≥C h according to Assumption 3, we have
+ti−1 2 3
+E∥βρ∗
+i−1 −β (x ,t )∥ =O(hp−1). (33)
+θ θ ti−1 i−1 2
+Above all, (30) and (33) establish the correctness of the corollary.
+Theorem 5. For any predictor-only sampler of p-th order of convergence, ap-
+plying Dynamic Compensation with ratio ρ∗ will maintain the p-th order of con-
+i
+vergence.
+ρ∗ i−1
+Proof. We will use mathematical induction to prove it. Denote {β k} =
+θ k=0
+{βρ∗
+k(x˜ ,t
+)}i−1
+, we define P as the proposition that
+E∥βρ∗
+k−β (x ,t )∥ =
+θ tk k k=0 i θ θ tk k 2
+O(hp−1),0≤k ≤i−1, and E∥x˜ −x ∥ =O(hp),0≤k ≤i.
+tk tk 220 W. Zhao et al.
+InthefirstK steps(namelythewarm-upsteps),weonlyusethePredictor-p
+withouttheDynamicCompensation.SincePredictor-phasp-thorderofconver-
+gence, it’s obvious that E∥x˜ −x ∥ =O(hp),0≤k ≤K. Under Assumption
+tk tk 2
+1, we also have
+E∥βρ∗ k −β (x ,t )∥ =E∥β (x˜ ,t )−β (x ,t )∥
+θ θ tk k 2 θ tk k θ tk k 2 (34)
+≤E∥x˜ −x ∥ =O(hp)≤O(hp−1),∀0≤k ≤K−1
+tk tk 2
+Thus, we show that P is true. Recall the result in Corollary 1, we can then
+K
+use mathematical induction to prove that P is true, where M is the NFE.
+M
+ThisindicatesthatE∥x˜ −x ∥ =O(hp),whichconcludestheproofthatthe
+tM tM 2
+convergence order is still p with the Dynamic Compensation
+We then provide the proof of the convergence order when applying Dynamic
+Compensation to predictor-corrector solvers.
+Corollary 2. Assumethatwehave{x˜c }p−1,{x˜ }p−1,and{βρ∗ i−k(x˜c ,t )}p−1
+ti−k k=1 ti−k k=1 θ ti−k i−k k=2
+(denotedas{βρ∗ i−k}p−1 ),whichsatisfyE∥βρ∗
+i−k−β (x ,t )∥ =O(hp),2≤
+θ k=2 θ θ ti−k i−k 2
+k ≤ p − 1 , E∥x˜c − x ∥ = O(hp+1),1 ≤ k ≤ p − 1, and E∥x˜ −
+ti−k ti−k 2 ti−k
+x ∥ = O(hp),1 ≤ k ≤ p−1. Then using Predictor-Corrector-p combined
+ti−k 2
+with Dynamic Compensation to estimate x , we can calculate
+βρ∗
+i−1,x˜c ,x˜ ,
+ti θ ti ti
+that satisfy
+E∥βρ∗
+i−1 −β (x ,t )∥ =O(hp), E∥x˜c −x ∥ =O(hp+1) and
+E∥x˜ −x ∥
+=θ
+O(hp)
+θ ti−1 i−1 2 ti ti 2
+ti ti 2
+Proof. Itisobviousthat,thereexistssufficientlylargeconstantsC ,C ,C ,such
+β x y
+that
+E∥βρ∗
+i−k −β (x ,t )∥ ≤C hp,2≤k ≤p−1 (35)
+θ θ ti−k i−k 2 β
+E∥x˜c −x ∥ ≤C hp+1,1≤k ≤p−1 (36)
+ti−k ti−k 2 x
+E∥x˜ −x ∥ ≤C hp,1≤k ≤p−1 (37)
+ti−k ti−k 2 y
+When estimating x , we consider three different methods in this step. First, if
+ti
+we use Dynamic Compensation, we have
+p−1
+x˜ =Ati x˜c +
+(cid:88)
+Bti
+βρ∗
+i−m (38)
+ti ti−1 ti−1 ti−m θ
+m=1
+p−1
+x˜c =Cti x˜c +
+(cid:88)
+Dti
+βρ∗
+i−m +Dtiβ (x˜ ,t ) (39)
+ti ti−1 ti−1 ti−m θ ti θ ti i
+m=1
+Otherwise,ifweusethestandardPredictor-Corrector-pwithoutDCatthisstep,
+we get
+p−1
+x¯ =Ati x˜c +
+(cid:88)
+Bti
+βρ∗
+i−m +Bti β (x˜ ,t ) (40)
+ti ti−1 ti−1 ti−m θ ti−1 θ ti−1 i−1
+m=2DC-Solver 21
+p−1
+x¯c =Cti x˜c +
+(cid:88)
+Dti
+βρ∗
+i−m +Dti β (x˜ ,t )
+ti ti−1 ti−1 ti−m θ ti−1 θ ti−1 i−1 (41)
+m=2
++Dtiβ (x¯ ,t )
+ti θ ti i
+Finally, we use Predictor-Corrector-p to previous points on the ground truth
+trajectory, we have:
+p−1
+(cid:88)
+xˆ =Ati x + Bti β (x ,t ) (42)
+ti ti−1 ti−1 ti−m θ ti−m i−m
+m=1
+p−1
+(cid:88)
+xˆc =Cti x + Dti β (x ,t )+Dtiβ (xˆ ,t ) (43)
+ti ti−1 ti−1 ti−m θ ti−m i−m ti θ ti i
+m=1
+Due to Predictor-Corrector-p’s p+1-th convergence order, we have
+E∥xˆc −x ∥ =O(hp+2) (44)
+ti ti 2
+Based on Assumption 1 and (37), we also know that
+E∥β (x˜ ,t )−β (x ,t )∥
+θ ti−1 i−1 θ ti−1 i−1 2
+(45)
+≤LE∥x˜ −x ∥ =O(hp)
+ti−1 ti−1 2
+Subtracting (43) from (41), we obtain
+x¯c −xˆc =Cti (x˜c −x )
+ti ti ti−1 ti−1 ti−1
+p−1
++
+(cid:88)
+Dti
+(cid:104) βρ∗
+i−m −β (x ,t
+)(cid:105)
+ti−m θ θ ti−m i−m (46)
+m=2
++Dti (cid:2) β (x˜ ,t )−β (x ,t )(cid:3)
+ti−1 θ ti−1 i−1 θ ti−1 i−1
++Dti[β (x¯ ,t )−β (xˆ ,t )]
+ti θ ti i θ ti i
+Under Assumption 1, Assumption 3, (45), (35), (36) and (37), it follows that,
+E∥β (x¯ ,t )−β (xˆ ,t )∥ ≤LE∥x¯ −xˆ ∥
+θ ti i θ ti i 2 ti ti 2
+=LE∥Ati (x˜c −x )
+ti−1 ti−1 ti−1
+p−1
++
+(cid:88)
+Bti
+(cid:104) βρ∗
+i−m −β (x ,t
+)(cid:105)
+ti−m θ θ ti−m i−m
+m=2
+(47)
++Bti (cid:2) β (x˜ ,t )−β (x ,t )(cid:3) ∥
+ti−1 θ ti−1 i−1 θ ti−1 i−1 2
+p−1
+(cid:88)
+≤L(C C hp+1+ C C hp+1+C LC hp+1)
+2 x 4 β 4 y
+m=2
+=O(hp+1)≤C hp+1
+1022 W. Zhao et al.
+Therefore, according to Assumption 3, (35), (36), (37), (46) and (47), we get
+p−1
+(cid:88)
+E∥x¯c −xˆc ∥ ≤C C hp+1+ C C hp+1
+ti ti 2 6 x 8 β
+m=2 (48)
++C LC hp+1+C C hp+2
+8 y 8 10
+=O(hp+1)
+Given (44), we have
+E∥x¯c −x ∥ =O(hp+1) (49)
+ti ti 2
+Observe that DC-Solver-p is equivalent to Predictor-Corrector-p when ρ =
+i−1
+1.0, we have
+E∥x˜c −x ∥ ≤E∥x¯c −x ∥ =O(hp+1) (50)
+ti ti 2 ti ti 2
+Combining with (49), we get
+E∥x˜c −x¯c ∥ =O(hp+1) (51)
+ti ti 2
+Comparing (39) and (41), we have
+x˜c −x¯c =Dti
+(cid:104) βρ∗
+i−1 −β (x˜ ,t
+)(cid:105)
+ti ti ti−1 θ θ ti−1 i−1 (52)
++Dti[β (x˜ ,t )−β (x¯ ,t )]
+ti θ ti i θ ti i
+Under Assumption 3 and 1, concerning about the order of the coefficients, we
+can know that
+E∥Dti[β (x˜ ,t )−β (x¯ ,t )]∥
+ti θ ti i θ ti i 2
+≤L∥D tt ii∥ 2∥B tt ii −1∥ 2E∥β
+θρ∗
+i−1 −β θ(x˜ ti−1,t i−1)∥ 2 (53)
+≪E∥Dti
+(cid:104) βρ∗
+i−1 −β (x˜ ,t
+)(cid:105)
+∥
+ti−1 θ θ ti−1 i−1 2
+Leveraging (51), (52) with (53), we have
+E∥Dti
+(cid:104) βρ∗
+i−1 −β (x˜ ,t
+)(cid:105)
+∥ =O(hp+1) (54)
+ti−1 θ θ ti−1 i−1 2
+Thus, considering that ∥Dti∥ ≥C h in Assumption 3, we can get
+ti 2 7
+∥βρ∗
+i−1 −β (x˜ ,t )∥ =O(hp) (55)
+θ θ ti−1 i−1 2
+Given (45) and (55), we further obtain
+∥βρ∗
+i−1 −β (x ,t )∥ =O(hp)≤C hp (56)
+θ θ ti−1 i−1 2 11DC-Solver 23
+Subtracting (42) from (38), we obtain
+E∥x˜ −xˆ ∥ =E∥Ati (x˜c −x )
+ti ti 2 ti−1 ti−1 ti−1
++Bti
+(cid:104) βρ∗
+i−1 −β (x ,t
+)(cid:105)
+ti−1 θ θ ti−1 i−1
+p−1
++
+(cid:88)
+Bti
+(cid:104) βρ∗
+i−m −β (x ,t
+)(cid:105)
+∥
+ti−m θ θ ti−m i−m 2 (57)
+m=2
+p−1
+(cid:88)
+≤C C hp+1+C C hp+1+ C C hp+1
+2 x 4 11 4 β
+m=2
+≤O(hp)
+Since E∥xˆ −x ∥ =O(hp+1), we have
+ti ti 2
+E∥x˜ −x ∥ ≤O(hp) (58)
+ti ti 2
+Above all, (50), (56) and (58) imply the validity of the corollary.
+Theorem 6. For any predictor-corrector sampler of (p+1)-th order of conver-
+gence, applying dynamic compensation with ratio ρ∗ will remain the (p+1)-th
+i
+order of convergence.
+Proof. Weusemathematicalinductiontoproofthis.Supposewehave{x˜c }i ,
+tk k=0
+{x˜ }i and {βρ∗ k(x˜c ,t )}i−1 denoted as {βρ∗ k}i−1 . First, we define P as the
+tk k=0 θ tk k k=0 θ k=0 i
+propositionthatE∥βρ∗ k−β (x ,t )∥ =O(hp),0≤k ≤i−1,E∥x˜c −x ∥ =
+O(hp+1),0≤k ≤i
+anθ
+d
+E∥x˜θ −tk xk ∥2
+=O(hp),0≤k ≤i.
+tk tk 2
+tk tk 2
+In the first K steps, we only use Predictor-Corrector-p without the Dynamic
+Compensation. Since Predictor-Corrector-p has (p+1)-th order of convergence,
+it’s obvious that E∥x˜c −x ∥ = O(hp+1),0 ≤ k ≤ K, and E∥x˜ −x ∥ =
+tk tk 2 tk tk 2
+O(hp),0≤k ≤K. Under Assumption 1, we also know, for k ∈[0,K−1],
+E∥βρ∗ k −β (x ,t )∥ =E∥β (x˜ ,t )−β (x ,t )∥
+θ θ tk k 2 θ tk k θ tk k 2 (59)
+≤LE∥x˜ −x ∥ =O(hp)
+tk tk 2
+Thus,weshowthatP istrue.Similarly,usingmathematicalinductionandthe
+K
+result in Corollary 2 we can know that P is true, which implies that E∥x˜c −
+M tM
+x ∥ = O(hp+1) and ends the proof. Therefore, we reach the conclusion that
+tM 2
+for a predictor-corrector sampler, the Dynamic Compensation will preserve the
+p+1 convergence order.
+C More Analyses
+C.1 Quantitative Results
+We now provide detailed quantitative results on both unconditional sampling
+and conditional sampling. For unconditional sampling, we list the numerical24 W. Zhao et al.
+Table6:Detailedquantitativeresultsonunconditionalsampling.Weprovide
+thecomparisonsoftheFID↓ofourDC-SolverandthepreviousmethodonFFHQ[13],
+LSUN-Church [42] and LSUN-Bedroom [42] with 5∼10 NFE. We observe that our
+DC-Solver achieves the lowest FID on all three datasets.
+(a) FFHQ[13]
+NFE
+Method
+5 6 7 8 9 10
+DPM-Solver++ [21] 27.15 15.6010.81 8.98 7.89 7.39
+DEIS [44] 32.35 18.7212.22 9.51 8.31 7.75
+UniPC [46] 18.66 11.89 9.51 8.21 7.62 6.99
+DC-Solver (Ours) 10.38 8.39 7.66 7.146.926.82
+(b) LSUN-Church[42]
+NFE
+Method
+5 6 7 8 9 10
+DPM-Solver++ [21]17.57 9.71 6.45 4.97 4.25 3.87
+DEIS [44] 15.01 8.45 5.71 4.49 3.86 3.57
+UniPC [46] 11.98 6.90 5.08 4.28 3.86 3.61
+DC-Solver (Ours) 7.47 4.703.913.463.233.06
+(c) LSUN-Bedroom[42]
+NFE
+Method
+5 6 7 8 9 10
+DPM-Solver++ [21]18.13 8.33 5.15 4.14 3.77 3.61
+DEIS [44] 16.68 8.75 6.13 5.11 4.66 4.41
+UniPC [46] 12.14 6.13 4.53 4.05 3.81 3.64
+DC-Solver (Ours) 7.40 5.294.273.983.743.52
+results on FFHQ [13], LSUN-Church [42] and LSUN-Bedroom [42] in Table 6.
+Allthepre-trainedDPMsarefromLatent-Diffusion[29]andweuseFID↓asthe
+evaluation metric. We demonstrate that our DC-Solver consistently attains the
+lowest FID on all three datasets. For conditional sampling, we summarize the
+results in Table 7, where we compare the sampling quality of different methods
+on various configurations of classifier-free guidance scale (CFG). Our results
+indicatethatDC-Solvercanoutperformpreviousmethodsbylargemarginswith
+different choices of CFG and NFE.DC-Solver 25
+Table 7: Detailed quantitative results on conditional sampling. We provide
+thecomparisonsbetweenourDC-SolverandthepreviousmethodonStable-Diffusion-
+1.5 [29] with different classifier-free guidance scale (CFG) and NFE ∈ [5,10]. The
+sampling quality is measured by the MSE↓ between the generated latents and the
+groundtruthlatents(obtainedbya999-stepDDIM).WedemonstratethatDC-Solver
+consistently achieves the best result for different sampling configurations.
+(a) CFG=1.0 (b) CFG=1.5
+NFE NFE
+Method Method
+5 6 7 8 9 10 5 6 7 8 9 10
+DPM-Solver++[21]0.277 0.232 0.204 0.188 0.177 0.169 DPM-Solver++[21]0.288 0.242 0.213 0.195 0.182 0.173
+DEIS[44] 0.299 0.252 0.223 0.203 0.191 0.181 DEIS[44] 0.307 0.260 0.229 0.209 0.194 0.184
+UniPC[46] 0.245 0.206 0.184 0.172 0.166 0.161 UniPC[46] 0.260 0.219 0.194 0.180 0.170 0.163
+DC-Solver(Ours) 0.1760.1630.1500.1500.1470.144 DC-Solver(Ours) 0.2130.1880.1690.1580.1530.149
+(c) CFG=2.5 (d) CFG=3.5
+NFE NFE
+Method Method
+5 6 7 8 9 10 5 6 7 8 9 10
+DPM-Solver++[21]0.339 0.293 0.262 0.239 0.221 0.208 DPM-Solver++[21]0.409 0.360 0.323 0.295 0.272 0.255
+DEIS[44] 0.354 0.307 0.274 0.250 0.231 0.217 DEIS[44] 0.419 0.369 0.332 0.303 0.280 0.262
+UniPC[46] 0.321 0.277 0.247 0.226 0.208 0.195 UniPC[46] 0.397 0.349 0.312 0.285 0.262 0.245
+DC-Solver(Ours) 0.2930.2570.2310.2120.1940.186 DC-Solver(Ours) 0.3750.3310.2990.2700.2510.239
+(e) CFG=4.5 (f) CFG=5.5
+NFE NFE
+Method Method
+5 6 7 8 9 10 5 6 7 8 9 10
+DPM-Solver++[21]0.490 0.437 0.392 0.358 0.330 0.308 DPM-Solver++[21]0.580 0.517 0.468 0.427 0.395 0.368
+DEIS[44] 0.496 0.441 0.397 0.364 0.336 0.314 DEIS[44] 0.581 0.519 0.469 0.430 0.398 0.372
+UniPC[46] 0.483 0.430 0.386 0.352 0.324 0.302 UniPC[46] 0.577 0.516 0.468 0.428 0.395 0.367
+DC-Solver(Ours) 0.4610.4120.3690.3370.3140.291 DC-Solver(Ours) 0.5510.4920.4460.4060.3810.355
+(g) CFG=6.5 (h) CFG=7.5
+NFE NFE
+Method Method
+5 6 7 8 9 10 5 6 7 8 9 10
+DPM-Solver++[21]0.687 0.612 0.556 0.512 0.474 0.441 DPM-Solver++[21]0.812 0.719 0.648 0.597 0.554 0.518
+DEIS[44] 0.684 0.610 0.554 0.511 0.474 0.442 DEIS[44] 0.802 0.712 0.643 0.592 0.552 0.517
+UniPC[46] 0.691 0.618 0.563 0.517 0.479 0.445 UniPC[46] 0.825 0.733 0.666 0.612 0.570 0.530
+DC-Solver(Ours) 0.6540.5870.5310.4880.4570.426 DC-Solver(Ours) 0.7660.6890.6200.5730.5370.501
+C.2 Qualitative Results
+Wepresentadditionalvisualizationstoshowcasethesuperiorqualitativeperfor-
+mance of DC-Solver in both unconditional sampling and conditional sampling.
+Initially, we compare the unconditional sampling quality of four different meth-
+ods on FFHQ [13], LSUN-Church [42] and LSUN-Bedroom [42] in Figure 6,
+employing only 5 NFE. We show that DC-Solver can produce the clearest and
+most realistic images across all three datasets. Furthermore, we explore condi-
+tional sampling on different pre-trained Stable-Diffusion(SD) models, including
+SD1.5,SD2.1andSDXL,withonly5NFE.ThereusltsinFigure7demonstrate26 W. Zhao et al.
+FFHQ
+DPM++ [21] DEIS [44] UniPC [46] DC-Solver
+LSUN Bedroom
+DPM++ [21] DEIS [44] UniPC [46] DC-Solver
+LSUN Church
+DPM++ [21] DEIS [44] UniPC [46] DC-Solver
+Fig.6:Comparisonsofunconditionalsamplingresultsacrossdifferentdatasetsemploy-
+ing DC-Solver, UniPC [46], DPM-Solver++ [21] and DEIS [44]. Images are sampled
+using only 5 NFE.
+that our DC-Solver is able to generate more realistic images with more details,
+consistently outperforming other methods on all three SD models.DC-Solver 27
+Stable-Diffusion 1.5
+TextPrompts DPM++[21] DEIS[44] UniPC[46] DC-Solver
+“A realistic photo of a tropical
+rainforest with diverse wildlife.”
+“Close up of a teddy bear
+sitting on top of it.”
+Stable-Diffusion 2.1
+TextPrompts DPM++[21] DEIS[44] UniPC[46] DC-Solver
+“Group of people standing on
+top of a snow covered slope.”
+“Close up of a bird perched
+on top of a tree.”
+Stable-Diffusion XL
+TextPrompts DPM++[21] DEIS[44] UniPC[46] DC-Solver
+“Pizza that is sitting on
+top of a plate.”
+“A serene waterfall in a
+lush green forest.”
+Fig.7: Comparisons of text-to-image results on different pre-trained Stable-Diffusion
+models using DC-Solver, UniPC [46], DPM-Solver++ [21] and DEIS [44]. Images are
+sampled with a classifier-free guidance scale 7.5, using only 5 NFE.28 W. Zhao et al.
+DPM-Solver++ UniPC DC-Solver (Ours) Ground Truth
++
++
+M
+P
+D
+C
+P
+in
+U
+revloS
+C-
+D
+T
+G
+Fig.8: Comparison with GT (upper part) and more uncurated results (lower part).
+For all the compared methods, we adopt NFE=5 and use the same initial noise. We
+can clearly find that DC-Solver outperforms other methods.
+D Implementation Details
+Our DC-Solver is built on the predictor-corrector framework UniPC [46] by
+default. We set the order of the dynamic compensation K = 2 and skip the
+compensation when i < K, which is equivalent to ρ = ρ = 1.0. K = 2 also
+0 1
+implies a parabola-like interpolation trajectory. During the searching stage, we
+set the number of datapoints N =10. We use a 999-step DDIM [35] to generate
+the ground truth trajectory xGT in the conditional sampling while we found a
+t
+200-step DDIM is enough for unconditional sampling. We use AdamW [19] to
+optimizethecompensationratiosforonlyL=40iterationsandsetthelearning
+rate of learnable parameters as α=0.1. For the cascade polynomial regression,
+we use p = p = 2 and p = 3. For the experiments on Latent-Diffusion [29],
+1 2 3
+we adopt their original checkpoints and use the default latent size 64×64. For
+the experiments of conditional sampling using Stable-Diffusion [29], we use the
+default latent size of 64×64, 64×64, 96×96, 128×128 for SD1.4, SD1.5, SD2.1,
+SDXL, respectively. It is worth noting that our method can be scaled up to
+larger latent sizes and pre-trained DPMs mainly because of the effectiveness of
+the designed dynamic compensation, which can be controlled by several scalar
+parameters.DC-Solver 29
+References
+1. Bao, F., Li, C., Zhu, J., Zhang, B.: Analytic-dpm: an analytic estimate of the
+optimal reverse variance in diffusion probabilistic models. ICLR (2022)
+2. Batzolis,G.,Stanczuk,J.,Schönlieb,C.B.,Etmann,C.:Conditionalimagegener-
+ation with score-based diffusion models. arXiv preprint arXiv:2111.13606 (2021)
+3. Brooks, T., Holynski, A., Efros, A.A.: Instructpix2pix: Learning to follow image
+editing instructions. In: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. pp. 18392–18402 (2023)
+4. Dhariwal, P., Nichol, A.: Diffusion models beat gans on image synthesis. NeurIPS
+34, 8780–8794 (2021)
+5. Gal, R., Alaluf, Y., Atzmon, Y., Patashnik, O., Bermano, A.H., Chechik, G.,
+Cohen-Or, D.: An image is worth one word: Personalizing text-to-image gener-
+ation using textual inversion. arXiv preprint arXiv:2208.01618 (2022)
+6. Gu,S.,Chen,D.,Bao,J.,Wen,F.,Zhang,B.,Chen,D.,Yuan,L.,Guo,B.:Vector
+quantizeddiffusionmodelfortext-to-imagesynthesis.In:CVPR.pp.10696–10706
+(2022)
+7. Hertz, A., Mokady, R., Tenenbaum, J., Aberman, K., Pritch, Y., Cohen-Or,
+D.: Prompt-to-prompt image editing with cross attention control. arXiv preprint
+arXiv:2208.01626 (2022)
+8. Ho,J.,Jain,A.,Abbeel,P.:Denoisingdiffusionprobabilisticmodels.NeurIPS33,
+6840–6851 (2020)
+9. Ho, J., Salimans, T.: Classifier-free diffusion guidance. NeurIPS (2021)
+10. Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M., Fleet, D.J.: Video
+diffusion models. arXiv preprint arXiv:2204.03458 (2022)
+11. Hochbruck, M., Ostermann, A.: Explicit exponential runge–kutta methods for
+semilinearparabolicproblems.SIAMJournalonNumericalAnalysis43(3),1069–
+1090 (2005)
+12. Hochbruck, M., Ostermann, A.: Exponential integrators. Acta Numerica 19,
+209–286 (2010). https://doi.org/10.1017/S0962492910000048
+13. Karras,T.,Laine,S.,Aila,T.:Astyle-basedgeneratorarchitectureforgenerative
+adversarial networks. In: CVPR. pp. 4401–4410 (2019)
+14. Kingma,D.,Salimans,T.,Poole,B.,Ho,J.:Variationaldiffusionmodels.NeurIPS
+34, 21696–21707 (2021)
+15. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P.,
+Zitnick,C.L.:Microsoftcoco:Commonobjectsincontext.In:ECCV.pp.740–755.
+Springer (2014)
+16. Liu,L.,Ren,Y.,Lin,Z.,Zhao,Z.:Pseudonumericalmethodsfordiffusionmodels
+on manifolds. ICLR (2022)
+17. Liu,R.,Wu,R.,VanHoorick,B.,Tokmakov,P.,Zakharov,S.,Vondrick,C.:Zero-
+1-to-3: Zero-shot one image to 3d object. In: ICCV. pp. 9298–9309 (2023)
+18. Liu,X.,Gong,C.,Liu,Q.:Flowstraightandfast:Learningtogenerateandtransfer
+data with rectified flow. arXiv preprint arXiv:2209.03003 (2022)
+19. Loshchilov, I., Hutter, F.: Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101 (2017)
+20. Lu,C., Zhou,Y., Bao, F.,Chen, J.,Li, C., Zhu, J.:Dpm-solver:A fastodesolver
+for diffusion probabilistic model sampling in around 10 steps. NeurIPS (2022)
+21. Lu,C.,Zhou,Y.,Bao,F.,Chen,J.,Li,C.,Zhu,J.:Dpm-solver++:Fastsolverfor
+guidedsamplingofdiffusionprobabilisticmodels.arXivpreprintarXiv:2211.01095
+(2022)30 W. Zhao et al.
+22. Meng,C.,He,Y.,Song,Y.,Song,J.,Wu,J.,Zhu,J.Y.,Ermon,S.:Sdedit:Guided
+image synthesis and editing with stochastic differential equations. arXiv preprint
+arXiv:2108.01073 (2021)
+23. Mokady,R.,Hertz,A.,Aberman,K.,Pritch,Y.,Cohen-Or,D.:Null-textinversion
+for editing real images using guided diffusion models. In: CVPR. pp. 6038–6047
+(2023)
+24. Mou, C., Wang, X., Xie, L., Zhang, J., Qi, Z., Shan, Y., Qie, X.: T2i-adapter:
+Learning adapters to dig out more controllable ability for text-to-image diffusion
+models. arXiv preprint arXiv:2302.08453 (2023)
+25. Nichol, A., Dhariwal, P., Ramesh, A., Shyam, P., Mishkin, P., McGrew, B.,
+Sutskever,I.,Chen,M.:Glide:Towardsphotorealisticimagegenerationandediting
+with text-guided diffusion models. ICML (2022)
+26. Nichol, A.Q., Dhariwal, P.: Improved denoising diffusion probabilistic models. In:
+ICML. pp. 8162–8171. PMLR (2021)
+27. Parmar, G., Kumar Singh, K., Zhang, R., Li, Y., Lu, J., Zhu, J.Y.: Zero-shot
+image-to-image translation. In: ACM SIGGRAPH 2023 Conference Proceedings.
+pp. 1–11 (2023)
+28. Poole, B., Jain, A., Barron, J.T., Mildenhall, B.: Dreamfusion: Text-to-3d using
+2d diffusion. arXiv preprint arXiv:2209.14988 (2022)
+29. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: CVPR. pp. 10684–10695 (2022)
+30. Ruiz, N., Li, Y., Jampani, V., Pritch, Y., Rubinstein, M., Aberman, K.: Dream-
+booth: Fine tuning text-to-image diffusion models for subject-driven generation.
+In: CVPR. pp. 22500–22510 (2023)
+31. Salimans, T., Ho,J.: Progressive distillation forfast samplingof diffusion models.
+ICLR (2022)
+32. Schuhmann,C.,Vencu,R.,Beaumont,R.,Kaczmarczyk,R.,Mullis,C.,Katta,A.,
+Coombes,T.,Jitsev,J.,Komatsuzaki,A.:Laion-400m:Opendatasetofclip-filtered
+400 million image-text pairs. arXiv preprint arXiv:2111.02114 (2021)
+33. Shi, Y., Xue, C., Pan, J., Zhang, W., Tan, V.Y., Bai, S.: Dragdiffusion: Har-
+nessing diffusion models for interactive point-based image editing. arXiv preprint
+arXiv:2306.14435 (2023)
+34. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., Ganguli, S.: Deep unsuper-
+vised learning using nonequilibrium thermodynamics. In: ICML. pp. 2256–2265.
+PMLR (2015)
+35. Song, J., Meng, C., Ermon, S.: Denoising diffusion implicit models. ICLR (2021)
+36. Song, Y., Dhariwal, P., Chen, M., Sutskever, I.: Consistency models (2023)
+37. Song,Y.,Sohl-Dickstein,J.,Kingma,D.P.,Kumar,A.,Ermon,S.,Poole,B.:Score-
+based generative modeling through stochastic differential equations. In: ICLR
+(2021)
+38. Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,L.,Gomez,A.N.,Kaiser,
+Ł., Polosukhin, I.: Attention is all you need. Advances in neural information pro-
+cessing systems 30 (2017)
+39. Wang,Z.,Lu,C.,Wang,Y.,Bao,F.,Li,C.,Su,H.,Zhu,J.:Prolificdreamer:High-
+fidelity and diverse text-to-3d generation with variational score distillation. arXiv
+preprint arXiv:2305.16213 (2023)
+40. Watson, D., Chan, W., Ho, J., Norouzi, M.: Learning fast samplers for diffusion
+models by differentiating through sample quality. In: ICLR (2021)
+41. Xue,S.,Yi,M.,Luo,W.,Zhang,S.,Sun,J.,Li,Z.,Ma,Z.M.:Sa-solver:Stochastic
+adamssolverforfastsamplingofdiffusionmodels.arXivpreprintarXiv:2309.05019
+(2023)DC-Solver 31
+42. Yu,F.,Seff,A.,Zhang,Y.,Song,S.,Funkhouser,T.,Xiao,J.:Lsun:Construction
+of a large-scale image dataset using deep learning with humans in the loop. arXiv
+preprint arXiv:1506.03365 (2015)
+43. Zhang, L., Rao, A., Agrawala, M.: Adding conditional control to text-to-image
+diffusion models. In: ICCV. pp. 3836–3847 (2023)
+44. Zhang,Q.,Chen,Y.:Fastsamplingofdiffusionmodelswithexponentialintegrator.
+arXiv preprint arXiv:2204.13902 (2022)
+45. Zhang, Q., Tao, M., Chen, Y.: gddim: Generalized denoising diffusion implicit
+models. arXiv preprint arXiv:2206.05564 (2022)
+46. Zhao, W., Bai, L., Rao, Y., Zhou, J., Lu, J.: Unipc: A unified predictor-corrector
+framework for fast sampling of diffusion models. NeurIPS (2023)
+47. Zheng,K.,Lu,C.,Chen,J.,Zhu,J.:Dpm-solver-v3:Improveddiffusionodesolver
+with empirical model statistics. arXiv preprint arXiv:2310.13268 (2023)

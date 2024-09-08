@@ -1,0 +1,1759 @@
+Planning In Natural Language Improves
+LLM Search For Code Generation
+EvanWang1,2,FedericoCassano°3,4,CatherineWu° ,YunfengBai1,WillSong1,VaskarNath1,
+ZiwenHan1,SeanHendryx1,SummerYue1,HughZhang1
+1ScaleAI,2CaliforniaInstituteofTechnology,3NortheasternUniversity,4CursorAI,
+°WorkconductedwhileatScaleAI
+Correspondenceto#evan.wang@scale.com and hugh.zhang@scale.com
+Abstract
+Whilescalingtrainingcomputehasledtoremarkableimprovementsinlargelanguagemodels(LLMs),
+scaling inference compute has not yet yielded analogous gains. We hypothesize that a core missing
+component is a lack of diverse LLM outputs, leading to inefficient search due to models repeatedly
+samplinghighlysimilar,yetincorrectgenerations. Weempiricallydemonstratethatthislackofdiversity
+canbemitigatedbysearchingovercandidateplansforsolvingaprobleminnaturallanguage. Based
+onthisinsight,wepropose PLANSEARCH,anovelsearchalgorithmwhichshowsstrongresultsacross
+HumanEval+,MBPP+,andLiveCodeBench(acontamination-freebenchmarkforcompetitivecoding).
+PLANSEARCHgeneratesadiversesetofobservationsabouttheproblemandthenusestheseobservations
+to construct plans for solving the problem. By searching over plans in natural language rather than
+directly over code solutions, PLANSEARCH explores a significantly more diverse range of potential
+solutions compared to baseline search methods. Using PLANSEARCH on top of Claude 3.5 Sonnet
+achieves a state-of-the-art pass@200 of 77.0% on LiveCodeBench, outperforming both the best score
+achievedwithoutsearch(pass@1=41.4%)andusingstandardrepeatedsampling(pass@200=60.6%).
+Finally,weshowthat,acrossallmodels,searchalgorithms,andbenchmarksanalyzed,wecanaccurately
+predictperformancegainsduetosearchasadirectfunctionofthediversityovergeneratedideas.
+“Ifyoufailtoplan,youplantofail.” —Mastermind,TaylorSwift
+1. Introduction
+The bitter lesson [40] famously posits that two forms of scaling trump everything else: learning and
+search. Whilerecentadvancesinlargelanguagemodelshaveremovedalldoubtontheeffectivenessof
+learning,searchhasnotyetprovenitsvalueforlargelanguagemodels,despiteitssuccesswithclassical
+machinelearningtechniques[4,7,8,10,17,37,38].
+Here, we refer to search as any method of spending compute at inference time to improve overall
+performance[28]. Inthiswork,wefocusoureffortsonimprovingLLMsearchforcodegeneration,one
+ofthemostimportantcurrentapplicationsofLLMs. Wehypothesizethemajorbottleneckpreventing
+widespreaduseofsearchatinferencetimeforcodeisalackofhigh-leveldiversityinmodeloutputs.
+This lackof diversity is likelyin part due tospecific post-training objectivescommonly used to train
+1
+4202
+peS
+5
+]GL.sc[
+1v33730.9042:viXraPass@k Scores by Method on LiveCodeBench
+0.8
+0.770
+0.730
+0.703
+0.7
+0.649
+0.606
+0.6
+0.556
+0.533 0.532
+0.5
+0.413 0.414 0.403
+0.4 0.390
+0.3
+0.2
+Repeated Sampling@1
+0.1 Repeated Sampling@200
+PlanSearch@200
+0.0
+GPT-4o-mini GPT-4o ek-Coder-V2 Sonnet-3.5
+e
+S
+p
+e
+e
+D
+Figure 1: Comparison of REPEATED SAMPLING, both pass@1 and pass@k, and our novel method
+PLANSEARCH. On every model, our method outperforms baselines by a wide margin, with the best
+model-methodcombinationofClaude3.5Sonnet/ PLANSEARCHachievingperformancenearlydouble
+thatofthebestmodelwithoutsearch.
+LLMsaschatbots,inwhichmodelsareoftentimesoptimizedtoproduceasinglecorrectanswer[31,33].
+We empirically demonstrate that this is the case for many open-source language models which have
+undergonesignificantpost-training. Specifically,weshowthatinmanycases,despiteinstructiontuned
+models outperforming base models by large margins on a single sample regime (pass@1), this trend
+disappears—sometimesevenreversing—whengeneratingmanysamples. Werefer toFigure3asan
+exampleofthisphenomenon.
+Furthermore,thelackofdiversityisparticularlyharmfulforsearchalgorithms. Inthemostegregious
+ofcaseswithlittletonodiversity,suchasgreedydecoding,repeatedsamplingfromthemodelreturns
+highly similar programs, resulting in minimal gain from additional inference-time compute. This di-
+versity problem is also not reflected in many public leaderboards (e.g. LMSYS Chatbot Arena [14],
+LiveCodeBench[22],OpenLLMLeaderboard[1]),whichoftenreportonlythepassratefromasinglesam-
+pleofthemodel,ignoringanentiredimensionalongwhichtocomparemodels. Whiletheperformance
+of one sample is the primary metric of relevance for applications such as chatbots, as users typically
+aresensitivetolatency,thissinglescalarisinsufficienttofullycapturethequalityofamodelwhenitis
+allowedtousemoreinferencetimecompute.
+Inthispaper,weexploreseveraldirectionsforimprovingthediversityofLLMsatinferencetime. We
+hypothesize that the right axis of diversity to search over is the natural language conceptual/idea
+space, and we validate our hypothesis across several experiments. First, we show that models can
+producethecorrectfinalprogramwhenfedthecorrectsolutionsketches,wherethesesketcheshavebeen
+“backtranslated”frompassingsolutioncodeintosketchesinideaspace(Section3.2). Second,weshow
+thatwhenmodelsareaskedtogeneratetheirownideasbeforeimplementingthemonLiveCodeBench
+(IDEASEARCH), their accuracy conditioned on a particular sketch trends towards either 0% or 100%,
+2
+k@ssaPStage 1: Generate diverse observations Stage 2: Implement code from observations
+Second-order
+observations
+"Precompute
+positions for each
+First-order
+subsequence"
+observations
+"Use hashmaps" "Return False if
+Strategy
+the array is Pseudocode Code
+Description
+empty"
+"Use greedy Prompt new solutions with
+Coding Problem . . .
+search" "Your idea is wrong"
+"Identify the
+Strategy
+longest Pseudocode Code
+"Use binary Description
+subsequence"
+search"
+"Bucket each
+array into a size
+of root n"
+Figure2: AnexampletrajectoryofPLANSEARCH,whichsearchesoverplansinnaturallanguageasa
+methodofincreasingdiversityinthesearchprocess. PLANSEARCHfirstgeneratesobservations,then
+combinatoriallysamplessubsetsoftheseobservationstogeneratethenextstepinthesearchprocess. To
+generatethenextlayerofobservations,thecombinationsderivedfromthefirstobservationsareusedas
+asteppingstonetogeneratethenextobservations,andtheprocessrepeats. Aftergeneratingboththe
+firstandsecondorderobservations,PLANSEARCHthengeneratesanaturallanguagedescriptionofa
+strategytosolvetheproblem. Foradditionaldiversity,themodelispromptedtoregenerateitsstrategy
+asanadditionalsamplebeforegeneratingcode. SeeSection4.2foradditionaldiscussion.
+suggestingthatmostofthevarianceinpassingaparticularproblemiscapturedbywhetherthesketchis
+correctratherthananyotherfactor. ThesetwoexperimentssuggestanaturalmethodtoimprovingLLM
+searchforcodegeneration: bysearchingforthecorrectideatoimplement.
+Guided by this principle of maximizing exploration of ideas, we propose PLANSEARCH. In contrast to
+many existing search methods that search over individual tokens [44, 46], lines of code [24], or even
+entireprograms[25], PLANSEARCHsearchesoverpossibleplansforsolvingtheproblemathand,where
+a plan is defined as a collection of high level observations and sketches helpful to solve a particular
+problem(Figure2). Togeneratenovelplans,PLANSEARCHgeneratesanumberofobservationsabout
+theproblem,beforecombiningtheseobservationsintoacandidateplanforsolvingtheproblem. Thisis
+doneforeverypossiblesubsetofthegeneratedobservationstomaximallyencourageexplorationinidea
+space,beforethecodesareeventuallyalltranslatedintoafinalcodesolution(Section4.2). Wefindthat
+searchingoverplansoutperformsbothstandardrepeatedsamplinganddirectlysearchingoverideas
+(IDEASEARCH,introducedinSection4.1.2)intermsofeffectivelyusingcomputeatinferencetime.
+ApplyingPLANSEARCHontopofClaude3.5Sonnetachievesastate-of-the-artpass@200of77.0%on
+LiveCodeBench,outperformingboththebestscoreachievedwithoutsearch(pass@1=41.4%)andthe
+standardbest-of-nsamplingscore(pass@200=60.6%). Furthermore,consistentwithrecentfindingson
+theeffectivenessofsearchontopofsmallmodels[5,6,12,42],allowingPLANSEARCHbasedonasmall
+model(GPT-4o-mini)outperformslargermodelsnotaugmentedwithsearchaftermerely4attempts.
+Evaluations of PLANSEARCH across two other coding benchmarks, HumanEval+ and MBPP+ [26],
+suggestsimilarimprovements.
+3Finally,wemeasurethediversityofoutputcodeovertheideaspaceofallsearchmethodsviaanLLM-as-
+a-judgeprocedure(Section6.1)andshowthattheresultingdiversityscoreishighlycorrelatedwiththe
+performancegainsgeneratedbythatsearchmethod. Thisprovidesfurthersupportforourhypothesis
+thattheeffectiveexplorationofplansinideaspaceiskeytoLLMsearchforcodegeneration(Figure6).
+2. Related Work
+We reiterate that search as defined in the context of our paper refers to any method which expends
+inferencetimecomputetoimproveperformance. Wefurtherspecifyplanningasanyformofhighlevel
+observationorabstractthoughtthatassistsamodelingeneratingafinalsolution. Ourworkbuildsoffa
+longhistoryofworkinscalingsearchandplanning.
+2.1 SearchinClassicalAI
+Classicalsearchalgorithmslikebreadth-firstsearch,depth-firstsearch,andA*searchhavebeenwidely
+usedforpathfinding, planning, andoptimization[34]. MoreadvancedsearchtechniqueslikeMonte
+Carlo tree search (MCTS) have achieved remarkable success in domains like game playing, enabling
+superhumanperformanceinGo[37,38],poker[7,8]andDiplomacy[17]. Morerecently,Jones[23]find
+scalinglawsfortheperformanceofAIsystemsinboardgames,whereELOimproveslogarithmically
+withtheamountofcomputespentatinference.
+2.2 SearchwithLanguageModels
+ApplyingsearchontopofLLMshasbeenatopicofmuchinterest,especiallywithaneyetowardscode
+generation[13,25]. Historically,methodssuchasbeamsearchsignificantlyimprovedperformancefor
+translationsystems[18]. Closertothepresentday,severalrecentworkshaveexploredrepeatedsampling
+[5, 6, 12, 42] as a search method for improving performance. Repeated sampling is a method which
+directlygeneratescandidatecodesolutionsfromthemodelmanytimesatmoderatetohightemperatures
+inhopesthatoneoftheresultinggenerationswillbecorrect. However,althoughtheseworksaddress
+theroughlylinearincreaseinpass@kwithrespecttologk,theyonlyfocusonthemostbasicversionof
+repeatedsampling,withoutsearchinginideaspace.
+Whencombinedwithaverifier,rewardmodel,orotherfilteringalgorithmtoselectthebestgeneration
+(incaseswherepass@kisnotaviablemetricduetolackoftestcases),itisalsoknownunderthenameof
+best-of-nsampling[29]. Manyworksshowsomewhatgoodresultsunderintelligentselectionofsuch
+afilteringalgorithm[11,12]. Recently,severalapproacheshavedemonstratedthepowerofrepeated
+sampling. Forexample,repeatedsamplingfromasmallmodelcansometimesoutperformtakingasingle
+sample from a large model on an equalized compute bases [39]. Unlike algorithms such as repeated
+sampling, which search over the output space, the key insight of PLANSEARCH is that it is far more
+effectivetoinsteadsearchplansoverthelatentideaspace. Byexplicitlysearchingoverdifferentnatural
+language plans before generating the code, we significantly increase the diversity of the final code
+outputsandthus,theresultingpass@kscoresforsufficientlylargek.
+Regardingsearchingoverplansinnaturallanguage,severalapproacheshavealsoproposedgeneralizing
+chain-of-thought[41]reasoningintoasearch-likeprocess,suchasTreeofThoughts[43]andReasoning
+via Planning [20]. However, prior methods have largely demonstrated effectiveness on somewhat
+contrived problems designed to highlight the power of search, such as the game of 24, or classic
+planningbenchmarkssuchasBlocksworld[27],wherebothbenchmarksareeasiertosolvebyexplicitly
+consideringmanyoptions,andwherethe‘steps’overwhichtosearchoverarefairlyobvious. Bycontrast,
+most real-world planning is used to assist in domains that are complex enough to benefit from, but
+4Pass@k vs k for DeepSeek-Coder-V2-Lite Models on MBPP+
+0.90
+0.85
+0.80
+0.75
+0.70
+0.65
+DeepSeek-Coder-V2-Lite-Base
+0.60
+DeepSeek-Coder-V2-Lite-Instruct
+1 10 100
+k
+Figure 3: Despite DeepSeek-Coder-V2-Lite-Base having significantly lower pass@1 than its instruct
+counterpart,weobservethatthistrendreversesaskincreases,suggestingthattheinstructmodelhas
+lessdiversitythanitsbasemodelcounterpart. Weobservethistrendformany,butnotall,modelsand
+benchmarks,andprovidethefulldatainAppendixH.
+not require, the additional exploration of plans. We demonstrate that PLANSEARCH, which plans in
+naturallanguage,outperformsbaselinesearchmethodsinonesuchdomain: codegeneration. Moreover,
+ouranalysisrevealstheunderlyingreasonthatsuchsearchiseffective: itincreasesthediversityofthe
+generatedideas,allowingmoreefficientsearchrelativetoothermethodswhichrepeatedlysubmithighly
+similar,incorrectsolutions.
+3. Motivation
+Codingisapowerfulareainwhichsearchshouldexcel. Whilesearchinotherdomainsrequiresboth
+generating many solutions and selecting the correct solution amongst all the resulting generations,
+codingoftenonlyrequirestheformer,asanyvalidpieceofcodecanbetestedviacodeexecutionagainst
+giventestcases. Thisallowscodesearchalgorithmstosidestepmanyoftheissuesthatplaguesearch
+algorithmsformoreopen-endeddomains(e.g. generatingpoetry)duetodifficultyinselectingcorrect
+solutionsoutofallthegeneratedsolutions.
+3.1 DefiningtheSearchSpace
+Perhapsthemostimportantquestionforelicitingstrongsearchcapacitiesisdeterminingwhichspaceto
+searchover,asfindingtheproperlayerofabstractioniscriticaltoprogressinthefield. Priorapproaches
+have varied, with many people searching over individual tokens [44, 46], lines of code [24], or even
+entireprograms[25]. Wehypothesizethatthekeyfactorisobtainingthecorrectsolutionsketch, which
+we define as a description of the correct program in natural language space. Intuitively, conducting
+the reasoning process in natural language space allows us to effectively harness the training process
+of LLMs, which have observed many human reasoning traces in both pre- and post-training. Prior
+work[41]hasobservedstrongpositiveeffectsfrombeingallowedtoconductsuchreasoninginnatural
+language,makingitanaturalplacetosearchover. Wedescribetwoexperimentsprovidingevidencefor
+thishypothesisbytestingontheLiveCodeBenchbenchmarkusingGPT-4o-miniasourmodel.
+5
+k@ssaPEffects of Backtranslation on Performance Distribution of Solve Rates Conditioned on Idea
+1.00 0.35
+Pass@1 Per Problem
+0.95 B Paa ss se @lin 5e Pass@1 0.30 Per Idea
+Baseline Pass@5
+0.90
+0.25
+0.85
+0.20
+0.80
+0.15
+0.75
+0.10
+0.70
+0.05
+0.65
+101 102 103 0.00 0.0 0.2 0.4 0.6 0.8 1.0
+Average Solution Token Length Solve Rate
+(a) Performance of GPT-4o-mini on LiveCodeBench (b)Weplotthedistributionofsolveratesconditionedon
+whenprovidedwithbacktranslatedsolutionsofvary- beinggivenasolutionsketchandwithout. Whencon-
+ing lengths. The baselines plot performance without ditioningonagivensketch,wenoticethatdownstream
+backtranslatedsolutions. Providingthemodelwitha solveratespolarizetowardseither0%or100%. Mostof
+compressedsolutioninnaturallanguage,evenasshort thevarianceinperformanceispredictedbywhethera
+as10tokens,significantlyincreasesperformance. givenideaiscorrectornot.
+Figure4: Backtranslationshowsthepromiseofprovidinggoodsketches,andconditioningonideashows
+thepresenceofasolutionsketchpolarizesperformance.
+3.2 Backtranslation
+Toinvestigatethehypothesiswhethertheideaspace,instantiatedassolutionsketches,istherightareaof
+exploration,anaturalquestioniswhetherLLMscancorrectlyimplementacorrectcodesolutiongivena
+correctsketch. Inspiredbyapproachestobacktranslationinmachinelearning[16,32,35],weexperiment
+with“backtranslating”passingcodesolutionsbackintoideaspace. First,wegeneratecodesolutions
+usingGPT-4otogenerate1000attemptstosolvetheproblemandfilteroutproblemswithoutanypassing
+solutions. Aswealsodonothaveadatasetofcorrectsolutionsketchesassociatedwitheachsolution,we
+generateacandidatecorrectideaviabacktranslation. WedothisbyfeedinganLLMboththeproblem
+andcodesolutionandaskingtheLLMtoconvertsaidsolutionintoanaturallanguagedescriptionofthe
+solution. Additionally,wevarythedetailofthebacktranslatedideaviainstructionstotheLLMinthe
+prompt(e.g. ‘inwwords’). AfulldescriptionofthepromptscanbefoundinAppendixJ.1,alongside
+severalexamplebacktranslatedsolutionsofvariouslengths.
+Weobservethatpromptingamodelwithabacktranslatedideasignificantlyimprovesaccuracy,increas-
+ing with the length of the translated idea (Figure 4a), which suggests that having a correct sketch is
+sufficienttoproducethecorrectfinalsolutionwithrelativelyhighaccuracy,evenonlyafter10tokens
+ofbacktranslatedsolution. Thissuggeststhatthecorrectdirectionofsearchistoexplorethroughidea
+spacetomaximizethechanceofarrivingatacorrectidea.
+3.3 ConditioningonIdeaQuality
+Inafollow-upexperiment,wepromptanLLMtogenerateitsownsketchestosolveLiveCodeBench
+problemsinsteadofprovidingitwithgoldenonesviabacktranslation. First,wegenerate5ideasper
+problem using IDEASEARCH, defined in Section 4.1.2. For each idea, we then sample 25 candidate
+solutionsandmeasuretheirpassrate. Forthisexperiment,wefilteroutanyproblemthatGPT-4o-mini
+solveswitheithera100%ora0%solverate,sincesuchproblemsareeithertooeasyortoohardforthe
+modelandwouldnotbeinformativeforthisexperiment. Weendwith75problemsand375sketches.
+6
+k@ssaP
+ycneuqerFTotestourhypothesisthatgeneratingacorrectsketchisacriticalfactorforsolvingproblems,wecompare
+thedistributionofsolveratesforgeneratingcorrectcodesolutionsconditionedonagivensketchtothe
+distributionoversolveratesgivenasketchdrawnatrandom,i.e.,justthedistributionoversolverates.
+Formally, for any problem P, we sample some sketch I from some conditional distribution with
+i
+probability mass P(I|P). The probability of solving P is then P(solve|P,I). We compare the solve-
+i i i
+ratedistribution, P(solve|P,I) overallproblemsandallsketchesversusthesolve-ratedistributionof
+i
+∑ P(solve|P,I)·P(I|P) = P(solve|P)overallproblems.
+I i i i
+Whileverifyingwhetherasketchiscorrectorincorrectisdifficultwithoutaccesstoexternallabels,akey
+insightisthatifgeneratingthecorrectideaisacriticalfactorinsolvingtheproblem,thenconditioning
+onaparticularsketchshouldpolarizethedistributionofsolveratestowards{0,1}. Ifthemodelisgiven
+acorrectsketch,itshouldconsistentlygeneratecorrectsolutions,whileifgivenabadsketch,itshould
+consistentlygenerateincorrectsolutions.
+Ourresultsconfirmthistobethecase. Figure4bshowsthedistributionofsolveratesacrossproblems,
+bothunconditionally(inred)andconditionedoneachsketch(inblue). Wenoticethatwhengroupingby
+sketches,thesolveratesindeedbecomepolarizedtowards{0,1}. Thisresulthasimportantimplications
+forimprovingcodegeneration,suggestingthatalargeportionofvarianceinperformancemaycomefrom
+whetherthemodelisabletogenerateacorrectideaornot. Therefore,anaturalpathforimprovementis
+tofocusonthesketchgenerationstepandsearchforcorrectsketchesandobservationsinideaspace
+beforegeneratingsolutioncode.
+4. Methods
+We provide a description of the various methods of search we explore in our work. If additional
+backgroundoncompetitiveprogrammingandrelatednotationisdesired,weprovidemore(optional)
+informationinAppendixK.
+4.1 Baselines
+4.1.1 REPEATED SAMPLING
+We consider the basic prompting approach as a baseline, in which we use few-shot prompting by
+providing the LLM with a number of problem-solution pairs before asking it to solve the desired
+question [9]. A full example of the prompt is given in Appendix J.2. In code generation, the most
+commonvariantofsearchutilizedisrepeatedsampling,wheremodelsarerepeatedlysampledfrom
+untiltheygenerateanoutputthatpassesthetestorthemaximumnumberofsamplesisreached. Refer
+totheRelatedWorkformoreinformation(Section2.2).
+4.1.2 IDEASEARCH
+AnaturalextensionoftheREPEATEDSAMPLINGapproachdiscussedinSection4.1.1istoavoidprompting
+theLLMforthesolutioncodeimmediately. Thiscanbeviewedasanapplicationofthecommonlyused
+“chain-of-thought”promptingtoprogrammingproblems[41],althoughwefindthatIdeaSearchshows
+non-negligibleperformanceboostsoverstandard“chain-of-thought”prompting(seeAppendixE).
+In IDEASEARCH,theLLMisgiventheproblem PandisaskedtooutputanaturallanguagesolutionSof
+theproblem. Then,aseparateinstanceoftheLLMisgiven PandS,andtaskedtofollowtheproposed
+solutionStosolvetheproblem P. Thepurposeof IDEASEARCHistoisolatetheeffectivenessofhaving
+thecorrect“idea/sketch”forsolvingtheproblem. Empirically,wefindthatexplicitlyforcingthesearch
+7algorithmtoarticulateanideaforsolvingtheproblemincreasesdiversity. SeeAppendixJ.3fordetailed
+prompts.
+4.2 PLANSEARCH
+While both REPEATED SAMPLING and IDEASEARCH are successful and lead to improvement in the
+resultsonbenchmarkresults,weobservethatinmanyofthecases,promptingmultipletimes(pass@k)
+(evenathightemperatures)willonlyleadtosmall,narrowchangesintheoutputcodethatchangeminor
+aspectsbutfailtoimproveuponpitfallsinidea.
+4.2.1 PromptingforObservations
+Startingfromtheproblemstatement P,wepromptanLLMfor“observations”/hintstotheproblem.
+We denote these observations as O1, where, i ∈ {1,...,n } due to the fact that they are first-order
+i 1
+observations. Typically, n is on the order of 3 to 6. The exact number depends on the LLM output.
+1
+Tousetheseobservationstoinspirefutureideageneration,wecreateallsubsetswithsizeatmost2of
+(cid:8) (cid:9)
+S1 = O1,...,O1 . Eachofthesesubsetsisacombinationofobservations,andforclaritywedenote
+1 n 1
+eachsubsetasC1,i ∈ {1,...,l },wherel = 1+n +(n 1).
+i 1 1 1 2
+4.2.2 DerivingNewObservations
+Thesetofallobservationscanbethusdefinedasadirectedtreewithdepth1,wheretherootnodeis P,
+andanedgeexistsforeachC1 pointingfrom PtoC1. WethenrepeatthisprocedurefromSection4.2.1
+i i
+on each leaf node C1 to generate a set of second order observations, S2 = {O2 ,...,O2 }. To obtain
+i i i,1 i,ni,2
+secondorderobservations,wepromptthemodelwithboththeoriginalproblem Pandallobservations
+containedinC1,framedasprimitiveobservationsthatarenecessaryinordertosolveP. TheLLMisthen
+i
+promptedtouse/mergetheobservationsfoundinC1 inordertoderivenewones.
+i
+ThesameprocedureasSection4.2.1isusedtocreateallsubsetsC2 ,foralli ∈ {1,...,l }. Thisprocess
+i,j 1
+maybearbitrarilyrepeated,butwetruncatethetreeatdepth2forcomputationalconstraints.
+Notethatthereisnoassumptionanyoftheobservationsgeneratedarecorrect. Infact,itiscriticalto
+notethatmanyofthemmaybeincorrect. Theobservationsmerelyservetoelicitthemodeltosearch
+overamorediversesetofideas.
+4.2.3 ObservationstoCode
+Aftertheobservationshavebeenmade,theymustbeimplementedasideasbeforebeingtranslatedinto
+code. Foreachleafnode,wepromptthemodelwithallobservations,alongwiththeoriginalproblem
+P, inordertogenerateanaturallanguagesolutiontotheproblem P. Toaddmorediversity, foreach
+generatedidea,wegenerateanadditionalideabysupposingtheideaiswrong,andaskinganLLMto
+givecriticisms/feedback,thusincreasingourproposedideasbyafactorof2.
+Thesenaturallanguagesolutionsarethentranslatedintopseudocode,whicharesubsequentlytranslated
+intoactualPythoncode. Wetakeamoregranularapproachtoreducethetranslationerror(whichmay
+causethe modeltoreverttoits originalmode, disregardingthe reasoned-through observations). We
+provideallpromptsforallsectionsinAppendixJ.4.
+8Model Benchmark Pass@1 Pass@200 IDEASEARCH@200 PLANSEARCH@200
+GPT-4o-mini LiveCodeBench 39.0 53.3 59.4 64.9
+GPT-4o LiveCodeBench 41.3 60.6 70.4 73.0
+DeepSeek-Coder-V2 LiveCodeBench 41.4 53.2 65.9 70.3
+Claude-Sonnet-3.5 LiveCodeBench 40.3 55.6 70.2 77.0
+GPT-4o-mini HumanEval+ 83.7 95.0 97.5 98.2
+GPT-4o HumanEval+ 86.4 98.2 97.6 99.5
+DeepSeek-Coder-V2 HumanEval+ 82.8 91.4 97.2 99.3
+Claude-Sonnet-3.5 HumanEval+ 81.6 88.9 95.6 98.5
+GPT-4o-mini MBPP+ 73.5 83.8 87.3 91.0
+GPT-4o MBPP+ 77.2 87.4 89.3 92.2
+DeepSeek-Coder-V2 MBPP+ 76.3 81.9 89.1 92.6
+Claude-Sonnet-3.5 MBPP+ 77.1 83.0 87.8 93.7
+Table1: Wefindthat PLANSEARCHandIDEASEARCHimproveuponsearchbaselinesacrossallmodels,
+withPLANSEARCHachievingthebestresultsacrossallmodelsandbenchmarksconsidered. Notably,
+using PLANSEARCH ontopofClaude3.5Sonnet[2]hasapass@200of77.0onLiveCodeBench,which
+isnearlydoubletheperformanceofthetopmodelwithoutusingsearch(41.4). Wehighlyencourage
+readerstocheckAppendixAforcompleteresultsandpass@kcurves.
+5. Experimental Results
+5.1 Datasets
+Weevaluateoursearchmethodsonthreebenchmarks: MBPP+,HumanEval+ [26],andLiveCodeBench[22].
+MBPP[3]andHumanEval[13]aresomeofthemostwidelyusedcodebenchmarksinthefield. However,
+sincebothbenchmarksprovideonlyafewtestcases,[26]updatesbothbenchmarkswithadditionaltest
+casesthatincreasethebenchmarks’robustnesstorewardhacking. LiveCodeBenchisabenchmarkfor
+codingthatconsistsofcompetitiveprogrammingproblemswhichtypicallyrequireadvancedreasoning
+capabilities. Giventherealitythatcodingdataisoftenhighlyupsampledduringpre-training[15,30],
+LiveCodeBench differentiates itself from other benchmarks by taking care to segregate problems by
+datetoavoiddatacontaminationconcerns. Forthispaper,weuseonlythesubsetofproblemsbetween
+May 2024 and September 2024 to avoid possibilities of contamination. We choose May 2024 as the
+cutoffdatetoensurethatourresultswithourbestperformingmodel(Claude3.5Sonnet)arenotdue
+to contamination, because Claude 3.5 Sonnet has a knowledge cutoff of April 2024. To ensure fair
+comparison,weusethesamecutoffforallmodelsevaluated,eventhoughtheprecisecutoffdatesfor
+othermodelsmayvaryslightlyfromMay2024.
+5.2 ExperimentDetails
+For all search algorithms, we require that all output code be in the correct format specified, and we
+markasolutionasincorrectifitdoesnotfollowtheintendedformatting. Theextractedcodeisthenrun
+throughalltestsoftheprogramandmarkedascorrectifandonlyifitpassesalltests.
+Allmodelsarerunwithtemperature0.9andtop-pof0.95. Temperaturewasdeterminedthroughacoarse
+hyperparameter sweep on REPEATED SAMPLING and IDEASEARCH from T ∈ {0.0,0.1,0.2,...,1.2},
+whichwedescribeinAppendixF.
+9Pass@k vs k for Methods with Public Filtering on LiveCodeBench
+GPT-4o-mini GPT-4o
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+0.3 0.3
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+Public Filtering
+No Public Filtering
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+Repeated Sampling
+IdeaSearch
+0.3 0.3 PlanSearch
+1 10 1 10
+k k
+Figure5: PerformanceofallmodelsandmethodsonLiveCodeBenchwithpublictestfiltering. Theidea
+ofpublictestfilteringistoshiftpass@kcurvesleftward(i.e.,bringinghighktolowk),soweplotcurves
+indetailoverk ∈ {1,...,20}. Dottedlinesareprovidedforreferenceofthebasemethodpass@kbefore
+filtering. Evenat10completions, PLANSEARCHoutperformsfiltered REPEATED SAMPLING byaflat30to
+40%. Again,fullpass@kplotsareincludedintheirentiretyinAppendixA.
+BothREPEATED SAMPLINGandIDEASEARCHgenerateexactlyncodes,whereasPLANSEARCHgenerates
+avariablenumberofcodes,usuallyrangingontheorderof300to400. Tocomputepass@k,weusethe
+unbiasedestimatorinEquation4[13]1. Ifk > n,weassumetheremaininggenerationsdidnotpass. To
+computepass@kforfiltering,welimitthepoolofcodestothosethatarefiltered,meaningthatbothn
+andcmayshrinkinsize. Thiscanbethoughtofasaconditionalprobability,wheretheconditionisthat
+thecodepassespublictests.
+1NotethattheestimatorinEquation4theoreticallyrequiresthatthenumberofsuccessesfollowsabinomialdistribution.
+REPEATEDSAMPLINGandIDEASEARCHobeythis,butPLANSEARCHgenerationsmaynotbeindependent.SeeAppendixN
+formorediscussion.
+10
+k@ssaP
+k@ssaP5.3 Results
+Oursummarizedresultsfor REPEATED SAMPLING, IDEASEARCH,and PLANSEARCH canbefoundin
+Table1,Figure1,andFigure5. Additionally,weplotourfullpass@kcurvesforallmethods,models,and
+datasetsinAppendixA.Forsakeofeasycomparison,wealsoplotallrelativegainscomparedto RE-
+PEATED SAMPLING@1averagedoverallmodelsinAppendixC.Foracompute-normalizedcomparison
+between REPEATED SAMPLINGand PLANSEARCH,seeFigure18.
+5.4 PublicTestFiltering
+Publictestfilteringisamethodwhichonlychoosessamplesoutoftheoriginalpoolnwhichpassthe
+publictests. Thisisparticularlyusefulinsettingssuchascodedeploymentwhereexecutingthefullsuite
+oftestsmaybecomputationallycostlyorotherwiseundesirable(e.g. inacodingcontestwhereevery
+incorrectsubmissionispenalized). Thus,insteadofsubmittingallncodes,afterpublictestfiltering,only
+codesc wouldbesubmittedsuchthatc (x ) = y forall j ∈ {1,...,u},wherec (x)referstotheoutput
+i i j j i
+fromrunningthecodeonsomeinput x. Theprimaryeffectofpublictestfilteringistoshiftthepass@k
+curveleftward,sincepublictestfilteringwilldiscardlowqualitycandidatesolutionsthateitherfailto
+compileorfailelementarytestcasesfortheproblem.
+All problems in MBPP+, HumanEval+, and LiveCodeBench come with a few public tests which are
+usually used to sanity check any submissions. We can further improve performance by filtering on
+these public tests before a final submission, as described. Applying public test filtering reduces the
+numberofsamplestoachievethesameaccuracybytenfold: PLANSEARCHtoachievea77.1%accuracy
+onLiveCodeBenchafterjust20submissions(pass@20)comparedtoapass@200of77.0%withoutusing
+publicfiltering(seeFigure5). WeprovidefullresultsfortheotherdatasetsinAppendixB.
+6. Analysis
+Ourresultssuggestthatboth PLANSEARCH and IDEASEARCH outperformbasicsamplingbyawide
+margin(Figures12,13,14),withPLANSEARCHachievingthebestscoreacrossallmethodsandmodels
+considered. Weshowthedetailedpass@kresultsforeachdatasetinFigures7,8and9. Wealsocompare
+withChain-of-Thought[41]inAppendixE.Interestingly,wefindthatIDEASEARCHperformssomewhat
+better,whichwespeculatecomesfromdifferencesinsplittingsolutionsketchintotwomodelresponses,
+insteadofdoingbothchain-of-thoughtandcodesolutioninonemodelresponse.
+Investigatingthedifferencesinspecificmodels,wenoticethattrendsexhibitedbythepass@kcurvesare
+notuniformacrossallmodels;infact,eachcurveseemsunique. Wehypothesizethatthesedifferences
+are in part due to changes in idea diversity, as investigated in Figures 6, 26, 27. From the figures, we
+canseethatourapproximatediversityscoreaccountsformuchofthevarianceweseeintherelative
+improvement that arrives from scaling-up inference-time compute. This correlation holds across all
+methodsandmodelsonthesamedataset,thussuggestingthatdiversityscorecanbeusedasaproxyto
+predictforrelativepass@kimprovement. Forfurtherdiscussiononthespecificsofthediversityscore,
+seeSection6.1.
+One interesting point of observation is that PLANSEARCH often hurts pass@1 for several models, in-
+cludingmostnotablySonnet3.5onLiveCodeBench,ourbestperformingcombination. Intuitively,this
+isbecauseincreasingthediversityacrossideaslikelydilutestheprobabilitythatanyparticularideais
+generated, while simultaneously increasing the chance of having at least one correct idea within said
+pool. Therefore,pass@1maybeslightlylowerthanusual,yetpass@kwilllikelysurpass“pools”ofideas
+lackingdiversityforthisreason. SeeFigure48foragraphicalintuition.
+Finally,inTable1andFigure1,wepresentourmainresultsnormalizedacrossattempts/completion,
+11whereeachsearchmethodisallowedkattemptstosolveeachproblem. Analternativemethodofnormal-
+izingacrossmethodsistoequalizetheamountofcomputespentoneachmethod. SincePLANSEARCH
+and IDEASEARCH firstplanoutanideabeforeimplementingthefinalsolution,theybothspendmore
+computeatinferencetimepersolutiongenerated. InAppendixD,wereporttheequivalentplotsnor-
+malizedacrosscompute. Ourfindingsarehighlysimilarandsuggestthat PLANSEARCHoutperformsall
+othermethodsifsufficientcomputeisexpendedatinferencetime.
+6.1 MeasuringDiversity
+Idea Diversity vs Relative Gains from Search (on LiveCodeBench)
+1.8
+Repeated Sampling
+IdeaSearch
+1.6
+PlanSearch
+1.4
+1.2
+1.0
+0.8
+0.6 GPT-4o-mini
+GPT-4o
+0.4 DeepSeek-Coder-V2
+Sonnet-3.5
+0.2 0.3 0.4 0.5 0.6
+Idea Diversity
+Figure6: Weobserveastrongpositivecorrelationbetweenthemeasuredamountofideadiversityin
+asearchalgorithmandtheresultingimprovementsduetosearch(Section6.1). Diversityscoreisthe
+probabilitythatGPT-4o-minibelievestworandomlyselectedoutputcodesimplementdifferentideas
+(higherismorediverse). OurfindingssuggestthatdiversityinideaspaceisessentialforeffectiveLLM
+search.
+Wefindthatdiversityasmeasuredinideaspaceishighlypredictiveofsearchperformance,asmeasured
+bytherelativeimprovementbetweenamodel/method’spass@1anditspass@200(Figure6). Whilethe
+mostcommonmeasureofdiversityisentropy[36],entropyisinsufficientforanumberofreasonsforthe
+precisesettingofLLMs[21,45]. Asasimpleexample,considertwodifferentlanguagemodels,oneof
+whichgeneratesminorvariationsofthesameprogramwhileanothergeneratesavarietyofprograms
+withdifferentunderlyingideas. Evenifbothmodelshavethesameentropy, thelattermodelwillbe
+significantlybetterwhenaugmentedwithsearchcapabilities.
+Inoursetting,wemeasurediversitybygroundingitinideaspaceusingasimplepair-matchingstrategy
+acrossallgeneratedprograms. Formally,supposewehaveapoolofncodegenerations,{c ,...,c }. We
+1 n
+12
+)002@ssaP
+ot
+1@ssaP(
+sniaG
+evitaleRassumethateachpieceofcodeimplementssomesketch,whichcanbethoughttoexistinsomelatent
+‘idea’space. Weconsidertwosketchessimilariftheyarewithinϵofeachotherinthislatentspace,for
+somechoiceofϵ. Assuch,inthisspace,c havingasimilarideatoc andsimilarlyforc andc doesnot
+i j j k
+implyc andc shareasimilaridea.
+i k
+To compute the diversity of such a given generation pool, we ask an LLM to judge the similarity of
+two ideas in the following manner. First, we construct each of the (n) pairs. For each pair (c ,c ), we
+2 i j
+judge(usinganLLM)whetherbothc andc implementthesameidea. Wedefinethisasthefunction
+i j
+S(c ,c ) ∈ {0,1},whichevaluatesto1ifc andc implementthesameideaand0otherwise. Ouroverall
+i j i j
+diversityscoreforaparticularproblemisthendefinedas:
+∑ S(c ,c )
+i<j i j
+D = 1− (1)
+(n)
+2
+Modelsthatoutputprogramsthatallimplementthesameideawillhaveascoreof D = 0,whilemodels
+thatoutputcompletelyuniqueprogramswillhaveascoreof D = 1. Overall,ascoreof Dimpliesthatif
+twocodesarechosenatrandom,theprobabilitythattheyarethesameidea(asmeasuredbytheLLM)is
+D. InAppendixM,wedescribethismeasureinadditionalmathematicaldepth.
+Foraparticularmethod,ourreporteddiversityscoreissimplythediversityscoreoverallproblemsin
+theconsidereddataset. Forcomputationalfeasibility,forlargen,weinsteadsampleasubsetof40codes
+andtestallpairsfromthatsubsetinstead. Inordertotestcodesamples,wefirstbacktranslateusingan
+LLMtoexpressthecodeinnaturallanguagebeforecomparingeachpairusingboththecodeandthe
+backtranslatedidea. WedetailthepromptsusedinAppendixJ.5anduseOpenAI’sGPT-4o-miniasthe
+supportingLLM.
+7. Limitations and Future Work
+While PLANSEARCH substantiallyimprovesdiversityoverideaspaceatinference-time,fundamentally,
+improvementsindiversityshouldcomeatthepost-trainingstage. Thislikelyrequiresre-imaginingthe
+post-trainingpipelineforLLMsaroundsearch,insteadofthecurrentparadigmoptimizedforasingle
+correctresponse. Thismayrequirebothcollectinghighqualitypost-trainingdatathatisalsosufficiently
+diverse,andnewlearningobjectivesthatdonotaimsolelytomaximizetheexpectedrewardofagiven
+response. Weareoptimisticaroundfutureworktodesignsignificantlyimprovedpost-trainingobjectives
+thatmaximizebothqualityanddiversityandwhichspecificallyoptimizedtouseinference-timecompute
+tomaximumeffectiveness.
+IntermsofmethodologicalimprovementstoPLANSEARCH,PLANSEARCHcurrentlysearchesallleaf
+nodesinthesearchtreeuniformly. Becauseofthis,itbecomesquicklyintractabletogofurtherthana
+couplelevelsdeep, andinourexperiments, weareonlyabletogotwolevelsdownthetree. Several
+approachesbasedonMonte-CarloTreeSearch(MCTS),suchasTreeofThought[43]orReasoningas
+Planning[19],havesuggestedthatsomeformofdynamicpruningandexpansionofnodescanbevery
+helpful. WeareoptimisticthatPLANSEARCHcanbefurtherimprovedbysuchmethods. Furthermore,
+PLANSEARCHisafairlyelementarymethodtakingadvantageoftheparadigmthatsearchingoveracon-
+ceptualorideaspaceisaneffectivemethodtoimprovediversity,andthus,downstreamtaskperformance.
+Itiscompletelyfeasibletosearchatanevenhigherlevelofabstractionthanobservations,whichmaybe
+usedtoinjectevenmorediversityintothefinalgeneratedoutputs.
+PLANSEARCH and IDEASEARCH tradeoff a slight deterioration of pass@1 performance for a large
+improvementinpass@kperformance. However, inmanysuchcasesoutsideofcodegeneration, itis
+infeasibletorunanLLM-basedmodelformorethanafewattemptsatmost. Forexample,inFigure9,
+PLANSEARCHdoesnotsignificantlyoutperform REPEATED SAMPLINGuntilk ≥ 4.
+Fortunately,manyfilteringalgorithmsexist,whichimplicitlybringpass@k(forhigh k)topass@1(or
+13lower k), i.e. shifting the original pass@k curve leftward. A simple example of this is public test
+filtering. AsseeninFigure5,pass@1offilteredPLANSEARCHsignificantlyimprovesuponpass@1of
+baseREPEATEDSAMPLING,whichgetsevenbetteraskincreases. Moreover,mosttoalmostallbasemodels
+withpublictestfilteringoutperformtheirinstructmodelvariantsatpass@1,nomatterthedataset(see
+Appendix I), where clearly base models are known to be worse, yet trading off for somewhat higher
+diversity. Thus,wearguethatthereexistsapotentialforanewparadigm—developingsearchalgorithms
+whichtradeoffpass@1performanceformuchstrongerpass@kperformance,thenfilteringthepromising
+generatedsolutionstoextractthepass@kbackintothepass@1.
+Additionally, we focus on code generation in this paper and do not consider the applicability of
+PLANSEARCHtoabroadersetofdomains. Onepointofimportanceisthatthepass@kmetricheavily
+used throughout code generation may not be as applicable to other domains and a larger focus on
+selectingthecorrectsolutionoutofallpossiblegeneratedcandidatesmayberequired,insteadofmerely
+generatingthecorrectsolution. However,withgoodfilteringmethods,whichwedemonstratecanbe
+simple in nature, pass@k, for medium k, can be effectively brought down to pass@1, emphasizing a
+similarparadigmofincreasingdiversity,thenstrengtheningexistingfilteringmethods.
+Finally, a natural extension of this work is training the underlying model itself on successful plans
+and code solutions obtained from PLANSEARCH. This has the potential to distill the pass@k into the
+pass@1—withoutinference-timemethodslikefiltering—byreducingthelikelihoodofthemodelgoing
+downbranchesofthesearchtreewhichdonotleadtocorrectsolutions. Webelievethatsuchtrainingis
+likelytosignificantlyimprovethemodelandlookforwardtofutureworkinthisdirection.
+8. Acknowledgements
+WewouldliketothankJasonWei,MilesTurpin,SailWang,HoraceHe,KennethLi,CeliaChen,Rahul
+Chalamala,AlanWu,andKevinChangfortheirhelpfulcomments,suggestionsanddiscussionoverthe
+courseofthisproject.
+References
+[1] Zhiqiang Shen Aidar Myrzakhan, Sondos Mahmoud Bsharat. Open-llm-leaderboard: From
+multi-choice to open-style questions for llms evaluation, benchmark, and arena. arXiv preprint
+arXiv:2406.07545,2024.
+[2] Anthropic. Claude3.5sonnet. https://www.anthropic.com/news/claude-3-5-sonnet,June2024.
+[3] JacobAustin,AugustusOdena,MaxwellNye,MaartenBosma,HenrykMichalewski,DavidDohan,
+EllenJiang,CarrieCai,MichaelTerry,QuocLe,andCharlesSutton. Programsynthesiswithlarge
+languagemodels,2021. URLhttps://arxiv.org/abs/2108.07732.
+[4] Anton Bakhtin, David J. Wu, Adam Lerer, Jonathan Gray, Athul Paul Jacob, Gabriele Farina,
+AlexanderH.Miller,andNoamBrown. MasteringtheGameofNo-PressDiplomacyviaHuman-
+RegularizedReinforcementLearningandPlanning,October2022. URLhttp://arxiv.org/abs/
+2210.05492. arXiv:2210.05492[cs].
+[5] Hritik Bansal, Arian Hosseini, Rishabh Agarwal, Vinh Q. Tran, and Mehran Kazemi. Smaller,
+weaker, yet better: Training llm reasoners via compute-optimal sampling, 2024. URL https:
+//arxiv.org/abs/2408.16737.
+[6] Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V. Le, Christopher Ré, and
+AzaliaMirhoseini. Largelanguagemonkeys: Scalinginferencecomputewithrepeatedsampling,
+2024. URLhttps://arxiv.org/abs/2407.21787.
+14[7] Noam Brown and Tuomas Sandholm. Superhuman AI for heads-up no-limit poker: Libratus
+beatstopprofessionals. Science,359(6374):418–424,2018. Publisher: AmericanAssociationforthe
+AdvancementofScience.
+[8] NoamBrownandTuomasSandholm. SuperhumanAIformultiplayerpoker. Science,365(6456):
+885–890,2019. Publisher: AmericanAssociationfortheAdvancementofScience.
+[9] Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel
+Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel Ziegler,
+Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen, Eric Sigler, Mateusz Litwin, Scott Gray,
+BenjaminChess,JackClark,ChristopherBerner,SamMcCandlish,AlecRadford,IlyaSutskever,
+andDarioAmodei.Languagemodelsarefew-shotlearners.InH.Larochelle,M.Ranzato,R.Hadsell,
+M.F.Balcan, and H.Lin(eds.), AdvancesinNeural InformationProcessingSystems, volume33, pp.
+1877–1901. Curran Associates, Inc., 2020. URL https://proceedings.neurips.cc/paper/2020/
+file/1457c0d6bfcb4967418bfb8ac142f64a-Paper.pdf.
+[10] Murray Campbell, A.Joseph Hoane, and Feng hsiung Hsu. Deep blue. Artificial Intelligence,
+134(1):57–83, 2002. ISSN 0004-3702. doi: https://doi.org/10.1016/S0004-3702(01)00129-1. URL
+https://www.sciencedirect.com/science/article/pii/S0004370201001291.
+[11] BeiChen,FengjiZhang,AnhNguyen,DaoguangZan,ZeqiLin,Jian-GuangLou,andWeizhuChen.
+Codet: Codegenerationwithgeneratedtests. arXivpreprintarXiv:2207.10397,2022.
+[12] LingjiaoChen,JaredQuincyDavis,BorisHanin,PeterBailis,IonStoica,MateiZaharia,andJames
+Zou. Aremorellmcallsallyouneed? towardsscalinglawsofcompoundinferencesystems,2024.
+URLhttps://arxiv.org/abs/2403.02419.
+[13] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared
+Kaplan,HarriEdwards,YuriBurda,NicholasJoseph,GregBrockman,AlexRay,RaulPuri,Gretchen
+Krueger,MichaelPetrov,HeidyKhlaaf,GirishSastry,PamelaMishkin,BrookeChan,ScottGray,
+NickRyder,MikhailPavlov,AletheaPower,LukaszKaiser,MohammadBavarian,ClemensWinter,
+PhilippeTillet,FelipePetroskiSuch,DaveCummings,MatthiasPlappert,FotiosChantzis,Elizabeth
+Barnes,ArielHerbert-Voss,WilliamHebgenGuss,AlexNichol,AlexPaino,NikolasTezak,JieTang,
+IgorBabuschkin,SuchirBalaji,ShantanuJain,WilliamSaunders,ChristopherHesse,AndrewN.
+Carr,JanLeike,JoshAchiam,VedantMisra,EvanMorikawa,AlecRadford,MatthewKnight,Miles
+Brundage,MiraMurati,KatieMayer,PeterWelinder,BobMcGrew,DarioAmodei,SamMcCandlish,
+IlyaSutskever,andWojciechZaremba. EvaluatingLargeLanguageModelsTrainedonCode,July
+2021. URLhttp://arxiv.org/abs/2107.03374. arXiv:2107.03374[cs].
+[14] Wei-LinChiang,LianminZheng,YingSheng,AnastasiosNikolasAngelopoulos,TianleLi,Dacheng
+Li,HaoZhang,BanghuaZhu,MichaelJordan,JosephE.Gonzalez,andIonStoica. Chatbotarena:
+Anopenplatformforevaluatingllmsbyhumanpreference,2024. URLhttps://arxiv.org/abs/
+2403.04132.
+[15] AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,etal. Thellama3herdofmodels.
+arXivpreprintarXiv:2407.21783,2024.
+[16] SergeyEdunov,MyleOtt,MichaelAuli,andDavidGrangier. Understandingback-translationat
+scale,2018. URLhttps://arxiv.org/abs/1808.09381.
+[17] FAIR, Anton Bakhtin, Noam Brown, Emily Dinan, Gabriele Farina, ColinFlaherty, Daniel Fried,
+AndrewGoff,JonathanGray,HengyuanHu,AthulPaulJacob,MojtabaKomeili,KarthikKonath,
+15MinaeKwon,AdamLerer,MikeLewis,AlexanderH.Miller,SashaMitts,AdithyaRenduchintala,
+StephenRoller,DirkRowe,WeiyanShi,JoeSpisak,AlexanderWei,DavidWu,HughZhang,and
+Markus Zijlstra. Human-level play in the game of Diplomacy by combining language models
+with strategic reasoning. Science, 378(6624):1067–1074, December 2022. doi: 10.1126/science.
+ade9097. URL https://www.science.org/doi/10.1126/science.ade9097. Publisher: American
+AssociationfortheAdvancementofScience.
+[18] Markus Freitag and Yaser Al-Onaizan. Beam search strategies for neural machine translation.
+In Proceedings of the First Workshop on Neural Machine Translation. Association for Computational
+Linguistics,2017. doi: 10.18653/v1/w17-3207. URLhttp://dx.doi.org/10.18653/v1/W17-3207.
+[19] Shibo Hao, Yi Gu, Haodi Ma, Joshua Jiahua Hong, Zhen Wang, Daisy Zhe Wang, and Zhiting
+Hu. Reasoning with Language Model is Planning with World Model, May 2023. URL http:
+//arxiv.org/abs/2305.14992. arXiv:2305.14992[cs].
+[20] ShiboHao,YiGu,HaodiMa,JoshuaJiahuaHong,ZhenWang,DaisyZheWang,andZhitingHu.
+Reasoningwithlanguagemodelisplanningwithworldmodel,2023. URLhttps://arxiv.org/
+abs/2305.14992.
+[21] TatsunoriB.Hashimoto,HughZhang,andPercyLiang. UnifyingHumanandStatisticalEvaluation
+forNaturalLanguageGeneration. NorthAmericanAssociationforComputationalLinguistics(NAACL).,
+April2019. URLhttp://arxiv.org/abs/1904.02792. arXiv: 1904.02792.
+[22] NamanJain,KingHan,AlexGu,Wen-DingLi,FanjiaYan,TianjunZhang,SidaWang,Armando
+Solar-Lezama, Koushik Sen, and Ion Stoica. Livecodebench: Holistic and contamination free
+evaluationoflargelanguagemodelsforcode. arXivpreprintarXiv:2403.07974,2024.
+[23] AndyL.Jones. Scalingscalinglawswithboardgames,2021. URLhttps://arxiv.org/abs/2104.
+03113.
+[24] SumithKulal,PanupongPasupat,KartikChandra,MinaLee,OdedPadon,AlexAiken,andPercy
+Liang. Spoc: Search-basedpseudocodetocode,2019. URLhttps://arxiv.org/abs/1906.04908.
+[25] YujiaLi,DavidChoi,JunyoungChung,NateKushman,JulianSchrittwieser,RémiLeblond,Tom
+Eccles,JamesKeeling,FelixGimeno,AgustinDalLago,etal. Competition-levelcodegeneration
+withalphacode. Science,378(6624):1092–1097,2022.
+[26] JiaweiLiu,ChunqiuStevenXia,YuyaoWang,andLingmingZhang. IsYourCodeGeneratedby
+ChatGPTReallyCorrect? RigorousEvaluationofLargeLanguageModelsforCodeGeneration. In
+Thirty-seventhConferenceonNeuralInformationProcessingSystems,2023. URLhttps://openreview.
+net/forum?id=1qvx610Cu7.
+[27] DrewM.McDermott. The1998aiplanningsystemscompetition. AIMagazine,21(2):35,Jun.2000.
+doi: 10.1609/aimag.v21i2.1506.URLhttps://ojs.aaai.org/aimagazine/index.php/aimagazine/
+article/view/1506.
+[28] AidanMcLaughlin. AISearch: TheBitter-erLesson,2024. AccessedonSeptember3,2024.
+[29] SidharthMudgal,JongLee,HarishGanapathy,YaGuangLi,TaoWang,YanpingHuang,Zhifeng
+Chen, Heng-TzeCheng, MichaelCollins, TrevorStrohman, JilinChen, AlexBeutel, andAhmad
+Beirami. Controlleddecodingfromlanguagemodels,2024. URLhttps://arxiv.org/abs/2310.
+17022.
+16[30] OpenAI,JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoni
+Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, Red Avila, Igor
+Babuschkin, Suchir Balaji, Valerie Balcom, Paul Baltescu, Haiming Bao, Mohammad Bavarian,
+Jeff Belgum, Irwan Bello, Jake Berdine, Gabriel Bernadett-Shapiro, Christopher Berner, Lenny
+Bogdonoff,OlegBoiko,MadelaineBoyd,Anna-LuisaBrakman,GregBrockman,TimBrooks,Miles
+Brundage, Kevin Button, Trevor Cai, Rosie Campbell, Andrew Cann, Brittany Carey, Chelsea
+Carlson, Rory Carmichael, Brooke Chan, Che Chang, Fotis Chantzis, Derek Chen, Sully Chen,
+Ruby Chen, Jason Chen, Mark Chen, Ben Chess, Chester Cho, Casey Chu, Hyung Won Chung,
+DaveCummings,JeremiahCurrier,YunxingDai,CoryDecareaux,ThomasDegry,NoahDeutsch,
+DamienDeville,ArkaDhar,DavidDohan,SteveDowling,SheilaDunning,AdrienEcoffet,Atty
+Eleti,TynaEloundou,DavidFarhi,LiamFedus,NikoFelix,SimónPosadaFishman,JustonForte,
+IsabellaFulford,LeoGao,ElieGeorges,ChristianGibson,VikGoel,TarunGogineni,GabrielGoh,
+RaphaGontijo-Lopes,JonathanGordon,MorganGrafstein,ScottGray,RyanGreene,JoshuaGross,
+Shixiang Shane Gu, Yufei Guo, Chris Hallacy, Jesse Han, Jeff Harris, Yuchen He, Mike Heaton,
+JohannesHeidecke,ChrisHesse,AlanHickey,WadeHickey,PeterHoeschele,BrandonHoughton,
+KennyHsu,ShengliHu,XinHu,JoostHuizinga,ShantanuJain,ShawnJain,JoanneJang,Angela
+Jiang,RogerJiang,HaozhunJin,DennyJin,ShinoJomoto,BillieJonn,HeewooJun,TomerKaftan,
+Łukasz Kaiser, Ali Kamali, Ingmar Kanitscheider, Nitish Shirish Keskar, Tabarak Khan, Logan
+Kilpatrick,JongWookKim,ChristinaKim,YongjikKim,JanHendrikKirchner,JamieKiros,Matt
+Knight,DanielKokotajlo,ŁukaszKondraciuk,AndrewKondrich,ArisKonstantinidis,KyleKosic,
+GretchenKrueger,VishalKuo,MichaelLampe,IkaiLan,TeddyLee,JanLeike,JadeLeung,Daniel
+Levy,ChakMingLi,RachelLim,MollyLin,StephanieLin,MateuszLitwin,TheresaLopez,Ryan
+Lowe,PatriciaLue,AnnaMakanju,KimMalfacini,SamManning,TodorMarkov,YanivMarkovski,
+Bianca Martin, Katie Mayer, Andrew Mayne, Bob McGrew, Scott Mayer McKinney, Christine
+McLeavey,PaulMcMillan,JakeMcNeil,DavidMedina,AalokMehta,JacobMenick,LukeMetz,
+Andrey Mishchenko, Pamela Mishkin, Vinnie Monaco, Evan Morikawa, Daniel Mossing, Tong
+Mu,MiraMurati,OlegMurk,DavidMély,AshvinNair,ReiichiroNakano,RajeevNayak,Arvind
+Neelakantan,RichardNgo,HyeonwooNoh,LongOuyang,CullenO’Keefe,JakubPachocki,Alex
+Paino,JoePalermo,AshleyPantuliano,GiambattistaParascandolo,JoelParish,EmyParparita,Alex
+Passos, Mikhail Pavlov, Andrew Peng, Adam Perelman, Filipe de Avila Belbute Peres, Michael
+Petrov,HenriquePondedeOliveiraPinto,Michael,Pokorny,MichellePokrass,VitchyrH.Pong,
+Tolly Powell, Alethea Power, Boris Power, Elizabeth Proehl, Raul Puri, Alec Radford, Jack Rae,
+AdityaRamesh,CameronRaymond,FrancisReal,KendraRimbach,CarlRoss,BobRotsted,Henri
+Roussez, Nick Ryder, Mario Saltarelli, Ted Sanders, Shibani Santurkar, Girish Sastry, Heather
+Schmidt,DavidSchnurr,JohnSchulman,DanielSelsam,KylaSheppard,TokiSherbakov,Jessica
+Shieh, Sarah Shoker, Pranav Shyam, Szymon Sidor, Eric Sigler, Maddie Simens, Jordan Sitkin,
+KatarinaSlama,IanSohl,BenjaminSokolowsky,YangSong,NatalieStaudacher,FelipePetroski
+Such,NatalieSummers,IlyaSutskever,JieTang,NikolasTezak,MadeleineB.Thompson,PhilTillet,
+AminTootoonchian,ElizabethTseng,PrestonTuggle,NickTurley,JerryTworek,JuanFelipeCerón
+Uribe, Andrea Vallone, Arun Vijayvergiya, Chelsea Voss, Carroll Wainwright, Justin Jay Wang,
+AlvinWang,BenWang,JonathanWard,JasonWei,C.J.Weinmann,AkilaWelihinda,PeterWelinder,
+JiayiWeng,LilianWeng,MattWiethoff,DaveWillner,ClemensWinter,SamuelWolrich,Hannah
+Wong,LaurenWorkman,SherwinWu,JeffWu,MichaelWu,KaiXiao,TaoXu,SarahYoo,Kevin
+Yu,QimingYuan,WojciechZaremba,RowanZellers,ChongZhang,MarvinZhang,ShengjiaZhao,
+TianhaoZheng,JuntangZhuang,WilliamZhuk,andBarretZoph. GPT-4TechnicalReport,March
+2024. URLhttp://arxiv.org/abs/2303.08774. arXiv:2303.08774[cs].
+[31] LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow
+instructionswithhumanfeedback. Advancesinneuralinformationprocessingsystems,35:27730–27744,
+2022.
+17[32] Hieu Pham, Xinyi Wang, Yiming Yang, and Graham Neubig. Meta back-translation, 2021. URL
+https://arxiv.org/abs/2102.07847.
+[33] RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,andChelsea
+Finn. Directpreferenceoptimization: Yourlanguagemodelissecretlyarewardmodel. Advancesin
+NeuralInformationProcessingSystems,36,2024.
+[34] StuartRussellandPeterNorvig. Artificialintelligence: amodernapproach. 2002.
+[35] RicoSennrich,BarryHaddow,andAlexandraBirch. Improvingneuralmachinetranslationmodels
+withmonolingualdata,2016. URLhttps://arxiv.org/abs/1511.06709.
+[36] ClaudeEShannon. Amathematicaltheoryofcommunication. BellSystemTechnicalJournal,27(3):
+379–423,623–656,1948.
+[37] DavidSilver,AjaHuang,ChrisJ.Maddison,ArthurGuez,LaurentSifre,GeorgevandenDriessche,
+JulianSchrittwieser,IoannisAntonoglou,VedaPanneershelvam,MarcLanctot,SanderDieleman,
+Dominik Grewe, John Nham, Nal Kalchbrenner, Ilya Sutskever, Timothy Lillicrap, Madeleine
+Leach,KorayKavukcuoglu,ThoreGraepel,andDemisHassabis. MasteringtheGameofGowith
+DeepNeuralNetworksandTreeSearch. Nature,529(7587):484–489,January2016. ISSN0028-0836,
+1476-4687. doi: 10.1038/nature16961. URLhttp://www.nature.com/articles/nature16961.
+[38] DavidSilver,JulianSchrittwieser,KarenSimonyan,IoannisAntonoglou,AjaHuang,ArthurGuez,
+ThomasHubert,LucasBaker,MatthewLai,AdrianBolton,andothers. MasteringtheGameofGo
+WithoutHumanKnowledge. Nature,550(7676):354–359,2017. Publisher: NaturePublishingGroup.
+[39] CharlieSnell,JaehoonLee,KelvinXu,andAviralKumar. Scalingllmtest-timecomputeoptimally
+can be more effective than scaling model parameters, 2024. URL https://arxiv.org/abs/2408.
+03314.
+[40] RichardSSutton. Thebitterlesson. IncompleteIdeas,2019. URLhttp://www.incompleteideas.net/
+IncIdeas/BitterLesson.html.
+[41] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,BrianIchter,FeiXia,EdChi,QuocLe,
+andDennyZhou. Chain-of-ThoughtPromptingElicitsReasoninginLargeLanguageModels. arXiv,
+2022. doi: 10.48550/arXiv.2201.11903. URLhttp://arxiv.org/abs/2201.11903. arXiv:2201.11903
+[cs].
+[42] YangzhenWu,ZhiqingSun,ShandaLi,SeanWelleck,andYimingYang. Anempiricalanalysisof
+compute-optimalinferenceforproblem-solvingwithlanguagemodels,2024. URLhttps://arxiv.
+org/abs/2408.00724.
+[43] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik
+Narasimhan. Tree of Thoughts: Deliberate Problem Solving with Large Language Models, May
+2023. URLhttp://arxiv.org/abs/2305.10601. arXiv:2305.10601[cs].
+[44] DanZhang,SiningZhoubian,ZiniuHu,YisongYue,YuxiaoDong,andJieTang.Rest-mcts*: Llmself-
+trainingviaprocessrewardguidedtreesearch,2024. URLhttps://arxiv.org/abs/2406.03816.
+[45] HughZhang,DanielDuckworth,DaphneIppolito,andArvindNeelakantan. Tradingoffdiversity
+andqualityinnaturallanguagegeneration. InProceedingsoftheworkshoponhumanevaluationofNLP
+systems(HumEval),pp.25–33,Online,April2021.AssociationforComputationalLinguistics. URL
+https://aclanthology.org/2021.humeval-1.3.
+[46] ShunZhang,ZhenfangChen,YikangShen,MingyuDing,JoshuaB.Tenenbaum,andChuangGan.
+Planningwithlargelanguagemodelsforcodegeneration. InTheEleventhInternationalConferenceon
+LearningRepresentations,2023. URLhttps://openreview.net/forum?id=Lr8cOOtYbfL.
+18Appendix
+A. Full Pass@K curves for All Models and All Benchmarks
+SeeFigures7,8,9. WeplotallmodelsandmethodsonHumanEval+,MBPP+[26],andLiveCodeBench[22],
+respectively.
+Pass@k vs k for Methods on HumanEval+
+GPT-4o-mini GPT-4o
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6 RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+PPllaannSSeeaarrcchh
+1 10 100 1 10 100
+k k
+Figure7: Pass@kperformanceofallmodelsandmethodsonHumanEval+,plottedoverk ∈ {1,...,200}.
+19
+k@ssaP
+k@ssaPPass@k vs k for Methods on MBPP+
+GPT-4o-mini GPT-4o
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+0.5 0.5
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+PPllaannSSeeaarrcchh
+0.5 0.5
+1 10 100 1 10 100
+k k
+Figure8: Pass@kperformanceofallmodelsandmethodsonMBPP+,plottedoverk ∈ {1,...,200}.
+20
+k@ssaP
+k@ssaPPass@k vs k for Methods on LiveCodeBench
+GPT-4o-mini GPT-4o
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+0.3 0.3
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+PPllaannSSeeaarrcchh
+0.3 0.3
+1 10 100 1 10 100
+k k
+Figure 9: Pass@k performance of all models and methods on LiveCodeBench, plotted over k ∈
+{1,...,200}.
+21
+k@ssaP
+k@ssaPB. Full Pass@k Curves with Public Filtering
+See Figures 10, 11, 5. We plot all models and methods with public test filtering on HumanEval+,
+MBPP+[26],andLiveCodeBench[22],respectively.
+Pass@k vs k for Methods with Public Filtering on HumanEval+
+GPT-4o-mini GPT-4o
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+1.0 1.0
+Public Filtering
+No Public Filtering
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6 Repeated Sampling
+IdeaSearch
+PlanSearch
+1 10 1 10
+k k
+Figure10: Pass@kperformanceofallmodelsandmethodsonHumanEval+,withpublictestfiltering,
+plottedoverk ∈ {1,...,20}. Notethatdottedlinesareprovidedforreferenceofthebasemethodpass@k
+beforefiltering.
+22
+k@ssaP
+k@ssaPPass@k vs k for Methods with Public Filtering on MBPP+
+GPT-4o-mini GPT-4o
+0.90 0.90
+0.85 0.85
+0.80 0.80
+0.75 0.75
+0.70 0.70
+0.65 0.65
+0.60 0.60
+0.55 0.55
+0.50 0.50
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+0.90 0.90 Public Filtering
+No Public Filtering
+0.85 0.85
+0.80 0.80
+0.75 0.75
+0.70 0.70
+0.65 0.65
+0.60 0.60
+Repeated Sampling
+0.55 0.55 IdeaSearch
+PlanSearch
+0.50 0.50
+1 10 1 10
+k k
+Figure11: Pass@kperformanceofallmodelsandmethodsonMBPP+,withpublictestfiltering,plotted
+overk ∈ {1,...,20}. Notethatdottedlinesareprovidedforreferenceofthebasemethodpass@kbefore
+filtering.
+23
+k@ssaP
+k@ssaPC. Average Relative Improvements
+See Figures 12, 13, 14. To create these graphs, the relative improvements of each point on all pass@k
+curves are computed and compared to the respective pass@1 of REPEATED SAMPLING. Then these
+valuesareaveragedoverallmodels,sothatthereisonecurvepermethodperdataset. Thedatasetsare
+HumanEval+,MBPP+[26],andLiveCodeBench[22],respectively. Forthepublictestfilteredversions,
+seeFigures15,16,17.
+Average Gains on HumanEval+
+20
+15
+10
+5
+0
+5
+10
+RReeppeeaatteedd SSaammpplliinngg
+15
+IIddeeaaSSeeaarrcchh
+PPllaannSSeeaarrcchh
+20
+100 101 102
+k
+Figure12: PerformancegainoverREPEATED SAMPLING@1averagedoverallmodelsonHumanEval+,
+plottedoverk ∈ {1,...,200}.
+24
+)%(
+niaG
+evitaleRAverage Gains on MBPP+
+20
+10
+0
+10
+RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+20 PPllaannSSeeaarrcchh
+100 101 102
+k
+Figure13: Performancegainover REPEATED SAMPLING@1averagedoverallmodelsonMBPP+,plotted
+overk ∈ {1,...,200}.
+25
+)%(
+niaG
+evitaleRAverage Gains on LiveCodeBench
+80
+60
+40
+20
+0
+RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+PPllaannSSeeaarrcchh
+100 101 102
+k
+Figure14: Performancegainover REPEATED SAMPLING@1averagedoverallmodelsonLiveCodeBench,
+plottedoverk ∈ {1,...,200}.
+26
+)%(
+niaG
+evitaleRAverage Gains with Public Filtering on HumanEval+
+Public Filtering
+No Public Filtering
+15
+10
+5
+0
+5
+10
+Repeated Sampling
+15
+IdeaSearch
+PlanSearch
+20
+100 101
+k
+Figure15: Averageperformancegainoverallmodelsofmethodswithpublictestfilteringcomparedto
+REPEATED SAMPLING@1,plottedoverk ∈ {1,...,20}. Notethatdottedlinesareprovidedforreference
+ofthebasemethodpass@k(beforefiltering).
+27
+)%(
+niaG
+evitaleRAverage Gains with Public Filtering on MBPP+
+20
+Public Filtering
+No Public Filtering
+15
+10
+5
+0
+5
+10
+15
+Repeated Sampling
+IdeaSearch
+20 PlanSearch
+100 101
+k
+Figure16: Averageperformancegainoverallmodelsofmethodswithpublictestfilteringcomparedto
+REPEATED SAMPLING@1,plottedoverk ∈ {1,...,20}. Notethatdottedlinesareprovidedforreference
+ofthebasemethodpass@k(beforefiltering).
+28
+)%(
+niaG
+evitaleRAverage Gains with Public Filtering on LiveCodeBench
+Public Filtering
+No Public Filtering
+60
+40
+20
+0
+Repeated Sampling
+IdeaSearch
+PlanSearch
+100 101
+k
+Figure17: Averageperformancegainoverallmodelsofmethodswithpublictestfilteringcomparedto
+REPEATED SAMPLING@1,plottedoverk ∈ {1,...,20}. Notethatdottedlinesareprovidedforreference
+ofthebasemethodpass@k(beforefiltering).
+29
+)%(
+niaG
+evitaleRD. Compute Normalized Pass@K Graphs
+SeeFigure18. ForeachrunofamethodinAppendixA,wecomputethenumberofgeneratedtokens
+needed per completion, per problem, independently on each dataset. Then, we average across all
+datasetstoobtain244generatedtokenspercompletionperproblemforREPEATED SAMPLING,and1,428
+generatedtokenspercompletionperproblemfor PLANSEARCH.
+Compute-Normalized Repeated Sampling vs PlanSearch
+0.8 PlanSearch
+Repeated Sampling
+0.7
+0.6
+0.5
+0.4
+GPT-4o-mini
+GPT-4o
+DeepSeek-Coder-V2
+0.3
+Sonnet-3.5
+245 103 104 105
+Average Tokens Used (per problem)
+Figure18: Normalizedpass@kbyaveragetokensusedperproblem. REPEATED SAMPLING usesroughly
+244tokenspercompletionperproblem,and PLANSEARCHusesroughly1428tokenspercompletionper
+problem. Whenwenormalizecomputeacrossmethods,wefindthat PLANSEARCHbeginstobemore
+effectivethanrepeatedsamplingiftheuseriswillingtosampleatleast10,000tokensperproblem.
+30
+etar-evloSE. Comparison with Chain-of-Thought
+SeeFigures19,20,21,whicharerunonLiveCodeBench[22],MBPP+,andHumanEval+[26],respectively.
+ThesearethesameplotsasAppendixA,withCoT[41]. SeeFigures22,23,24forthepublictestfiltered
+versions.
+Pass@k vs k with CoT on LiveCodeBench
+GPT-4o-mini GPT-4o
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+0.3 0.3
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4 RReeppeeaatteedd SSaammpplliinngg
+IIddeeaaSSeeaarrcchh
+CChhaaiinn--ooff--TThhoouugghhtt
+PPllaannSSeeaarrcchh
+0.3 0.3
+1 10 100 1 10 100
+k k
+Figure19: Pass@kgraphsonLiveCodeBench,withtheChain-of-Thoughtbaseline.
+31
+k@ssaP
+k@ssaPPass@k vs k with CoT on MBPP+
+GPT-4o-mini GPT-4o
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+0.5 0.5
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+0.9 0.9
+0.8 0.8
+0.7 0.7
+RReeppeeaatteedd SSaammpplliinngg
+0.6 0.6
+IIddeeaaSSeeaarrcchh
+CChhaaiinn--ooff--TThhoouugghhtt
+PPllaannSSeeaarrcchh
+0.5 0.5
+1 10 100 1 10 100
+k k
+Figure20: Pass@kgraphsonMBPP+,withtheChain-of-Thoughtbaseline.
+32
+k@ssaP
+k@ssaPPass@k vs k with CoT on HumanEval+
+GPT-4o-mini GPT-4o
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+1 10 100 1 10 100
+DeepSeek-Coder-V2 Sonnet-3.5
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+RReeppeeaatteedd SSaammpplliinngg
+0.6 0.6 IIddeeaaSSeeaarrcchh
+CChhaaiinn--ooff--TThhoouugghhtt
+PPllaannSSeeaarrcchh
+1 10 100 1 10 100
+k k
+Figure21: Pass@kgraphsonHumanEval+,withtheChain-of-Thoughtbaseline.
+33
+k@ssaP
+k@ssaPPass@k vs k with CoT (Public Filtering) on LiveCodeBench
+GPT-4o-mini GPT-4o
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4
+0.3 0.3
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+Public Filtering
+No Public Filtering
+0.7 0.7
+0.6 0.6
+0.5 0.5
+0.4 0.4 Repeated Sampling
+IdeaSearch
+Chain-of-Thought
+PlanSearch
+0.3 0.3
+1 10 1 10
+k k
+Figure22: Pass@kgraphsonLiveCodeBench,withtheChain-of-Thoughtbaselineandpublicfiltering.
+34
+k@ssaP
+k@ssaPPass@k vs k with CoT (Public Filtering) on MBPP+
+GPT-4o-mini GPT-4o
+0.90 0.90
+0.85 0.85
+0.80 0.80
+0.75 0.75
+0.70 0.70
+0.65 0.65
+0.60 0.60
+0.55 0.55
+0.50 0.50
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+0.90 0.90 Public Filtering
+No Public Filtering
+0.85 0.85
+0.80 0.80
+0.75 0.75
+0.70 0.70
+0.65 0.65
+0.60 0.60 Repeated Sampling
+IdeaSearch
+0.55 0.55 Chain-of-Thought
+PlanSearch
+0.50 0.50
+1 10 1 10
+k k
+Figure23: Pass@kgraphsonMBPP+,withtheChain-of-Thoughtbaselineandpublicfiltering.
+35
+k@ssaP
+k@ssaPPass@k vs k with CoT (Public Filtering) on HumanEval+
+GPT-4o-mini GPT-4o
+1.0 1.0
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6
+1 10 1 10
+DeepSeek-Coder-V2 Sonnet-3.5
+1.0 1.0
+Public Filtering
+No Public Filtering
+0.9 0.9
+0.8 0.8
+0.7 0.7
+Repeated Sampling
+0.6 0.6 IdeaSearch
+Chain-of-Thought
+PlanSearch
+1 10 1 10
+k k
+Figure24: Pass@kgraphsonHumanEval+,withtheChain-of-Thoughtbaselineandpublicfiltering.
+36
+k@ssaP
+k@ssaPF. Ablation on Temperature for REPEATED SAMPLING and IDEASEARCH
+SeeFigure25. Wesweepovertemperatureincrementsof0.1from0.0to1.2,inclusive,withtop-pof0.95,
+on REPEATED SAMPLINGand IDEASEARCH.
+Temperature Effects on Pass@k (on LiveCodeBench)
+1.2
+Repeated Sampling
+0.575
+IdeaSearch
+1.0
+0.550
+0.525
+0.8
+0.500
+0.6
+0.475
+0.450
+0.4
+0.425
+0.2
+0.400
+0.375 0.0
+100 101
+k
+Figure 25: Sweep over temperature in 0.1 increments from 0.0 to 1.2. REPEATED SAMPLING and
+IDEASEARCHbothexhibitpass@kimprovementsathighertemperature,althoughitseemsthathigher
+temperaturesmaybegintoplateau.
+37
+k@ssaP
+erutarepmeTG. Diversity Score vs Search Improvement Plots for MBPP+ and HumanEval+
+See Figures 26, 27, 6. Each figure is made through running the diversity measure as described in
+Section 6.1 on the generated codes of each run, then compared with the relative gain from pass@k
+comparedtopass@1.
+Idea Diversity vs Relative Gains from Search (on HumanEval+)
+0.9 Repeated Sampling
+IdeaSearch
+0.8 PlanSearch
+0.7
+0.6
+0.5
+0.4
+0.3
+GPT-4o-mini
+GPT-4o
+0.2
+DeepSeek-Coder-V2
+0.1 Sonnet-3.5
+0.1 0.2 0.3 0.4 0.5
+Idea Diversity
+Figure26: RelationshipbetweenthemeasureddiversityscoreasdescribedinSection6.1(wherehigheris
+morediverse)andrelativeimprovementfromthepass@1ofthemethodtothepass@200ofthemethod.
+38
+)002@ssaP
+ot
+1@ssaP(
+sniaG
+evitaleRIdea Diversity vs Relative Gains from Search (on MBPP+)
+0.9
+Repeated Sampling
+IdeaSearch
+0.8
+PlanSearch
+0.7
+0.6
+0.5
+0.4
+0.3
+GPT-4o-mini
+0.2 GPT-4o
+DeepSeek-Coder-V2
+0.1
+Sonnet-3.5
+0.1 0.2 0.3 0.4 0.5 0.6
+Idea Diversity
+Figure27: RelationshipbetweenthemeasureddiversityscoreasdescribedinSection6.1(wherehigher
+ismorediverse)andrelativeimprovementfromthepass@1ofthemethodtothepass@200ofthemethod
+onMBPP+.
+39
+)002@ssaP
+ot
+1@ssaP(
+sniaG
+evitaleRH. Base Models vs. Instruct Models for Large Samples
+Wefindthatbasemodels,despiteperformingpoorlyrelativetotheirinstructcounterpartsforevaluated
+withpass@1,willfrequentlymatchorevenexceedperformanceonpass@kforsufficientlyhighk. This
+islikelyduetohigheramountsofdiversityinbasemodels,whichhavenotundergonepost-training
+designedtoelicitasinglestrongresponsefromthemodel.
+We see this effect across all models for HumanEval+ and MBPP+, but only the DeepSeek-Coder-V2
+familyforLiveCodeBench.
+SeeFigures29,30,31forLlama-3.1-8bpass@kcomparisons.
+SeeFigures32,33,34forLlama-3.1-70bpass@kcomparisons.
+SeeFigures3,35,36forDeepSeek-Coder-V2-Litepass@kcomparisons.
+We also ran Llama-3.1-8b and DeepSeek-Coder-V2-Lite pass@k comparisons for k up to 10,000; see
+Figures37,28.
+Pass@k vs k for DeepSeek-Coder-V2-Lite Models on LiveCodeBench
+0.6
+0.5
+0.4
+0.3
+0.2
+DeepSeek-Coder-V2-Lite-Base
+DeepSeek-Coder-V2-Lite-Instruct
+1 10 100 1,000 10,000
+k
+Figure 28: Pass@k curves comparing DeepSeek-Coder-V2-Lite’s base and instruct versions on Live-
+CodeBenchwithupto10,000completions.
+I. Base Models vs. Instruct Models with Public Test Filtering
+WerepeatthegraphsfromAppendixH,butwithpublictestfiltering. Wefindthatbasemodelswith
+publictestfilteringalmostalwaysexceedthepass@1oftheirinstructmodelvariants.
+SeeFigures38,39,40forLlama-3.1-8bpass@kcomparisonswithpublictestfiltering.
+SeeFigures41,42,43forLlama-3.1-70bpass@kcomparisonswithpublictestfiltering.
+SeeFigures44,45,46forDeepSeek-Coder-V2-Litepass@kcomparisonswithpublictestfiltering.
+40
+k@ssaPPass@k vs k for Llama-3.1-8B Models on MBPP+
+0.8
+0.7
+0.6
+0.5
+Llama-3.1-8B-Base
+Llama-3.1-8B-Instruct
+1 10 100
+k
+Figure29: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonMBPP+.
+Pass@k vs k for Llama-3.1-8B Models on HumanEval+
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4
+0.3 Llama-3.1-8B-Base
+Llama-3.1-8B-Instruct
+1 10 100
+k
+Figure30: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonHumanEval+.
+41
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-8B Models on LiveCodeBench
+0.45
+0.40
+0.35
+0.30
+0.25
+0.20
+0.15
+Llama-3.1-8B-Base
+0.10
+Llama-3.1-8B-Instruct
+1 10 100
+k
+Figure31: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonLiveCodeBench.
+Pass@k vs k for Llama-3.1-70B Models on MBPP+
+0.90
+0.85
+0.80
+0.75
+0.70
+0.65
+0.60 Llama-3.1-70B-Base
+Llama-3.1-70B-Instruct
+0.55
+1 10 100
+k
+Figure32: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonMBPP+.
+42
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-70B Models on HumanEval+
+0.9
+0.8
+0.7
+0.6
+0.5
+Llama-3.1-70B-Base
+Llama-3.1-70B-Instruct
+1 10 100
+k
+Figure33: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonHumanEval+.
+Pass@k vs k for Llama-3.1-70B Models on LiveCodeBench
+0.6
+0.5
+0.4
+0.3
+Llama-3.1-70B-Base
+0.2
+Llama-3.1-70B-Instruct
+1 10 100
+k
+Figure34: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonLiveCodeBench.
+43
+k@ssaP
+k@ssaPPass@k vs k for DeepSeek-Coder-V2-Lite Models on HumanEval+
+0.9
+0.8
+0.7
+0.6
+0.5 DeepSeek-Coder-V2-Lite-Base
+DeepSeek-Coder-V2-Lite-Instruct
+1 10 100
+k
+Figure 35: Pass@k curves comparing DeepSeek-Coder-V2-Lite’s base and instruct versions on Hu-
+manEval+.
+Pass@k vs k for DeepSeek-Coder-V2-Lite Models on LiveCodeBench
+0.50
+0.45
+0.40
+0.35
+0.30
+0.25
+0.20
+DeepSeek-Coder-V2-Lite-Base
+0.15
+DeepSeek-Coder-V2-Lite-Instruct
+1 10 100
+k
+Figure 36: Pass@k curves comparing DeepSeek-Coder-V2-Lite’s base and instruct versions on Live-
+CodeBench.
+44
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-8B Models on LiveCodeBench
+0.5
+0.4
+0.3
+0.2
+Llama-3.1-8B-Base
+0.1
+Llama-3.1-8B-Instruct
+1 10 100 1,000 10,000
+k
+Figure37: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonLiveCodeBenchwith
+upto10,000completions.
+Pass@k vs k for Llama-3.1-8B Models on MBPP+
+Public Filtering
+No Public Filtering
+0.8
+0.7
+0.6
+0.5
+Llama-3.1-8B-Base
+Llama-3.1-8B-Instruct
+1 10
+k
+Figure38: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonMBPP+withpublic
+testfiltering.
+45
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-8B Models on HumanEval+
+Public Filtering
+No Public Filtering
+0.8
+0.7
+0.6
+0.5
+0.4
+0.3
+Llama-3.1-8B-Base
+Llama-3.1-8B-Instruct
+1 10
+k
+Figure39: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonHumanEval+with
+publictestfiltering.
+Pass@k vs k for Llama-3.1-8B Models on LiveCodeBench
+Public Filtering
+No Public Filtering
+0.45
+0.40
+0.35
+0.30
+0.25
+0.20
+0.15
+0.10 Llama-3.1-8B-Base
+Llama-3.1-8B-Instruct
+1 10
+k
+Figure40: Pass@kcurvescomparingLlama-3.1-8B’sbaseandinstructversionsonLiveCodeBenchwith
+publictestfiltering.
+46
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-70B Models on MBPP+
+0.90
+Public Filtering
+No Public Filtering
+0.85
+0.80
+0.75
+0.70
+0.65
+0.60
+Llama-3.1-70B-Base
+Llama-3.1-70B-Instruct
+0.55
+1 10
+k
+Figure41: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonMBPP+withpublic
+testfiltering.
+Pass@k vs k for Llama-3.1-70B Models on HumanEval+
+Public Filtering
+0.9 No Public Filtering
+0.8
+0.7
+0.6
+0.5
+Llama-3.1-70B-Base
+Llama-3.1-70B-Instruct
+1 10
+k
+Figure42: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonHumanEval+with
+publictestfiltering.
+47
+k@ssaP
+k@ssaPPass@k vs k for Llama-3.1-70B Models on LiveCodeBench
+0.60
+Public Filtering
+No Public Filtering
+0.55
+0.50
+0.45
+0.40
+0.35
+0.30
+0.25
+0.20 Llama-3.1-70B-Base
+Llama-3.1-70B-Instruct
+1 10
+k
+Figure43: Pass@kcurvescomparingLlama-3.1-70B’sbaseandinstructversionsonLiveCodeBenchwith
+publictestfiltering.
+Pass@k vs k for DeepSeek-Coder-V2-Lite Models on MBPP+
+0.90 Public Filtering
+No Public Filtering
+0.85
+0.80
+0.75
+0.70
+0.65
+0.60 DeepSeek-Coder-V2-Lite-Base
+DeepSeek-Coder-V2-Lite-Instruct
+1 10
+k
+Figure44: Pass@kcurvescomparingDeepSeek-Coder-V2-Lite’sbaseandinstructversionsonMBPP+
+withpublictestfiltering.
+48
+k@ssaP
+k@ssaPPass@k vs k for DeepSeek-Coder-V2-Lite Models on HumanEval+
+Public Filtering
+0.9
+No Public Filtering
+0.8
+0.7
+0.6
+0.5
+DeepSeek-Coder-V2-Lite-Base
+DeepSeek-Coder-V2-Lite-Instruct
+1 10
+k
+Figure 45: Pass@k curves comparing DeepSeek-Coder-V2-Lite’s base and instruct versions on Hu-
+manEval+withpublictestfiltering.
+Pass@k vs k for DeepSeek-Coder-V2-Lite Models on LiveCodeBench
+Public Filtering
+0.45 No Public Filtering
+0.40
+0.35
+0.30
+0.25
+0.20
+0.15
+DeepSeek-Coder-V2-Lite-Base
+DeepSeek-Coder-V2-Lite-Instruct
+1 10
+k
+Figure 46: Pass@k curves comparing DeepSeek-Coder-V2-Lite’s base and instruct versions on Live-
+CodeBenchwithpublictestfiltering.
+49
+k@ssaP
+k@ssaPJ. Prompts
+J.1 Backtranslation
+J.1.1 BacktranslateSystemPrompt
+You are an expert Python programmer. You will be given an algorithmic question (problem
+specification). You will return a high-level, natural language solution to the question,
+like an editorial. You will NOT return any code. Be as creative as possible, going beyond
+what you think is intuitively correct.
+J.1.2 ImplementBacktranslationIdea
+You are an expert Python programmer. You will be given a question (problem specification)
+and a natural language solution/tutorial that describes how to solve the problem. You will
+generate a correct Python program that matches said specification and tutorial and passes
+all tests. You will NOT return anything except for the program inside markdown codeblocks.
+J.2 RepeatedSampling
+You are an expert Python programmer. You will be given a question (problem specification)
+and will generate a correct Python program that matches the specification and passes all
+tests. You will NOT return anything except for the program inside Markdown codeblocks.
+J.3 SimpleIdea
+You will given a competitive programming problem; please output a high-level description
+of how to solve the problem in natural language. Below are examples:
+Example input: PROBLEM DESCRIPTION HERE
+Example output: EXAMPLE OUTPUT HERE
+Here is the competitive programming problem: PROBLEM TO SOLVE
+Brainstorm a high-level, natural language solution to the problem above. Note that your
+intuition may lead you astray, so come up with simple, creative ideas that go beyond what
+you would usually come up with and go beyond your narrow intuition. Brainstorming solutions
+that do not seem intuitively correct IS CRUCIAL.
+J.4 PLANSEARCH
+J.4.1 PromptforObservationPart1
+You are an expert Python programmer. You will be given an competitive programming question
+(problem specification). You will return several useful, non-obvious, and correct observations
+about the problem, like hints to solve the problem. You will NOT return any code. Be as
+creative as possible, going beyond what you think is intuitively correct.
+50J.4.2 PromptforObservationPart2
+You are an expert Python programmer. You will be given an competitive programming question
+(problem specification) and several correct observations about the problem.
+You will brainstorm several new, useful, and correct observations about the problem, derived
+from the given observations. You will NOT return any code. Be as creative as possible, going
+beyond what you think is intuitively correct.
+J.4.3 CombiningObservations
+Here is a sample prompt from the function with placeholders:
+Here is the competitive programming problem:
+Problem statement placeholder
+Here are the intelligent observations to help solve the problem:
+Observation 1 placeholder
+Observation 2 placeholder
+Observation 3 placeholder
+Use these observations above to brainstorm a natural language solution to the problem above.
+Note that your intuition may lead you astray, so come up with simple, creative ideas that
+go beyond what you would usually come up with and exceeds your narrow intuition.
+Quote relevant parts of the observations EXACTLY before each step of the solution. QUOTING
+IS CRUCIAL.
+J.5 MeasuringDiversity
+You are an expert Python programmer. You will be given a competitive programming problem
+and two pieces of code which are attempts to solve the problem. For your convenience, you
+will also be given the idea for each code, summarized in natural language. You will be asked
+to answer whether the ideas behind the code are the same. You must ONLY output ’Yes.’ or
+’No.’
+K. Competitive Programming
+Competitive programming is a popular subset of programming tasks that involve solving complex
+algorithmicreasoning. Typically,problemsconsistofaproblemstatement(writteninnaturallanguage)
+P,withassociatedtests: (x ,y ),i ∈ {1,...,m},forwhichanysolutionmustpassallofthem.
+i i
+Thenumberoftestsmdependsontheproblem,buttypicallyrangesontheorderof25to100. Asmall
+subsetofthetestsaretypicallygiventothesolver(wecallthesepublictests)touseasvalidationthat
+their program passes simple cases. The rest of the tests are hidden. Solutions to the problems must
+generally pass all the tests to be considered correct. Formally, we let f(x) denote the output of said
+coderanoninput x. Thesolutioncodeisconsideredcorrect(passing)ifandonlyif f(x ) = y forall
+i i
+i ∈ {1,...,m}.
+51Eachdatasetconsistsofmany(ontheorderoflow-hundreds)independentproblems,andmodelsare
+evaluatedoneachoftheseproblemsindependently.
+L. A Model of Repeated Sampling: Pass@k
+Consider a simplified model of repeated sampling for code generation. Suppose we have a dataset
+D = {P ,...,P}withl problems. Forsomeproblem P,definetheprobability p astheprobabilitythat
+1 l i i
+our code generation model solves the problem P in one submission. The pass@k [13, 24] metric (for
+i
+problem P)isdefinedastheprobabilitythatourcodegenerationmodelsolvestheproblem P atleast
+i i
+once out of k submissions. Thus, if we know the true p of our model, we may compute our pass@k
+i
+simply:
+pass@k = 1−(1−p )k (2)
+i i
+∑
+pass@k = pass@k /l (3)
+i
+i
+However,itturnsoutthatfork > 1,thenaïveestimatorasseeninEquation2isbiased,ifwesample
+n ≥ kfromourcodemodeltosolveP,c ≤ n arecorrect,andcompute p = c /n [13]. Instead,pass@k
+i i i i i i i i
+istypicallycomputedusingtheunbiasedestimator:
+(n−c)
+pass@k = 1− k (4)
+i (n)
+k
+Notethatreportingpass@konadatasetwhere l = 1isratherpointless,sincepass@kcanbederived
+usingonlypass@1 andn . Everycurve,overasuitablerangeofkvalues,willlookliketheS-curveseen
+1 1
+inFigure47(askisplottedonalogscale).
+Pass@k for Solve Probability p=0.04
+1.0
+0.8
+0.6
+0.4
+0.2
+p=0.04
+0.0
+100 101 102
+k
+Figure47: Asimplepass@k‘S-curve’plottedwith1−(1−p)k,where p = 0.04.
+However,withdatasetswherel > 1,modelsareabletodifferentiatethemselvesthroughlargerk,since
+theoverallpass@kisanaverageofthesel curves. Forexample,forl = 3,itislessoptimaltohavesolved
+52
+k@ssaPprobabilitiesofSet1 = {0.001,0.7,0.9}versusSet2 = {0.05,0.1,0.25},intheregimeofroughlyk = 20to
+k = 2,000(inwhichbothconvergeto1),eventhoughSet1hasapass@1of53%andSet2hasapass@1of
+13%. SeeFigure48.
+Although not shown in the graph, Set2 converges close to 1 at roughly k = 400, several orders of
+magnitudebelowSet1. Inaddition,notethattheslightnotchseeninSet1’scurveatlargekisduetothe
+presenceoflow,butnon-zerosolve-rates,whichcanbeseeninempiricalpass@kcurveslateron. (These
+canbethoughtasthebeginningofthe‘ramping-up’regimeofthetypicalS-curvesinFigure47.)
+Pass@k Across Different Solve Probability Sets
+1.0
+0.8
+0.6
+Average (Set 1)
+0.4
+p=0.001 (Set 1)
+p=0.7 (Set 1)
+p=0.9 (Set 1)
+0.2 Average (Set 2)
+p=0.01 (Set 2)
+p=0.1 (Set 2)
+0.0 p=0.25 (Set 2)
+100 101 102
+k
+Figure48: Twopass@kcurvesonahypotheticaldatasetoflengthl = 3,andthesolveprobabilitiesofSet
+1are{0.001,0.7,0.9}andSet2are{0.05,0.1,0.25}. Notethatthepass@1is53%and13%,respectively.
+However,atroughlyk = 20,Set2surpassesSet1andwithinanorderofmagnitude,achievespass@kof
+roughly1.0.
+M. Mathematics of the Diversity Measure
+Whileourchoiceofadiversitymetricisintuitive,oneshouldnotethatthereareanumberofintriguing
+details that result from our definition. In particular, it is not necessarily the case that a model that
+outputskuniqueideasoutofnsamplestoachieveadiversityscoreof k. Consideranexampleofn = 9
+n
+codes,separatedinto3cliquesof3,whereeachcliqueimplementsthesameidea(andseparatecliques
+implementseparateideas). Inthissetup, 1 ofideasareunique,butinourmetric,thereare3matching
+3
+ideapairs(and9totalmatchingideapairs)outof(9) = 36,foradiversityscoreof1− 9 = 3.
+2 36 4
+N. Biased Estimator for Pass@K Due to Non-Independence of PLANSEARCH
+Fromapuretheoreticalstandpoint,theexpressionisbiased(ifusingthesameinterpretation),butitstill
+leadstoasimilarinterpretation—computingtheprobabilitythatasubsetofsizekdrawnfromthesetof
+53
+k@ssaPsampleswealreadygeneratedcontainsatleastonesuccess. (Thesegivensamplesweregeneratedby
+onerunofPLANSEARCH.) Assuch,intheory,theestimatormaybeslightlybiasedinthePLANSEARCH
+casewhencomputingitstruepass@k. Inpractice,wedonotbelievethistobealargeconcern,especially
+asourprimaryresultsfeaturearelativelylargek = 200.
+54
