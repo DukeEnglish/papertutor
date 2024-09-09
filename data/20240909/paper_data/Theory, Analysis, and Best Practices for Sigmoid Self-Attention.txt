@@ -1,0 +1,3322 @@
+Theory, Analysis, and Best Practices for
+Sigmoid Self-Attention
+JasonRamapuram∗ FedericoDanieli∗ EeshanDhekane∗ FlorisWeers∗
+DanBusbridge∗ PierreAblin∗ TatianaLikhomanenko∗
+JagritDigani ZijinGu AmitisShidani RussWebb
+Apple
+{jramapuram, f_danieli, eeshan, floris_weers, dbusbridge,
+p_ablin, antares, digani, zgu26, amitis_shidani, rwebb}@apple.com
+Abstract
+Attentionisakeypartofthetransformerarchitecture. Itisasequence-to-sequence
+mappingthattransformseachsequenceelementintoaweightedsumofvalues.
+Theweightsaretypicallyobtainedasthesoftmaxofdotproductsbetweenkeysand
+queries. Recentworkhasexploredalternativestosoftmaxattentionintransformers,
+suchasReLUandsigmoidactivations. Inthiswork,werevisitsigmoidattention
+andconductanin-depththeoreticalandempiricalanalysis. Theoretically,weprove
+thattransformerswithsigmoidattentionareuniversalfunctionapproximatorsand
+benefitfromimprovedregularitycomparedtosoftmaxattention. Throughdetailed
+empiricalanalysis,weidentifystabilizationoflargeinitialattentionnormsduring
+theearlystagesoftrainingasacrucialfactorforthesuccessfultrainingofmodels
+withsigmoidattention,outperformingpriorattempts. WealsointroduceFLASH-
+SIGMOID, a hardware-aware and memory-efficient implementation of sigmoid
+attentionyieldinga17%inferencekernelspeed-upoverFLASHATTENTION2on
+H100GPUs2. Experimentsacrosslanguage,vision,andspeechshowthatproperly
+normalizedsigmoidattentionmatchesthestrongperformanceofsoftmaxattention
+onawiderangeofdomainsandscales,whichpreviousattemptsatsigmoidatten-
+tionwereunabletofullyachieve. Ourworkunifiespriorartandestablishesbest
+practicesforsigmoidattentionasadrop-insoftmaxreplacementintransformers.
+1 Introduction
+The success of modern machine learning can be largely attributed to the attention mechanism
+(Bahdanauetal.,2015;Vaswanietal.,2017). Attentionusesasequence-to-sequence(seq-to-seq)
+maptobuildcontext-awaretokenrepresentations. Classically,attentionreliesonthesoftmaxfunction
+(SoftmaxAttn)torecovertokenrepresentationsasdata-dependentconvexcombinationsofvalues.
+Despiteitswidespreaduseandeffectiveness,softmaxinSoftmaxAttnisnotwithoutlimitations.
+Forinstance,thesoftmaxfunctioncansometimesleadtoaconcentrationofattentiononjustafew
+features(Yangetal.,2018;Ganeaetal.,2019),potentiallyneglectingotherinformativeaspectsof
+∗Primarycontributor.ForadetailedbreakdownofauthorcontributionsseeAppendixH.
+2Codeisavailableathttps://github.com/apple/ml-sigmoid-attention.
+Preprint.Underreview.
+4202
+peS
+6
+]GL.sc[
+1v13440.9042:viXratheinputdata. Moreover,applyingSoftmaxAttnrequiresperformingarow-wisereductionalong
+thelengthoftheinputsequence,whichinthecaseofefficientattentionkernels(Daoetal.,2022;
+Dao, 2023), slows down computations. In this work, we relax this constraint by substituting the
+row-wisesoftmaxoperationwithanelement-wisesigmoidnonlinearity. Wehighlightthatthecentral
+problem with naïve sigmoid attention (SigmoidAttn) is that of large initial attention norms and
+proposesolutionstoalleviateit. Ourcontributionsareasfollows:
+(1) WeproveSigmoidAttnisauniversalfunctionapproximatoronseq-to-seqtasks(Sec.3.1).
+(2) WeanalyzeSigmoidAttn’sregularityandprovideitsworst-caseJacobianbound(Sec.3.2).
+(3) WeextendFLASHATTENTION2(Daoetal.,2022;Dao,2023)withthesigmoidkernel,reducing
+kernelinferencewall-clocktimebyupto17%andrealworldinferencebyupto8%(Sec.4).
+(4) WeshowthatSigmoidAttnmatchesSoftmaxAttninvarioustasksanddomains(Sec.5).
+2 SigmoidAttention
+LetX Rn×dbetheinputsequenceofnvectors,whereeachvectorhasdimensiond. Wedefine
+threele∈ arnableweightmatricesW
+q
+Rd×dqk,W
+k
+Rd×dqk,andW
+v
+Rd×dv,whichareusedto
+computethequeriesQ
+Rn×dqk,k∈
+eysK
+Rn×dq∈
+k,andvaluesV
+R∈
+n×dv asfollows:
+∈ ∈ ∈
+Q=XW , K =XW , and V =XW . (1)
+q k v
+Self-attention(Bahdanauetal.,2015;Vaswanietal.,2017)canbecompactlywrittenas
+SoftmaxAttn(X)=Softmax(QKT/ d )V, (2)
+qk
+wheretheSoftmaxfunctionnormalizeseachrowoftheinputma(cid:112)trix. WereplacetheSoftmaxwith
+SigmoidAttn(X)=σ(QKT/ d )V,
+qk
+(3)
+withσ :u sigmoid(u+b):=(1+e− (cid:112)(u+b))−1.
+(cid:55)→
+Here,σ isappliedelement-wisetotheinputmatrixin(3). Theactivationfunctionσ hasahyper-
+parameter b R. In App. E, we discuss an intuitive way to choose the order-optimal bias term,
+∈
+resultinginb= log(n).ThischoiceofballowsustomakesenseofSigmoidAttnforanysequence
+−
+length. Indeed,letting(y ,...,y )=SigmoidAttn(X)betheoutputsequence,wehave
+1 n
+n
+exp( W x ,W x )
+y = ⟨ q i k j ⟩ W x exp( W x ,W x )W xdµ(x), (4)
+i exp( W qx i,W kx
+j
+)+n v j −n−→−−+−∞→ ⟨ q i k ⟩ v
+j=1 ⟨ ⟩ (cid:90)
+(cid:88)
+whereµ= 1 n δ istheempiricalmeasurecorrespondingtoX. Notably,(4)stillmakessense
+n j=1 xj
+intheinfinitelengthlimit,wherethemeasureµisnotasumofDiracs. Wortsmanetal.(2023a)do
+notuseabias,(cid:80) andproposean−1normalizationforvariousattentionactivations,suchassigmoidand
+ReLU,butleavethereasonasanopenquestion. Ourvariablebiashasasimilareffectinthelargen
+limit,andwepositthatrecoveringafiniteoutputlimitasnincreasesisthewhyitworksinpractice.
+Amulti-headversionof(3)isobtainedbycombiningtheoutputsofseveralSigmoidAttn,asfollows:
+[SigmoidAttn (X),...,SigmoidAttn (X)]W , (5)
+1 h o
+foralearnableoutputweightmatrixW
+o
+Rhdv×d,wherehdenotesthenumberofheads.
+∈
+3 TheoreticalPropertiesofSigmoidAttention
+WeanalyzeSigmoidAttn,withtwoobjectives: (1)showingthatatransformerarchitectureremainsa
+universalfunctionapproximatorwhenSigmoidAttnreplacesSoftmaxAttn,and(2)recoveringa
+measureofregularityofSigmoidAttnbycomputingitsLipschitzconstant.
+23.1 AreTransformerswithSigmoidAttentionUniversalApproximators?
+Yun et al. (2020) demonstrate that classical transformers can approximate continuous sequence-
+to-sequence functions to arbitrary precision, a property known as the Universal Approximation
+Property(UAP).UAPishighlydesirableasitprovidesproofofanarchitecture’sgeneralizability
+andrepresentationcapability. AsSigmoidAttnmodifiesthetransformerarchitecture,itiscrucialto
+theoreticallyguaranteethatthismodificationdoesnotimpacttherepresentationcapabilityandthat
+UAPisretained. Weprovidethisguaranteewiththefollowingtheorem.
+Theorem3.1(UAPforSigmoidAttn). Wedenotewith h,dv,r theclassoftransformernetworks
+Tσ
+obtainablebycombininganarbitrarynumberofSigmoidAttnlayers(eachofhheadsofdimension
+d )followedbyFFNlayersofhiddendimensionr.Foranygivencontinuous,permutation-equivariant
+v
+functionf : Ω Rn×d Rn×d withcompactsupportΩ, andforanyarbitrarilysmallerrorε,
+thereexistsatra⊂ nsformer→ networkg 4,1,4suchthat
+∈Tσ
+f(X) g(X) pdX ε, for 1 p< . (6)
+∥ − ∥p ≤ ≤ ∞
+(cid:18)(cid:90)Ω (cid:19)
+Theorem3.1istheexactcounterpartof(Yunetal.,2020,Thm.2),whichshowsUAPforclassical
+transformers. Our proof largely follows the same path, an outline of the original proof provided
+inApp.C.Here, wepresentanoverviewofthemainadaptationsrequiredtoproveThm.3.1for
+SigmoidAttn,withfurtherdetailsinApp.C.1andC.2.
+SigmoidAttentionlayerscanimplementcontextualmappings: AkeystepinprovingThm.3.1is
+showingthat,evenwithSigmoidAttn,asequenceoftransformerblockscanimplementaContextual
+Mapping(Yunetal.,2020,Def.3.1). Acontextualmappingcharacterizesafunctionthatmapseach
+inputsequenceelementtoanoutputuniquelydependentonthewholesequence. Thispropertyallows
+atransformertocaptureandstoreglobalcontextwithineachtoken,evenifeachlayeronlyperforms
+pairwisecomparisons. Subsequentlayerscanthenusethisglobalinformationtomapindividual
+tokenstothecorrectoutput,ultimatelyapproximatinganyarbitrarysequence-to-sequencefunction.
+InYunetal.(2020),thecontextualmappingisassembledbymodifyingindividualtransformerblocks:
+each block is tuned to react to a specific input token. By stacking a sequence of these blocks, a
+transformercanbeturnedintoanaccumulator,mappingagiveninputtokensequencetoaunique
+globalindex. Thisoutcomeisachievedviaaselectiveshiftlayer(Yunetal.,2020,App.B.5):
+max X min X if b<X <b′
+Ψ(X;b,b′) i,1 := 0 k k,1 − k k,1 otherwise,i,1 (7)
+(cid:26)
+andcanbeapproximatedusingclassicattention. AlthoughSigmoidAttncannotdirectlyapproxi-
+mate(7),ouraccumulatordefinitionreliesonanequivalentselectiveshiftoperation:
+X if b<X <b′
+Ψ σ(X;b,b′)
+i,1
+:= k:Xk,1>b′ k,1 i,1 (8)
+(cid:40)(cid:80)0 otherwise,
+whichcanbeapproximatedbySigmoidAttn(describedinApp.C.1).InApp.C.2.4,weshowthat(8)
+sharessimilarpropertieswith(7),allowingustousetheoriginalproofframeworkinYunetal.(2020)
+anddemonstratethatUAPholdsinourcaseaswell.
+Our proof is largely equivalent to that in Yun et al. (2020), with two relevant differences: to
+approximate (8), we require SigmoidAttn with at least four heads and shifts included in both
+queryandkeydefinitions. Incontrast,SoftmaxAttnrequiresatleasttwoheadstoapproximate(7),
+withshiftsonlyinthequerydefinition. However,thisisprimarilyatheoreticalrequirementforthe
+proofanddoesnotaffectperformance. Notably,thetotalnumberofparametersrequiredbyboth
+architecturesfortheapproximationfollowsthesametightscalingofYunetal.(2020).
+3.2 RegularityofSigmoidAttention
+Aswithanylayerinaneuralnetwork,theregularityofSigmoidAttnisimportanttostudy,asitgives
+insightsintotherobustnessofthecorrespondingnetworkandtheeaseofoptimizingit. Themost
+standardwaytoquantifytheregularityofalayerfunctionϕistocomputeitsLipschitzconstantovera
+set ,thatisaconstantC >0suchthatforallX,Y ,itholds ϕ(X) ϕ(Y) C X Y ,
+X ∈X ∥ − ∥≤ ∥ − ∥
+3where isthestandardFrobeniusnorm. ThelocalLipschitzconstantisthespectralnormofthe
+∥·∥
+JacobianofϕatX. Thetwoarerelated: theLipschitzconstantofϕover isthegreatestlocal
+X
+LipschitzconstantforallX . WeturntothetheoremgivingtheregularityofSigmoidAttn:
+∈X
+Theorem3.2. DefineA = W x W x , i,j 1,...,n Rthesetofattentionweights,
+q i k j
+andthescaledactivationno{ r⟨ msσ = n ⟩| sup ∈ { σ(u) and}} σ⊂′ = n sup σ′(u). Then,
+∞ × u∈A| | ∞ × u∈A| |
+theJacobianofSigmoidAttnatX =(x ,...,x )hasaspectralnormofatmost:
+1 n
+n
+1
+W σ +2σ′ WTW x 2 . (9)
+∥ v ∥2 (cid:32) ∞ ∞∥ q k ∥2 (cid:32)n ∥ i ∥2 (cid:33)(cid:33)
+i=1
+(cid:88)
+The proof is found in App. D. In SigmoidAttn, if we assume that the attention weights
+W x ,W x areallboundedbyaconstantµ—thisistrue,e.g.,iftheactivationsarebounded
+q i k j
+—⟨ wegetσ ⟩ exp(µ)andσ′ exp(µ)thankstothechoiceofb = log(n). Theboundin
+∞ ≤ ∞ ≤ −
+Thm.3.2dependsonlyontheaveragesquared-normoftheinputsequencex ,whileclassicalresults
+i
+forthestudyofattentionallrelyonthelargestvalueof x 2(Kimetal.,2021;Castinetal.,2023).
+∥ i ∥2
+Thisisanotherconsequenceofthesimplicityofsigmoidattentionandisduetotheremovalofthe
+normalizingconstantinSoftmaxAttn. Ourresultimpliesthatifallx arewithinaballofradiusR
+i
+thentheLipschitzconstantofSigmoidAttngrowsatmostlikeR2,butitisstrongersincewecan
+applythistounboundeddistributionsx ;itmattersonlythatthesecondmomentisbounded. This
+i
+resultcontrastssharplywiththeboundsobtainedforSoftmaxAttn: Castinetal.(2023,Thm.3.4.)
+showthatthereexistsasequenceX =(x ,...,x )with x Rforallisuchthatthespectral
+1 n i 2
+normoftheJacobianofAttnatX
+isatleastcR2exp(cR∥2)fo∥ rs≤
+omeconstantc>0. Ontheother
+hand,ourboundscalesinR2: thismeansthatthelocalLipschitzconstantofSigmoidAttnismuch
+lowerthantheworstlocalLipschitzconstantofSoftmaxAttn.
+3.3 ComputationalComplexityofSigmoidandSoftmax.
+Table1:Forwardfloatingoperationspertokenperattentionhead. n andd arethecontextlength
+ctx head
+andheaddimensionrespectively. ∆measuresthecomputedifferencebetweensigmoidandsoftmax
+as a multiple of the floating operations for computing the attention logits. c accounts for causal
+(c = (n +1)/2n 1/2),orstandard(c = 1)attention. Typicalvaluesaretakenfromthe1B
+ctx ctx
+∼
+LLMresults(n =2048,d =64). ThedifferenceinfloatingoperationsbetweenSigmoidand
+ctx head
+Softmaxattentionmechanismsissubleading( 1%)comparedtootheroperationsintheattention
+∼
+mechanism like computing attention logits L (shown below), and the attention matrix values
+×
+operation. Thisanalysisprecludeshardwareawareimprovements(Section4).
+L=QKT Softmax(L) σ(L+b) ∆
+Expression 2cn d 3cn 5cn 1/d
+ctx head ctx ctx head
+Value 262144c 6144c 10240c 1/64
+4 FLASHSIGMOID: Hardware-AwareImplementation
+Memoryspeedhasnotkeptpacewithrecentgainsincomputationspeed(Choquette,2023;Jouppi
+etal.,2017;Hannunetal.,2023).Consequently,attentioncomputationsonmodernarchitectureshave
+beenIO-boundbymemoryaccesses(Ivanovetal.,2021). FLASHATTENTION(Daoetal.,2022)and
+FLASHATTENTION2(Dao,2023)addresstheseshortcomingsbyoptimizingGPUmemoryhierarchy
+utilizationtoaccelerateattentioncomputations. Motivatedbythespeedboostprovidedbythese
+approaches,wedevelopFLASHSIGMOID,ahardware-awareimplementationofSigmoidAttn. Like
+previousworks,FLASHSIGMOIDemploysthreecoreideas:
+Tiling: Divide and Conquer Approach to Attention: Similar to FLASHATTENTION and
+FLASHATTENTION2,FLASHSIGMOIDprocessesinputpartsinparalleltocomputeattentionoutputs
+inblocks,efficientlycombiningpartialresultstogeneratethefinalattentionoutput.
+KernelFusion: LikeFLASHATTENTIONandFLASHATTENTION2,FLASHSIGMOIDimplements
+thecomputationalstepsofbothforwardandbackwardpassesofSigmoidAttnassingleGPUkernels,
+minimizing memory accesses and improving memory efficiency by avoiding materialization of
+intermediateactivationsonHigh-BandwidthMemory(HBM).
+41750 FlashAttention2 (Full) FlashAttention2 (Full)
+FlashSigmoid (Full) 6000 FlashSigmoid (Full)
+1500 FlashAttention2 (Causal) FlashAttention2 (Causal)
+FlashSigmoid (Causal) 5000 FlashSigmoid (Causal)
+1250
+4000
+1000
+3000
+750
+500 2000
+250 1000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonH100. (b)TrainingmodekernelsonH100.
+Figure 1: Average kernel speed-up for FLASHSIGMOID over FLASHATTENTION2 for sequence
+lengths 64–78k. Inference is 17.39% faster for self-attention and 18.76% for causal attention.
+Trainingis6.53%fasterforself-attentionand9.46%forcausalattention.
+ActivationRecomputation: Thebackwardpassofsigmoidattentionrequiresthesigmoidacti-
+vationmatrix,which,ifmaterializedonGPUHBM,resultsinslowerimplementationandmemory
+inefficiencies. FLASHSIGMOID addressesthisbyretainingonlyquery,key,andvaluetensorsfor
+re-computationofthesigmoidactivationmatrixduringthebackwardpass. DespiteincreasedFLOPs,
+thisapproachprovesfasterinwall-clocktimeaswellasmorememory-efficientthanthealterantive
+approachofmaterializingandretainingtheattentionmatrix.
+TheforwardandbackwardpassalgorithmsofFLASHSIGMOIDcanbefoundinApp.F.1. Here,we
+highlightkeydifferencesbetweenFLASHSIGMOIDandFLASHATTENTION/FLASHATTENTION2.
+Thepoint-wisenatureofSigmoidAttnresultsinafasterandmorememory-efficientimplementation
+byremovingtheneedtocomputethesoftmaxnormalizationandmaterializeittoHBM.Areduction
+inthenumberofkerneldispatchesalsospeedsupFLASHSIGMOID. Further,FLASHSIGMOIDdoes
+notrequireaccumulationandtrackingofintermediatevariables(row-sumandmaximumofblocks)
+intheforwardandbackwardpasseswhichsavescomputationcostandreducesregisterpressure. We
+usesigmoid(x)=0.5 (1+tanh(0.5 x))tooptimizethesigmoidcomputationonGPU.Thespeed
+· ·
+upinFLASHSIGMOIDcomparedtoFLASHATTENTIONarisesfromoptimizinghardwarebottlenecks;
+theoretically,SigmoidAttnisslowerthanSoftmaxAttn(Sec.3.3).
+To measure the performance improvements of FLASHSIGMOID, we compare the timings of the
+kernelsinitsforwardandbackwardpassesagainstthoseofFLASHATTENTION2. Thedetailsofthis
+benchmarkingonH100andA100GPUscanbefoundinApp.F.2.MeasuringGPUcomputationtime,
+weobservea17.39%speed-upduringinferenceanda6.53%speed-upduringtrainingforattention
+overrandomlyinitializeddataonH100GPU(Fig.1). Inpractice,thesegainsmaybeaffectedby
+otherbottlenecks,suchasmovementoftensorsbetweenCPUorGPUmemory,computationsinother
+layers,andcommunicationoverheadindistributedtrainingandinference. However,wedemonstrate
+thatFLASHSIGMOIDspeedsuptrainingby 4%andinferenceby 8%inarealisticend-to-end
+∼ ∼
+setup. Thedetailsofwall-clocktimeimprovementswithFLASHSIGMOIDareinApp.F.3. Wealso
+notethatpracticalmachinelearningworkflowsaredominatedbyinferenceratherthantraining.
+5 Experiments
+ToempiricallyvalidateSigmoidAttn,weevaluateacrossseveraldomains: supervisedimageclassi-
+ficationusingvisiontransformers(Dosovitskiyetal.,2021),self-supervisedimagerepresentation
+learningwithSimCLR(Chenetal.,2020;Zhaietal.,2023a),BootstrapYourOwnLatent(BYOL)
+(Grill et al., 2020; Busbridge et al., 2023) and Masked AutoEncoders (MAE) (He et al., 2022)
+as well as automatic speech recognition (ASR) (Synnaeve et al., 2020; Gulati et al., 2020b) and
+auto-regressivelanguagemodeling(LM)(Brownetal.,2020). Wealsovalidatesequencelength
+generalizationonTED-LIUMv3(Hernandezetal.,2018)forASRandinsmallscalesyntheticexper-
+imentsinApp.G.5.4. Acrossallthesedomainsandalgorithms,wedemonstratethatSigmoidAttn
+matches the performance of SoftmaxAttn (Fig. 2 and 21), while offering training and inference
+speed-upsashighlightedinSec.4. Empiricallywemakethefollowingobservations:
+5
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreKBYOLViT-B/16 SimCLRViT-B/16 MAEViT-L/16
+0.7 8.8 0.9
+0.5 6.8 0.8
+0.3 4.8 0.6
+0.1 2.8 0.5
+-0.0 0.8 0.4
+0 200 400 600 0 100 200 300 0 100 200 300 400
+Epoch Epoch Epoch
+SupervisedViT-B/16 255MASRTransformer 1BLM(n=2048)
+7.1 60.0 3.6
+Softmax
+Sigmoid
+5.9 50.8 3.2
+4.7 41.5 2.7
+3.5 32.2 2.3
+2.3 23.0 1.9
+0 100 200 300 100000 200000 300000 0 100000 200000 300000
+Epoch Steps Steps
+Figure2: TrainlossescomparingSigmoidAttnwithSoftmaxAttn.
+(1) SigmoidAttniseffectiveforvisiontaskswithoutabias(exceptMAE),butreliesonLayerScale
+to match the performance of the baseline SoftmaxAttn (Fig. 9-a) in a hyper-parameter free
+manner.3 AllresultspresentedforSoftmaxAttnalsofairlyaddLayerScaleunlessspecified.
+(2) LMand ASRare sensitive tothe initialnorm σ(QKT/ d )V . Modulation is required
+qk
+|| ||
+via(a)relativepositionalembeddingslikeALiBi(Pressetal.,2022),whichreducestheinitial
+attentionnormbyshiftinglogitmasstothezeroregimeu(cid:112) nderSigmoidAttn,(b)appropriate
+initializationofbtoachievethesameeffect–enablingusageofanypositionalembedding.
+5.1 Ablations
+Webeginwithablationstodissectthebenefitsofeachofourintroducedcomponents.Togainintuition
+aboutSigmoidAttn,wedevelopedaresearch-friendlyauto-regressive(AR)LMtrainingframework
+tomeasureallcomponentsofattentionandvalidatetheeffectsofLayerScale,LayerNormappliedto
+QandK(QKnorm),differentpositionalembeddingtechniques,andinitializationvaluesforb.
+Mitigating Large Attention Norms We train a single layer AR transformer block (E=3072,
+D_FF=12288)ontherealnewssplitofC4(Raffeletal.,2020). Wetrainfor216stepsusingabatch
+sizeof6andmaxsequencelengthof4096usingasinglecyclecosinelearningrate(LR)schedule
+withoutweightdecay. SigmoidAttninitiallyunderperformedSoftmaxAttnwhenusingabsolute
+sinusoidal (SinCos) (Fig. 3) or relative (Fig. 4) positional embeddings (PE), which we attribute
+to high initial attention Frobenius norms, σ(QKT/√d)V . A corresponding evolution of the
+∥ ∥
+attentiondistributionandsparsitycanbeseeninAppendixFig.31andFig.32onasynthetictask. To
+addresstheselargerattentionnorms,wepropose: (a)usingALiBi(Pressetal.,2022)whoserelative
+biasmovesinitialattentionlogitmasstothezeroregionunderthesigmoidactivation,producing
+equivalenttrainnegativelog-likelihoods(Fig.5);or(b)settheattentionlogitbiasbtoanegative
+offsetproportionaltothesequencelength,b lnn(seeApp.G.1.2foranablationonb). This
+∝ −
+enablestheusageofotherPEtechniqueslikeRoPE(Suetal.,2024)(Fig.6).
+3AppendixG.2.2demonstratesthatsupervisedvisiontasksusingSigmoidAttnwithoutLayerScalecan
+matchbaselineSoftmaxAttnperformancebyrelyingonlearnablescalarbiasandtemperature:{b,t}∈R.
+6
+ssoLniarT
+ssoLniarTFigure3: SigmoidAttnwithSinCos. Figure4: SigmoidAttnwithRoPE.
+Figure5: SigmoidAttnwithALiBi. Figure6: SigmoidAttnwithRoPE,b= 10.
+−
+LayerScale TovalidatetheneedforLayerScale,wefollowWortsmanetal.(2023b)toquantifythe
+impactonstability. AllmodelsaretrainedwithRoPEwithb lnn,usingAdamW(Loshchilov&
+Hutter,2017)ontherealnewssplitofC4with(β ,β )=(0.∝ 9,− 0.95),ϵ=10−8,wd=0,batchsize
+1 2
+24,maximumtokensequencelengthof512fromtheT5tokenizer(Raffeletal.,2020),cosineLR
+scheduleof214stepsincludingalinearwarmupof210steps.Modelshaven =κ,n =2 κ,
+heads layers
+×
+d =64 κandd =256 κforascalingvalueκ 1,2,4,8,16 leadingtomodels
+model feed-forward
+× × ∈{ }
+with 2.2,4.9,15.0,67.0,440.0 M trainablenon-embeddingparameters. FollowingWortsmanetal.
+(2023{ b), we sweep learning rat} es η 3 10−4,1 10−3,3 10−3,1 10−2,3 10−2,1
+10−1,3 10−1 . LR sensitivity is d∈ efi{ ned× as E × [min(ℓ(× (η)),ℓ ) × ℓ∗] wher× e ℓ( (η))× is
+η∈[a,b] 0
+the loss× achieve} d by the learning algorithm with LR η, ℓ iA s the loss− at initializationA , and ℓ∗
+0
+isthelossachievedbythebestLR.LayerScaA leisinitializedat10−4. Unlikevisiontasks,where
+LayerScaleimprovesperformance(Fig.9-a),inLM,weobservethatSoftmaxAttnslightlybenefits
+fromLayerScale,whiletheperformanceofSigmoidAttnremainslargelyunaffected.
+StabilitywithQKNorm Theorem3.2indicatesthattheJacobianofSigmoidAttnhasfavorable
+propertiescomparedtoSoftmaxAttn. WeexplorethisbyrepeatingtheanalysisofWortsmanetal.
+(2023b),asdescribedintheLayerScaleanalysis,toinvestigatetheimpactofQKnorm(Dehghani
+etal.,2023). Forlanguagemodeling, bothSigmoidAttnandSoftmaxAttnexhibitsensitivityto
+learningratechangeswithoutQKnorm. However,incorporatingQKnormsignificantlystabilizes
+performance(Fig.8). Invisiontasks,SigmoidAttndemonstratesrobustnesswithandwithoutQK
+norm(Fig.9-a)andwithouttheneedforn−αnormalizationfromWortsmanetal.(2023a).4
+4WeablatemultiplicativesequencelengthscalinginmoredetailinApp.G.1.1.
+7use_layer_scale=False use_layer_scale=True qk_norm=False qk_norm=True
+7.5 7.5
+NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name
+7.0 PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid 7.0 PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid
+6.5 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax 6.5 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax
+6.0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0 6.0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0
+5.5 444400..00 444400..00 5.5 444400..00 444400..00
+5.0 5.0
+4.5 4.5
+4.0 4.0
+3.5 3.5
+3.0 103 102 101 103 102 101 3.0 103 102 101 103 102 101
+Learning rate Learning rate Learning rate Learning rate
+wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee
+ssiiggmmooiidd ssiiggmmooiidd ssiiggmmooiidd ssiiggmmooiidd
+ssooffttmmaaxx ssooffttmmaaxx ssooffttmmaaxx ssooffttmmaaxx
+100
+101
+101
+107 108 107 108 107 108 107 108
+Non-embed Params (M) Non-embed Params (M) Non-embed Params (M) Non-embed Params (M)
+Figure7: LRsensitivityLayerScaleablation. Figure8: LRsensitivityQKnormablation.
+80
+Softmax,+LayerScale,+QKNorm
+Sigmoid,+LayerScale,+QKNorm
+75 +LayerScale,+QKNorm TanH,+LayerScale,+QKNorm
++LayerScale,-QKNorm MHASoftmax ReLU,+LayerScale,+QKNorm
+70 -LayerScale,+QKNorm MHASigmoid GeLU,+LayerScale,+QKNorm
+n−α,-LayerScale,+QKNorm MQASoftmax ReLU2,+LayerScale,+QKNorm
+n−α,-LayerScale,-QKNorm MQASigmoid ReLU2,-LayerScale,-QKNorm
+65
+50 100 150 200 250 30050 100 150 200 250 30050 100 150 200 250 300
+Epoch Epoch Epoch
+(a) (b) (c)
+Figure9: ImageNet1kViT-B/16classification. (a)SigmoidAttnisrobustwithoutQKnorm(+Lay-
+erScale,-QKNorm). RemovingLayerScalereducesaccuracyby1.0%(-LayerScale,+/-QKNorm).
+n−αnormalization(Wortsmanetal.,2023a)underperformswithoutLayerScale. (b)SigmoidAttn
+multi-queryattention(MQA)(Shazeer,2019)withoneheadmatchesmulti-headattention(MHA).
+(c)SigmoidwithLayerScaleandQKnormperformscomparablytootheractivations,exceptTanH.
+ReLU2(Huaetal.,2022)underperformswithoutLayerScaleandQKnorm.
+Multi-queryattention(MQA) InFig.9-bweexploreMQA(Shazeer,2019)forvisionusingonly
+oneheadfor K,V . WefindthatbothSigmoidAttnandSoftmaxAttnperformequallywellwith
+{ }
+orwithoutmultipleheadsevenatthesmallscaleofViT-B/16.
+Activation Function Ablations As in Wortsman et al. (2023a), various activation functions,
+when combined with LayerScale and QK norm, perform equally well for vision tasks (Fig. 9-c).
+However,forsequence-criticaltaskslikeASR,activationfunctionssuchasReLUposeinstabilities
+andunderperform. Inthesamefigure,wealsocomparetotheReLU2proposalfromHuaetal.(2022)
+andfindthatitunderperformswithoutLayerScaleandQKnorm.
+5.2 SupervisedImageClassification
+Visiontransformers(Dosovitskiyetal.,2021)extendtransformers(Vaswanietal.,2017)totreat
+K K imagegridsasdisparatetokens. Alltokensarerefinedthroughsequentiallayersofself-
+×
+attention,pooledusingaCLStokenorglobalaveragepoolinglayer,andoptimizedusingthenegative
+log likelihood, lnp(y x). We train ViT-B/16 models using R224×224×3 images for 300 epochs
+|
+usingtherecipeprovidedinApp.G.2.4. Weusethesamesetoftraininghyper-parametersforboth
+SoftmaxAttnandSigmoidAttn, changingonlytheactivationfunctionbetweentrials. Thetrain
+negativelog-likelihoodisreportedinFig.2andthetesttop-1%isreportedinFig.21. Wefindthat
+SigmoidAttnmatchesboththetrainingdynamicsandtheevaluationperformanceofSoftmaxAttn.
+8
+ssol
+laniF
+ytivitisnes
+RL
+%1-poTtseT
+ssol
+laniF
+ytivitisnes
+RLTable2: Worderrorrate(%)onLibriSpeechtestsetsandTED-LIUMv3(Hernandezetal.,2018)
+(“TED”,jointvalidationandtestsetssplitaccordingtoduration)fortransformer(255Mparams)with
+eitherSoftmaxAttnorSigmoidAttn(LayerScaleandQKnormareusedwithb= logn)trained
+−
+onLibriSpeech960hdata(meandurationis10-15s). Hyper-parametersareinApp.G.4.
+ATTN PE TEST-CLEAN TEST-OTHER TED0-10S TED10-20S TED20-30S TED30S+
+SOFTMAX 2.3 5.7 12.4 10.5 11.9 9.1
+SIGMOID 2.4 5.5 12.4 10.3 12.3 9.7
+-QKNORM UNSTABLE,GRADIENTNORMANDLOSSSPIKES
+-LAYERSCALE CAPE 2.5 6.1 13.6 11.5 13.4 8.9
+SIGMOID(b=−10,LEARNABLE) 2.3 5.5 12.1 10.5 13.0 9.3
+SIGMOID(b=−5INQ,LEARNABLE) 2.3 5.4 12.2 10.8 12.4 9.9
+-QKNORM UNSTABLE,GRADIENTNORMANDLOSSSPIKES
+SOFTMAX 2.2 5.5 12.7 10.6 12.8 9.5
+SIGMOID 2.3 5.4 12.3 10.1 12.3 8.6
+SIGMOID(b=−10,LEARNABLE) ROPE 2.2 5.2 12.4 10.5 12.3 21.8
++α=1 2.7 6.6 14.1 12.0 14.5 14.9
+SIGMOID(b=−5INQ,LEARNABLE) UNSTABLE,GRADIENTNORMANDLOSSSPIKES
+SOFTMAX 2.2 5.4 12.3 10.7 12.1 8.6
+SIGMOID 2.3 5.1 12.3 10.5 12.6 9.1
+SIGMOID(b=−10,LEARNABLE) ALIBI 2.2 5.2 12.4 10.4 11.7 9.1
++α=1 2.6 6.6 13.9 11.9 14.2 8.6
+SIGMOID(b=−5INQ,LEARNABLE) 2.2 5.2 12.1 10.4 12.0 8.2
+5.3 Self-SupervisedImageRepresentationLearning
+Self-supervised representation learning (SSL) exploits vast quantities of unlabeled data to learn
+semanticrepresentationsbasedoninductivebiasessuchasaugmentationinvariance(SimCLRChen
+etal.(2020),BYOL(Grilletal.,2020))orreconstructionfromcompressedrepresentations(MAE(He
+etal.,2022)). WeemployvisiontransformertrainingrecipesfromZhaietal.(2023a)andBusbridge
+etal.(2023)(App.G.2.4)forSimCLRandBYOL.Aswithsupervisedlearning,weusethesameset
+oftraininghyper-parametersforbothSoftmaxAttnandSigmoidAttn,changingonlytheactivation
+function between trials. Figure 2 reports the train losses, and Fig. 21 highlights the linear probe
+andfinetunedtesttop-1%. DespitethediversetrainingobjectivesinSSL,SigmoidAttnmatches
+SoftmaxAttnwhileimprovingtrainingandinferencethroughput(Sec.4).
+5.4 AutomaticSpeechRecognition(ASR)
+We benchmark ASR using LibriSpeech data (Panayotov et al., 2015) on 100h and 960h settings
+of paired speech and text transcriptions. Our PyTorch implementations of encoder-based vanilla
+transformer(Synnaeveetal.,2020)andconformer(Gulatietal.,2020a)aretrainedwithConnectionist
+TemporalClassification(CTC)(Gravesetal.,2006)w/BF16mixedprecision,w/oQKnormandw/o
+LayerScale. AfterextensivelytuningSoftmaxAttnbaselines,weswitchtoSigmoidAttnper(3)
+withoutanyotherchanges. Weinvestigatetheeffectsofpost/pre-LayerNorm,modeldepth,optimizer
+type,smalldataregime,andconnectiontolocalattention,withdetailsinApp.G.4.
+Our main findings are: i) CAPE (Likhomanenko et al., 2021) PE is the most unstable for
+SigmoidAttn; ii) post-LayerNorm models with SoftmaxAttn are hard to match with stable
+SigmoidAttn; iii) w/o QK norm SigmoidAttn is unstable and significant spikes happen in both
+gradient norms and training loss; iv) LayerScale is needed for generalization; v) learnable bias
+b= 10givesnolossandgradientnormsspikeswhilematchingtheSoftmaxAttn(whichdoesnot
+−
+benefitfromtheimprovedthroughputofFLASHSIGMOID);vi)addingalearnablebias,b= 5,toQ
+−
+insteadoftheattentionlogitsalsosolvestheinitiallargeattentionnormsforCAPEandALiBibut
+notforRoPE;vii)b= logngivesrare(2-5times)marginalgradientnormsspikeswithsmooth
+−
+losswhilematchingSoftmaxAttn.
+Table2showsthemainresultforpre-LayerNormtransformerswithCAPE,RoPE,andALiBi,where
+SigmoidAttnusesLayerScale,QKnorm,b= logn,andnosequencenormalization. Thebiasis
+−
+ablatedwithlearnablebias(oneperlayer)inattentionorQwithorwithoutsequencenormalization.
+SigmoidAttnisstabilizedwithbiaswhilematchingSoftmaxAttn,andb= lognworkswell. In
+−
+mostcases,biasallowsgeneralizationtolongersequenceswithoutsequencenormalization,except
+forRoPEwhereithelpsforlongersequencesbuthurtsoverallperformance.
+9Table3: 1BLLMEnglishevaluation.
+SEQ. ARC ARC HELLA- WINO- LAMBADA TRIVIAQA WEBQS STEP
+MODEL
+LEN. EASY CHALLENGE SWAG
+PIQA SCIQ
+GRANDE OPENAI (1-SHOT) (1-SHOT)
+AVG
+TIME(S)
+SOFTMAX(ALIBI) 2K 62.2 26.8 42.4 59.0 72.3 88.1 58.4 19.9 15.4 49.4 0.38
+SIGMOID(ALIBI) 2K 62.8 28.8 42.5 59.7 70.3 88.6 59.7 19.1 13.8 49.5 0.34
+SOFTMAX(ROPE) 4K 63.3 29.3 43.3 58.1 71.3 86.9 58.8 20.4 15.6 49.7 0.84
+SOFTMAX(ALIBI) 4K 62.6 27.7 42.4 58.6 71.1 88.2 58.6 18.9 14.7 49.2 0.84
+SIGMOID(ALIBI) 4K 60.5 27.3 41.3 57.8 70.5 87.0 57.6 18.9 12.6 48.2 0.67
+5.5 AutoregressiveLargeLanguageModeling
+Weinitiallyiteratedatthe85Mscale,asitservedasaproxyforlargerscaletraining. Ourfindings
+showthat: i)attentionbiasisrequiredforstability,whichcanbelearnable,butsettingitto log(n),
+−
+wherenisthemaximumtrainingsequencelengthof4096,workswellandisfaster;ii)RoPEismore
+challengingtostabilize;iii)thefinalsettingexhibitssmoothlosscurves,butstillshowsgradientnorm
+fluctuations. WethenturnourattentiontovalidatingSigmoidAttnatscale.
+Wetraina1BlanguagemodelusingtheLlama2(Touvronetal.,2023)recipewithALiBiinstead
+ofRoPEpositionalembedding,andtheRedPajama(Computer,2023)dataset(seeApp.G.3). At
+sequencelength4096,SigmoidAttnachievesa1.23 step-timeimprovementoverSoftmaxAttn
+×
+inJAXwithoutFLASHATTENTION(Tab.3). AllLLMsaretrainedusingtheAXLearnframework,
+whichincludetherecipeandSigmoidAttnimplementation.5
+SoftmaxAttnandSigmoidAttnhavematchingtrainandvalidationNLLat85M(Fig.26)andat
+1Bscalewhenusing2048sequencelength(Fig.2). However,aslightdisparityisobservedat1B
+scalewhenusing4096sequencelength, whichweleaveforfutureinvestigation(moredetailsin
+App.G.3).
+6 RelatedWork
+Recentstudiesinsupervisedimageclassification(Wightmanetal.,2021)andself-supervisedlearning
+(SSL),includingapproacheslikeSigLIP(Zhaietal.,2023b),areshiftinglarge-scalemachinelearning
+trainingfromoutputconditionalcategoricaldistributions,traditionallyparameterizedbysoftmax
+functions,toricherpointwiseBernoulliconditionalsparameterizedbysigmoidfunctions. Inthis
+study,ourfocusshiftstorefiningthemodel’sinternalmechanics,specificallybysubstitutingthe
+softmaxcomponentoftheattentionmechanismwithapointwisesigmoidfunction.
+PreviousworkhasexploredthereplacingsoftmaxwiththeReLUactivationinbothpractical(Shen
+et al., 2023; Hron et al., 2020) and theoretical settings (Bai et al., 2023; Fu et al., 2023). Other
+works explores using the ReLU2 activation (Hua et al., 2022), exploring purely linear attention
+(Katharopoulosetal.,2020;Luetal.,2021;Koohpayegani&Pirsiavash,2024)orcosine-similarity
+based attention (Luo et al., 2018; Liu et al., 2022). Our work builds upon these explorations,
+particularlyWortsmanetal.(2023a),whichreplacessoftmaxwithvariousactivationfunctionsscaled
+byn−α,wherencorrespondstothesequencelengthandα,ahyper-parameter. However,wefind
+thattheirformulationdoesnotmatchexpectedperformancewithoutproperbinitializationandthe
+useofLayerScale(Fig.9-a,App.G.1.1).
+7 Conclusion
+Inthiswork,wepresentacomprehensivetheoreticalandempiricalstudyofsigmoidattentionasan
+alternativetosoftmaxattentionintransformers.Weprovethattransformerswithsigmoidattentionare
+universalfunctionapproximatorswithimprovedregularity,andidentifyLayerScaleandprevention
+oflargeinitialattentionnormsaskeyfactorsforsuccessfultraining. WeintroduceFLASHSIGMOID,
+amemory-efficientvariantprovidinga17%inferencekernelspeed-up. Extensiveexperimentsacross
+language,vision,andspeechdemonstratethatproperlynormalizedsigmoidattentionmatchessoftmax
+attentionperformanceonvarioustasksandscales. Ourfindingsestablishsigmoidattentionasaviable
+alternative,unifyingpriorworkandestablishingbestpracticesforitsapplicationintransformers.
+5https://github.com/apple/axlearn
+108 Acknowledgements
+WethankZakariaAldeneh,SamyBengio,NavdeepJaitly,DavidKoski,PauRodriguezLopez,Hadi
+Pouransari,andSkylerSetofortheirhelpfulfeedbackandcriticaldiscussionsthroughouttheprocess
+of writing this paper; Okan Akalin, Hassan Babaie, Michael Brooks, Brian Gamp, Denise Hui,
+MubarakSeyedIbrahim,LiLi,RajatPhull,EvanSamanas,GuillaumeSeguin,andthewiderApple
+infrastructureteamforassistancewithdevelopingandrunningscalable,faulttolerantcode. Names
+areinalphabeticalorderbylastnamewithingroup.
+References
+Bahdanau, D., Cho, K., and Bengio, Y. Neural machine translation by jointly learning to align
+and translate. In Bengio, Y. and LeCun, Y. (eds.), 3rd International Conference on Learning
+Representations,ICLR2015,SanDiego,CA,USA,May7-9,2015,ConferenceTrackProceedings,
+2015. URLhttp://arxiv.org/abs/1409.0473.
+Bai, Y., Chen, F., Wang, H., Xiong, C., and Mei, S. Transformers as statisticians: Prov-
+able in-context learning with in-context algorithm selection. In Oh, A., Naumann, T.,
+Globerson, A., Saenko, K., Hardt, M., and Levine, S. (eds.), Advances in Neural In-
+formation Processing Systems 36: Annual Conference on Neural Information Process-
+ing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023,
+2023. URL http://papers.nips.cc/paper_files/paper/2023/hash/
+b2e63e36c57e153b9015fece2352a9f9-Abstract-Conference.html.
+Brown,T.B.,Mann,B.,Ryder,N.,Subbiah,M.,Kaplan,J.,Dhariwal,P.,Neelakantan,A.,Shyam,
+P., Sastry, G., Askell, A., Agarwal, S., Herbert-Voss, A., Krueger, G., Henighan, T., Child,
+R., Ramesh, A., Ziegler, D. M., Wu, J., Winter, C., Hesse, C., Chen, M., Sigler, E., Litwin,
+M., Gray, S., Chess, B., Clark, J., Berner, C., McCandlish, S., Radford, A., Sutskever, I., and
+Amodei,D. Languagemodelsarefew-shotlearners. InLarochelle,H.,Ranzato,M.,Hadsell,R.,
+Balcan,M.,andLin,H.(eds.),AdvancesinNeuralInformationProcessingSystems33: Annual
+ConferenceonNeuralInformationProcessingSystems2020,NeurIPS2020,December6-12,2020,
+virtual, 2020. URL https://proceedings.neurips.cc/paper/2020/hash/
+1457c0d6bfcb4967418bfb8ac142f64a-Abstract.html.
+Busbridge, D., Ramapuram, J., Ablin, P., Likhomanenko, T., Dhekane, E. G., Cuadros,
+X. S., and Webb, R. How to scale your EMA. In Oh, A., Naumann, T., Glober-
+son, A., Saenko, K., Hardt, M., and Levine, S. (eds.), Advances in Neural Infor-
+mation Processing Systems 36: Annual Conference on Neural Information Process-
+ing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023,
+2023. URL http://papers.nips.cc/paper_files/paper/2023/hash/
+e7681dd6fe16052433ab68cd1555bdc9-Abstract-Conference.html.
+Caron,M.,Touvron,H.,Misra,I.,Jégou,H.,Mairal,J.,Bojanowski,P.,andJoulin,A. Emerging
+propertiesinself-supervisedvisiontransformers. In2021IEEE/CVFInternationalConference
+onComputerVision,ICCV2021,Montreal,QC,Canada,October10-17,2021,pp.9630–9640.
+IEEE,2021. doi: 10.1109/ICCV48922.2021.00951. URLhttps://doi.org/10.1109/
+ICCV48922.2021.00951.
+Castin, V., Ablin, P., and Peyré, G. Understanding the regularity of self-attention with optimal
+transport. arXivpreprintarXiv:2312.14820,2023.
+Chen,T.,Kornblith,S.,Norouzi,M.,andHinton,G.E.Asimpleframeworkforcontrastivelearningof
+visualrepresentations. InProceedingsofthe37thInternationalConferenceonMachineLearning,
+ICML2020,13-18July2020,VirtualEvent,volume119ofProceedingsofMachineLearning
+Research, pp. 1597–1607. PMLR, 2020. URL http://proceedings.mlr.press/
+v119/chen20j.html.
+Chen,X.,Xie,S.,andHe,K. Anempiricalstudyoftrainingself-supervisedvisiontransformers.
+In 2021 IEEE/CVF International Conference on Computer Vision, ICCV 2021, Montreal, QC,
+Canada,October10-17,2021,pp.9620–9629.IEEE,2021. doi: 10.1109/ICCV48922.2021.00950.
+URLhttps://doi.org/10.1109/ICCV48922.2021.00950.
+11Choquette, J. NVIDIA hopper H100 GPU: scaling performance. IEEE Micro, 43(3):9–17,
+2023. doi: 10.1109/MM.2023.3256796. URLhttps://doi.org/10.1109/MM.2023.
+3256796.
+Choquette,J.,Gandhi,W.,Giroux,O.,Stam,N.,andKrashinsky,R. NVIDIAA100tensorcoreGPU:
+performanceandinnovation. IEEEMicro,41(2):29–35,2021. doi: 10.1109/MM.2021.3061394.
+URLhttps://doi.org/10.1109/MM.2021.3061394.
+Choromanski,K.M.,Likhosherstov,V.,Dohan,D.,Song,X.,Gane,A.,Sarlós,T.,Hawkins,P.,Davis,
+J.Q.,Mohiuddin,A.,Kaiser,L.,Belanger,D.B.,Colwell,L.J.,andWeller,A.Rethinkingattention
+withperformers. In9thInternationalConferenceonLearningRepresentations,ICLR2021,Virtual
+Event,Austria,May3-7,2021.OpenReview.net,2021. URLhttps://openreview.net/
+forum?id=Ua6zuk0WRH.
+Computer,T. Redpajama: Anopensourcerecipetoreproducellamatrainingdataset,April2023.
+URLhttps://github.com/togethercomputer/RedPajama-Data.
+Cubuk, E.D., Zoph, B., Shlens, J., andLe, Q. Randaugment: Practicalautomateddataaugmen-
+tation with a reduced search space. In Larochelle, H., Ranzato, M., Hadsell, R., Balcan, M.,
+and Lin, H. (eds.), Advances in Neural Information Processing Systems 33: Annual Confer-
+ence on Neural Information Processing Systems 2020, NeurIPS 2020, December 6-12, 2020,
+virtual, 2020. URL https://proceedings.neurips.cc/paper/2020/hash/
+d85b63ef0ccb114d0a3bb7b7d808028f-Abstract.html.
+Dao, T. Flashattention-2: Faster attention with better parallelism and work partitioning. CoRR,
+abs/2307.08691,2023. doi: 10.48550/ARXIV.2307.08691. URLhttps://doi.org/10.
+48550/arXiv.2307.08691.
+Dao, T., Fu, D. Y., Ermon, S., Rudra, A., and Ré, C. Flashattention: Fast and
+memory-efficient exact attention with io-awareness. In Koyejo, S., Mohamed, S., Agar-
+wal, A., Belgrave, D., Cho, K., and Oh, A. (eds.), Advances in Neural Informa-
+tion Processing Systems 35: Annual Conference on Neural Information Processing Sys-
+tems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022,
+2022. URL http://papers.nips.cc/paper_files/paper/2022/hash/
+67d57c32e20fd0a7a302cb81d36e40d5-Abstract-Conference.html.
+Dehghani,M.,Djolonga,J.,Mustafa,B.,Padlewski,P.,Heek,J.,Gilmer,J.,Steiner,A.P.,Caron,
+M.,Geirhos,R.,Alabdulmohsin,I.,Jenatton,R.,Beyer,L.,Tschannen,M.,Arnab,A.,Wang,X.,
+Ruiz,C.R.,Minderer,M.,Puigcerver,J.,Evci,U.,Kumar,M.,vanSteenkiste,S.,Elsayed,G.F.,
+Mahendran,A.,Yu,F.,Oliver,A.,Huot,F.,Bastings,J.,Collier,M.,Gritsenko,A.A.,Birodkar,V.,
+Vasconcelos,C.N.,Tay,Y.,Mensink,T.,Kolesnikov,A.,Pavetic,F.,Tran,D.,Kipf,T.,Lucic,M.,
+Zhai,X.,Keysers,D.,Harmsen,J.J.,andHoulsby,N. Scalingvisiontransformersto22billion
+parameters. InKrause,A.,Brunskill,E.,Cho,K.,Engelhardt,B.,Sabato,S.,andScarlett,J.(eds.),
+InternationalConferenceonMachineLearning,ICML2023,23-29July2023,Honolulu,Hawaii,
+USA,volume202ofProceedingsofMachineLearningResearch,pp.7480–7512.PMLR,2023.
+URLhttps://proceedings.mlr.press/v202/dehghani23a.html.
+Deng,J.,Dong,W.,Socher,R.,Li,L.,Li,K.,andFei-Fei,L. Imagenet: Alarge-scalehierarchical
+imagedatabase. In2009IEEEComputerSocietyConferenceonComputerVisionandPattern
+Recognition(CVPR2009),20-25June2009,Miami,Florida,USA,pp.248–255.IEEEComputer
+Society,2009. doi: 10.1109/CVPR.2009.5206848. URLhttps://doi.org/10.1109/
+CVPR.2009.5206848.
+Dosovitskiy,A.,Beyer,L.,Kolesnikov,A.,Weissenborn,D.,Zhai,X.,Unterthiner,T.,Dehghani,
+M.,Minderer,M.,Heigold,G.,Gelly,S.,Uszkoreit,J.,andHoulsby,N. Animageisworth16x16
+words: Transformersforimagerecognitionatscale. In9thInternationalConferenceonLearning
+Representations,ICLR2021,VirtualEvent,Austria,May3-7,2021.OpenReview.net,2021. URL
+https://openreview.net/forum?id=YicbFdNTTy.
+Fu,H.,Guo,T.,Bai,Y.,andMei,S. Whatcanasingleattentionlayerlearn? Astudythroughthe
+randomfeatureslens.InOh,A.,Naumann,T.,Globerson,A.,Saenko,K.,Hardt,M.,andLevine,S.
+12(eds.),AdvancesinNeuralInformationProcessingSystems36:AnnualConferenceonNeuralInfor-
+mationProcessingSystems2023,NeurIPS2023,NewOrleans,LA,USA,December10-16,2023,
+2023. URL http://papers.nips.cc/paper_files/paper/2023/hash/
+274db6bf1b01d8b4f07feaeb8c46f474-Abstract-Conference.html.
+Ganea,O.,Gelly,S.,Bécigneul,G.,andSeveryn,A. Breakingthesoftmaxbottleneckvialearnable
+monotonicpointwisenon-linearities. InChaudhuri,K.andSalakhutdinov,R.(eds.),Proceedings
+ofthe36thInternationalConferenceonMachineLearning,ICML2019,9-15June2019,Long
+Beach,California,USA,volume97ofProceedingsofMachineLearningResearch,pp.2073–2082.
+PMLR,2019. URLhttp://proceedings.mlr.press/v97/ganea19a.html.
+Graves,A.,Fernández,S.,Gomez,F.J.,andSchmidhuber,J. Connectionisttemporalclassification:
+labellingunsegmentedsequencedatawithrecurrentneuralnetworks. InCohen,W.W.andMoore,
+A.W.(eds.),MachineLearning,ProceedingsoftheTwenty-ThirdInternationalConference(ICML
+2006), Pittsburgh, Pennsylvania, USA, June 25-29, 2006, volume 148 of ACM International
+ConferenceProceedingSeries,pp.369–376.ACM,2006. doi: 10.1145/1143844.1143891. URL
+https://doi.org/10.1145/1143844.1143891.
+Grill,J.,Strub,F.,Altché,F.,Tallec,C.,Richemond,P.H.,Buchatskaya,E.,Doersch,C.,Pires,B.Á.,
+Guo,Z.,Azar,M.G.,Piot,B.,Kavukcuoglu,K.,Munos,R.,andValko,M. Bootstrapyourown
+latent-Anewapproachtoself-supervisedlearning. InLarochelle,H.,Ranzato,M.,Hadsell,R.,
+Balcan,M.,andLin,H.(eds.),AdvancesinNeuralInformationProcessingSystems33: Annual
+ConferenceonNeuralInformationProcessingSystems2020,NeurIPS2020,December6-12,2020,
+virtual, 2020. URL https://proceedings.neurips.cc/paper/2020/hash/
+f3ada80d5c4ee70142b17b8192b2958e-Abstract.html.
+Gulati, A., Qin, J., Chiu, C., Parmar, N., Zhang, Y., Yu, J., Han, W., Wang, S., Zhang, Z., Wu,
+Y., and Pang, R. Conformer: Convolution-augmented transformer for speech recognition. In
+Meng, H., Xu, B., and Zheng, T. F. (eds.), Interspeech 2020, 21st Annual Conference of the
+InternationalSpeechCommunicationAssociation,VirtualEvent,Shanghai,China,25-29October
+2020,pp.5036–5040.ISCA,2020a. doi: 10.21437/INTERSPEECH.2020-3015. URLhttps:
+//doi.org/10.21437/Interspeech.2020-3015.
+Gulati,A.,Qin,J.,Chiu,C.-C.,Parmar,N.,Zhang,Y.,Yu,J.,Han,W.,Wang,S.,Zhang,Z.,Wu,Y.,
+etal.Conformer:Convolution-augmentedtransformerforspeechrecognition.InProc.Interspeech,
+2020b.
+Hannun,A.,Digani,J.,Katharopoulos,A.,andCollobert,R. MLX:Efficientandflexiblemachine
+learningonapplesilicon,2023. URLhttps://github.com/ml-explore.
+He, K., Chen, X., Xie, S., Li, Y., Dollár, P., and Girshick, R. B. Masked autoencoders are scal-
+able vision learners. In IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+CVPR 2022, New Orleans, LA, USA, June 18-24, 2022, pp. 15979–15988. IEEE, 2022. doi:
+10.1109/CVPR52688.2022.01553. URL https://doi.org/10.1109/CVPR52688.
+2022.01553.
+Hernandez,F.,Nguyen,V.,Ghannay,S.,Tomashenko,N.,andEsteve,Y. Ted-lium3: Twiceasmuch
+dataandcorpusrepartitionforexperimentsonspeakeradaptation. InSpeechandComputer: 20th
+InternationalConference,SPECOM2018,Leipzig,Germany,September18–22,2018,Proceedings
+20,pp.198–208.Springer,2018.
+Hron,J.,Bahri,Y.,Sohl-Dickstein,J.,andNovak,R. Infiniteattention: NNGPandNTKfordeep
+attentionnetworks. InProceedingsofthe37thInternationalConferenceonMachineLearning,
+ICML2020,13-18July2020,VirtualEvent,volume119ofProceedingsofMachineLearning
+Research, pp. 4376–4386. PMLR, 2020. URL http://proceedings.mlr.press/
+v119/hron20a.html.
+Hua, W., Dai, Z., Liu, H., and Le, Q. V. Transformer quality in linear time. In Chaudhuri, K.,
+Jegelka, S., Song, L., Szepesvári, C., Niu, G., and Sabato, S. (eds.), International Conference
+on Machine Learning, ICML 2022, 17-23 July 2022, Baltimore, Maryland, USA, volume 162
+of Proceedings of Machine Learning Research, pp. 9099–9117. PMLR, 2022. URL https:
+//proceedings.mlr.press/v162/hua22a.html.
+13Hurley,N.P.andRickard,S.T. Comparingmeasuresofsparsity,2009.
+Ivanov, A., Dryden, N., Ben-Nun, T., Li, S., and Hoefler, T. Data movement is all you need:
+A case study on optimizing transformers. In Smola, A., Dimakis, A., and Stoica, I. (eds.),
+Proceedings of Machine Learning and Systems 2021, MLSys 2021, virtual, April 5-9, 2021.
+mlsys.org,2021. URLhttps://proceedings.mlsys.org/paper/2021/hash/
+c9e1074f5b3f9fc8ea15d152add07294-Abstract.html.
+Jones, C. H. Generalized hockey stick identities and n-dimensional blockwalking. 1994. URL
+https://api.semanticscholar.org/CorpusID:2088017.
+Jouppi,N.P.,Young,C.,Patil,N.,Patterson,D.A.,Agrawal,G.,Bajwa,R.,Bates,S.,Bhatia,S.,
+Boden,N.,Borchers,A.,Boyle,R.,Cantin,P.,Chao,C.,Clark,C.,Coriell,J.,Daley,M.,Dau,M.,
+Dean,J.,Gelb,B.,Ghaemmaghami,T.V.,Gottipati,R.,Gulland,W.,Hagmann,R.,Ho,C.R.,
+Hogberg,D.,Hu,J.,Hundt,R.,Hurt,D.,Ibarz,J.,Jaffey,A.,Jaworski,A.,Kaplan,A.,Khaitan,
+H., Killebrew, D., Koch, A., Kumar, N., Lacy, S., Laudon, J., Law, J., Le, D., Leary, C., Liu,
+Z.,Lucke,K.,Lundin,A.,MacKean,G.,Maggiore,A.,Mahony,M.,Miller,K.,Nagarajan,R.,
+Narayanaswami,R.,Ni,R.,Nix,K.,Norrie,T.,Omernick,M.,Penukonda,N.,Phelps,A.,Ross,J.,
+Ross,M.,Salek,A.,Samadiani,E.,Severn,C.,Sizikov,G.,Snelham,M.,Souter,J.,Steinberg,D.,
+Swing,A.,Tan,M.,Thorson,G.,Tian,B.,Toma,H.,Tuttle,E.,Vasudevan,V.,Walter,R.,Wang,
+W.,Wilcox,E.,andYoon,D.H. In-datacenterperformanceanalysisofatensorprocessingunit. In
+Proceedingsofthe44thAnnualInternationalSymposiumonComputerArchitecture,ISCA2017,
+Toronto,ON,Canada,June24-28,2017,pp.1–12.ACM,2017. doi: 10.1145/3079856.3080246.
+URLhttps://doi.org/10.1145/3079856.3080246.
+Katharopoulos,A.,Vyas,A.,Pappas,N.,andFleuret,F. Transformersarernns: Fastautoregressive
+transformers with linear attention. In Proceedings of the 37th International Conference on
+MachineLearning,ICML2020,13-18July2020,VirtualEvent,volume119ofProceedingsof
+MachineLearningResearch,pp.5156–5165.PMLR,2020. URLhttp://proceedings.
+mlr.press/v119/katharopoulos20a.html.
+Kim,H.,Papamakarios,G.,andMnih,A. Thelipschitzconstantofself-attention. InInternational
+ConferenceonMachineLearning,pp.5562–5571.PMLR,2021.
+Koohpayegani,S.A.andPirsiavash,H. Sima: Simplesoftmax-freeattentionforvisiontransformers.
+InIEEE/CVFWinterConferenceonApplicationsofComputerVision,WACV2024,Waikoloa,HI,
+USA,January3-8,2024,pp.2595–2605.IEEE,2024. doi: 10.1109/WACV57701.2024.00259.
+URLhttps://doi.org/10.1109/WACV57701.2024.00259.
+Lee, M., Han, K., and Shin, M. C. Littlebird: Efficient faster & longer transformer for question
+answering. InProceedingsofthe2022ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing,pp.5261–5277,2022.
+Likhomanenko, T., Xu, Q., Synnaeve, G., Collobert, R., and Rogozhnikov, A. CAPE: en-
+coding relative positions with continuous augmented positional embeddings. In Ranzato,
+M., Beygelzimer, A., Dauphin, Y. N., Liang, P., and Vaughan, J. W. (eds.), Advances
+in Neural Information Processing Systems 34: Annual Conference on Neural Informa-
+tion Processing Systems 2021, NeurIPS 2021, December 6-14, 2021, virtual, pp. 16079–
+16092, 2021. URL https://proceedings.neurips.cc/paper/2021/hash/
+865bf46435bd84fa5d89f64cf3ba7347-Abstract.html.
+Liu,Z.,Hu,H.,Lin,Y.,Yao,Z.,Xie,Z.,Wei,Y.,Ning,J.,Cao,Y.,Zhang,Z.,Dong,L.,Wei,F.,
+andGuo,B. SwintransformerV2: scalingupcapacityandresolution. InIEEE/CVFConference
+onComputerVisionandPatternRecognition,CVPR2022,NewOrleans,LA,USA,June18-24,
+2022, pp. 11999–12009. IEEE, 2022. doi: 10.1109/CVPR52688.2022.01170. URL https:
+//doi.org/10.1109/CVPR52688.2022.01170.
+Loshchilov,I.andHutter,F.Decoupledweightdecayregularization.arXivpreprintarXiv:1711.05101,
+2017.
+Lu,J.,Yao,J.,Zhang,J.,Zhu,X.,Xu,H.,Gao,W.,Xu,C.,Xiang,T.,andZhang,L. SOFT:softmax-
+freetransformerwithlinearcomplexity. InRanzato,M.,Beygelzimer,A.,Dauphin,Y.N.,Liang,
+14P.,andVaughan,J.W.(eds.),AdvancesinNeuralInformationProcessingSystems34: Annual
+ConferenceonNeuralInformationProcessingSystems2021,NeurIPS2021,December6-14,2021,
+virtual,pp.21297–21309,2021. URLhttps://proceedings.neurips.cc/paper/
+2021/hash/b1d10e7bafa4421218a51b1e1f1b0ba2-Abstract.html.
+Luo,C.,Zhan,J.,Xue,X.,Wang,L.,Ren,R.,andYang,Q. Cosinenormalization: Usingcosine
+similarityinsteadofdotproductinneuralnetworks. InKurková,V.,Manolopoulos,Y.,Hammer,
+B.,Iliadis,L.S.,andMaglogiannis,I.(eds.),ArtificialNeuralNetworksandMachineLearning
+-ICANN2018-27thInternationalConferenceonArtificialNeuralNetworks, Rhodes, Greece,
+October4-7,2018,Proceedings,PartI,volume11139ofLectureNotesinComputerScience,pp.
+382–391.Springer,2018. doi: 10.1007/978-3-030-01418-6\_38. URLhttps://doi.org/
+10.1007/978-3-030-01418-6_38.
+OpenAI. GPT-4technicalreport. CoRR,abs/2303.08774,2023. doi: 10.48550/ARXIV.2303.08774.
+URLhttps://doi.org/10.48550/arXiv.2303.08774.
+Panayotov, V., Chen, G., Povey, D., and Khudanpur, S. Librispeech: An ASR corpus based on
+publicdomainaudiobooks. In2015IEEEInternationalConferenceonAcoustics,Speechand
+SignalProcessing,ICASSP2015,SouthBrisbane,Queensland,Australia,April19-24,2015,pp.
+5206–5210.IEEE,2015. doi: 10.1109/ICASSP.2015.7178964. URLhttps://doi.org/
+10.1109/ICASSP.2015.7178964.
+Park,D.S.,Chan,W.,Zhang,Y.,Chiu,C.,Zoph,B.,Cubuk,E.D.,andLe,Q.V.Specaugment:Asim-
+pledataaugmentationmethodforautomaticspeechrecognition. InKubin,G.andKacic,Z.(eds.),
+Interspeech2019,20thAnnualConferenceoftheInternationalSpeechCommunicationAssociation,
+Graz,Austria,15-19September2019,pp.2613–2617.ISCA,2019.doi:10.21437/INTERSPEECH.
+2019-2680. URLhttps://doi.org/10.21437/Interspeech.2019-2680.
+Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G., Killeen, T., Lin, Z.,
+Gimelshein, N., Antiga, L., Desmaison, A., Köpf, A., Yang, E. Z., DeVito, Z., Raison, M.,
+Tejani, A., Chilamkurthy, S., Steiner, B., Fang, L., Bai, J., and Chintala, S. Pytorch: An
+imperative style, high-performance deep learning library. In Wallach, H. M., Larochelle,
+H., Beygelzimer, A., d’Alché-Buc, F., Fox, E. B., and Garnett, R. (eds.), Advances in Neu-
+ral Information Processing Systems 32: Annual Conference on Neural Information Process-
+ing Systems 2019, NeurIPS 2019, December 8-14, 2019, Vancouver, BC, Canada, pp. 8024–
+8035, 2019. URL https://proceedings.neurips.cc/paper/2019/hash/
+bdbca288fee7f92f2bfa9f7012727740-Abstract.html.
+Press,O.,Smith,N.A.,andLewis,M.Trainshort,testlong:Attentionwithlinearbiasesenablesinput
+lengthextrapolation. InTheTenthInternationalConferenceonLearningRepresentations,ICLR
+2022,VirtualEvent,April25-29,2022.OpenReview.net,2022.URLhttps://openreview.
+net/forum?id=R8sQPpGCv0.
+Raffel,C.,Shazeer,N.,Roberts,A.,Lee,K.,Narang,S.,Matena,M.,Zhou,Y.,Li,W.,andLiu,P.J.
+Exploringthelimitsoftransferlearningwithaunifiedtext-to-texttransformer. J.Mach.Learn.
+Res.,21:140:1–140:67,2020. URLhttp://jmlr.org/papers/v21/20-074.html.
+Shazeer,N. Fasttransformerdecoding: Onewrite-headisallyouneed. CoRR,abs/1911.02150,2019.
+URLhttp://arxiv.org/abs/1911.02150.
+Shen, K., Guo, J., Tan, X., Tang, S., Wang, R., and Bian, J. A study on relu and softmax in
+transformer. CoRR,abs/2302.06461,2023. doi: 10.48550/ARXIV.2302.06461. URLhttps:
+//doi.org/10.48550/arXiv.2302.06461.
+Su,J.,Ahmed,M.H.M.,Lu,Y.,Pan,S.,Bo,W.,andLiu,Y. Roformer: Enhancedtransformerwith
+rotarypositionembedding. Neurocomputing,568:127063,2024. doi: 10.1016/J.NEUCOM.2023.
+127063. URLhttps://doi.org/10.1016/j.neucom.2023.127063.
+Synnaeve,G.,Xu,Q.,Kahn,J.,Likhomanenko,T.,Grave,E.,Pratap,V.,Sriram,A.,Liptchinsky,
+V.,andCollobert,R. End-to-endASR:fromsupervisedtosemi-supervisedlearningwithmodern
+architectures. In ICML 2020 Workshop on Self-supervision in Audio and Speech, 2020. URL
+https://openreview.net/forum?id=OSVxDDc360z.
+15Touvron,H.,Martin,L.,Stone,K.,Albert,P.,Almahairi,A.,Babaei,Y.,Bashlykov,N.,Batra,S.,
+Bhargava,P.,Bhosale,S.,etal. Llama2: Openfoundationandfine-tunedchatmodels. arXiv
+preprintarXiv:2307.09288,2023.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L.,
+and Polosukhin, I. Attention is all you need. In Guyon, I., von Luxburg, U., Ben-
+gio, S., Wallach, H. M., Fergus, R., Vishwanathan, S. V. N., and Garnett, R. (eds.), Ad-
+vances in Neural Information Processing Systems 30: Annual Conference on Neural Infor-
+mation Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA, pp. 5998–
+6008, 2017. URL https://proceedings.neurips.cc/paper/2017/hash/
+3f5ee243547dee91fbd053c1c4a845aa-Abstract.html.
+Wightman,R.,Touvron,H.,andJégou,H. Resnetstrikesback: Animprovedtrainingprocedurein
+timm. CoRR,abs/2110.00476,2021. URLhttps://arxiv.org/abs/2110.00476.
+Wortsman, M., Lee, J., Gilmer, J., and Kornblith, S. Replacing softmax with ReLU in vision
+transformers. arXivpreprintarXiv:2309.08586,2023a.
+Wortsman, M., Liu, P. J., Xiao, L., Everett, K., Alemi, A., Adlam, B., Co-Reyes, J. D., Gur, I.,
+Kumar,A.,Novak,R.,Pennington,J.,Sohl-Dickstein,J.,Xu,K.,Lee,J.,Gilmer,J.,andKornblith,
+S. Small-scaleproxiesforlarge-scaletransformertraininginstabilities. CoRR,abs/2309.14322,
+2023b.doi:10.48550/ARXIV.2309.14322.URLhttps://doi.org/10.48550/arXiv.
+2309.14322.
+Yang,Z.,Dai,Z.,Salakhutdinov,R.,andCohen,W.W.Breakingthesoftmaxbottleneck:Ahigh-rank
+RNNlanguagemodel. In6thInternationalConferenceonLearningRepresentations,ICLR2018,
+Vancouver,BC,Canada,April30-May3,2018,ConferenceTrackProceedings.OpenReview.net,
+2018. URLhttps://openreview.net/forum?id=HkwZSG-CZ.
+Yun, C., Bhojanapalli, S., Rawat, A. S., Reddi, S. J., and Kumar, S. Are transformers universal
+approximatorsofsequence-to-sequencefunctions?,2020.
+Zhai, S., Likhomanenko, T., Littwin, E., Busbridge, D., Ramapuram, J., Zhang, Y., Gu, J., and
+Susskind, J. M. Stabilizing transformer training by preventing attention entropy collapse. In
+Krause,A.,Brunskill,E.,Cho,K.,Engelhardt,B.,Sabato,S.,andScarlett,J.(eds.),International
+ConferenceonMachineLearning,ICML2023,23-29July2023,Honolulu,Hawaii,USA,volume
+202 of Proceedings of Machine Learning Research, pp. 40770–40803. PMLR, 2023a. URL
+https://proceedings.mlr.press/v202/zhai23a.html.
+Zhai,X.,Mustafa,B.,Kolesnikov,A.,andBeyer,L. Sigmoidlossforlanguageimagepre-training.
+CoRR, abs/2303.15343, 2023b. doi: 10.48550/ARXIV.2303.15343. URL https://doi.
+org/10.48550/arXiv.2303.15343.
+16Appendices
+A Limitations 19
+B BroaderImpact 19
+C UniversalApproximationPropertyforSigmoidAttention 20
+C.1 ProofofStep(3): SigmoidTransformerscanApproximateModifiedSigmoidTrans-
+formers . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+C.2 Proof of Step (2-b): Modified Sigmoid Transformers can Implement Contextual
+Mappings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+C.2.1 BasicBuildingBlocksofContextualMapping . . . . . . . . . . . . . . . 22
+C.2.2 ResultofApplyingaSequenceofSelectiveShifts. . . . . . . . . . . . . . 23
+C.2.3 ResultofApplyingOneLastGlobalShiftLayer . . . . . . . . . . . . . . 25
+C.2.4 ASequenceofSelectiveShiftsFollowedbyaGlobalShiftProducesaCon-
+textualMapping . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+D LipschitznessofSigmoidAttention 30
+E TheBiasTermofSigmoidAttention 31
+F DetailsofFLASHSIGMOID 33
+F.1 DetailsofFLASHSIGMOIDAlgorithm . . . . . . . . . . . . . . . . . . . . . . . . 33
+F.2 BenchmarkingofFLASHSIGMOIDKernels . . . . . . . . . . . . . . . . . . . . . 36
+F.3 SpeedBoostsofFLASHSIGMOIDinRealisticSettings . . . . . . . . . . . . . . . 37
+F.4 FLASHSIGMOIDwithALiBi . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39
+F.5 DirectionsforFutureWorkonFLASHSIGMOID . . . . . . . . . . . . . . . . . . . 40
+G Experiments 41
+G.1 ExtraAblations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41
+G.1.1 TheEffectofMultiplicativeSequenceLengthNormalization . . . . . . . . 41
+G.1.2 AttentionBiasStabilityAblation . . . . . . . . . . . . . . . . . . . . . . . 42
+G.2 Vision . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+G.2.1 TestImageNet1kTop-1% . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+G.2.2 LayerScaleFreeSigmoidAttention . . . . . . . . . . . . . . . . . . . . . 43
+G.2.3 SigmoidAttentionvs. AttentionRelaxations . . . . . . . . . . . . . . . . 43
+G.2.4 Hyper-Parameters. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44
+G.3 LanguageModel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44
+G.3.1 Hyper-Parameters. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44
+G.3.2 GradientNorm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+G.4 AutomaticSpeechRecognition . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+G.4.1 TrainingDetails. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+G.4.2 ResultsandAblations . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+17G.5 SimpleExperiments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+G.5.1 k–SummationProblemDefinition . . . . . . . . . . . . . . . . . . . . . . 50
+G.5.2 ComparisontoSoftmax . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+G.5.3 AttentionEvolution . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+G.5.4 PairRepeatProblem . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+H Contributions 53
+18A Limitations
+While our work demonstrates that SigmoidAttn can serve as a viable drop-in replacement for
+SoftmaxAttninmanydomainsandscales,thereareafewkeylimitationstonote:
+(1) Inlarge-scale(1Bparameter,4096contextlength)languagemodeling,weobservedsome
+gradientnormspikesandaslightperformancegapbetweenSigmoidAttnandSoftmaxAttn
+(Table3). Whilerunsatsmallercontextlengths(1Bparameter,n=2048)werestableand
+matchedSoftmaxAttnperformance,furtherresearchisneededtofullyclosetheperfor-
+mancegapandensuretrainingstabilityforverylargelanguagemodelsusingSigmoidAttn.
+(2) OurtheoreticalanalysisprovesthattransformerswithSigmoidAttnareuniversalfunction
+approximators and have improved regularity compared to SoftmaxAttn. However, the
+boundswederive,whiletighterthanthoseforSoftmaxAttn,maynotbemaximallytight.
+Therecouldberoomforfurthertheoreticalrefinements.
+(3) Wefocusedourempiricalevaluationonstandardbenchmarksinlanguage,vision,andspeech
+domains. Performanceonmorenicheoremergingapplicationsremainstobevalidated.
+(4) Inautomaticspeechrecognitionexperiments,weobservedthatSigmoidAttncanbesen-
+sitivetothechoiceofpositionalembeddingsandmayrequirecarefulinitializationofthe
+attentionbiastermtoensurestabletraining. Specifically,wefoundthattheCAPEpositional
+embeddingwasthemostunstableforSigmoidAttn. Furtherworkisneededtodevelopro-
+bustinitializationschemesthatworkwellacrossdifferentpositionalembeddings. Moreover
+we found that w/o QK norm or with post-LayerNorm SigmoidAttn is unstable and can
+underperformsSoftmaxAttn,thusfurtherinvestigationisneeded.
+(5) FLASHSIGMOIDdemonstratespromisinginferenceandtrainingspeed-upsbyexploiting
+SigmoidAttn’ssimplerkernelstructurecomparedtoSoftmaxAttn. However, realizing
+these gains at scale in distributed training setups may require additional engineering to
+optimizecommunicationbottlenecks.
+Despitetheselimitations, webelievethisworkestablishesastrongfoundationforSigmoidAttn,
+unifyingpriorartanddemonstratingitspotentialasadrop-inSoftmaxAttnreplacement. Wehope
+ourtheoreticalgroundingandempiricalresultsmotivatefurtherresearchintothissimpleyeteffective
+architecturalvariation.
+B BroaderImpact
+The development of efficient and theoretically grounded attention mechanisms has the potential
+for significant positive impact across a range of applications. By establishing SigmoidAttn as a
+viablealternativetoSoftmaxAttn,ourworkexpandsthetoolkitofarchitecturalchoicesavailableto
+researchersandpractitioners. Positiveimpactsofthisworkmayinclude:
+(1) Improvedcomputationalefficiency: FLASHSIGMOID’sfasterkernelimplementationcould
+leadtomoreefficienttrainingandinferenceforattention-basedmodels,reducingenergycon-
+sumptionandenablingdeploymentonresource-constraineddevices.Thiscoulddemocratize
+accesstopowerfulmodels.
+(2) Theoreticalunderstanding: Ouruniversalapproximationresultsandtighterboundsonthe
+regularity of SigmoidAttn contribute to a deeper theoretical understanding of this key
+component. A stronger theoretical foundation can guide principled model design and
+architecturalsearch.
+(3) Application-specificbenefits:Acrosslanguage,vision,andspeechdomains,SigmoidAttn’s
+performancecouldtranslateintoimproveduserexperiences,suchasmorenaturallanguage
+interactions,enhancedimageunderstanding,androbustspeechrecognition. Theseadvance-
+mentscouldhavepositivesocietalimpacts,suchasimprovedaccessibilitytoolsandmore
+effectiveeducationaltechnologies.
+However,aswithanyfoundationalmachinelearningadvance,therearealsorisksofnegativeimpacts
+thatmustbeconsideredandmitigated:
+19(1) Fairness and bias considerations: As with any machine learning model, it is important
+to carefully evaluate SigmoidAttn based models for fairness and potential biases when
+appliedtosensitiveusecases. TheuniquepropertiesofSigmoidAttnmayhaveunexpected
+interactionswithdatabiases. Researchersandpractitionersshouldfollowbestpracticesfor
+auditingandmitigatingunwantedbiasestoensureequitableoutcomes.
+(2) Environmental impact: While FLASHSIGMOID is more computationally efficient than
+FLASHATTENTION,theoveralltrendofscalingupattention-basedmodelshassignificant
+energycosts. Furtherefficiencyimprovementsandtheuseofrenewableenergysourcesare
+importanttomitigateenvironmentalharms.
+Webelievethat thebenefits ofSigmoidAttn outweighthe risks, but itis crucialfor theresearch
+communitytoactivelyconsiderandaddressthesepotentialnegativeimpacts. Bydoingso,wecan
+worktowardsafuturewheretheefficiencyandexpressivityofSigmoidAttnareusedforsocietal
+benefit.
+C UniversalApproximationPropertyforSigmoidAttention
+ThissectionisdedicatedtotheprooffortheUniversalApproximationPropertyforattentionequipped
+withsigmoidnonlinearity. TheprooffollowscloselytheoneprovidedinYunetal.(2020,Sec.3),
+of which we inherit much of the notation, and we encourage the interested reader to refer to the
+originalsourceforamorecomprehensiveunderstandingofitsdetails. Herewefirstprovidecontext
+byoutliningthemainstepsintheoriginalproof,beforeproceedingtoadaptitskeycomponentsto
+theSigmoidAttncase.
+Theproofaimsatshowingthatatransformernetworkcanapproximatetoarbitraryaccuracyany
+continuous,permutation-equivariantfunctionwithcompactsupport. Theproofisconstructivein
+nature,inthatitexplicitlydefinesthearchitecture(andparticularly,thesequenceofself-attention
+andfeed-forwardlayers)thatcanapproximateagiventargetfunction. Todoso,itproceedsinsteps
+(seeYunetal.(2020,Sec.3.2)):
+(1) provethatanycontinuousfunctionwithcompactsupportcanbeapproximatedtoarbitrary
+accuracybyapiecewiseconstantfunction
+(2) provethatanaptly-constructedmodifiedtransformernetwork,(wherethesoftmaxnonlin-
+earity is substituted with a hardmax nonlinearity), can exactly represent such piecewise
+constantfunction. Thisstepisfurtherdividedintothreesub-steps(seeYunetal.(2020,
+Sec.4)):
+(a) provethataseriesoffeed-forwardlayerscanquantizeanyinputtoaspecificdiscretiza-
+tiongridinthecompactdomain
+(b) provethataseriesofself-attentionlayerscanimplementacontextualmapping(see
+Yunetal.(2020,Def.3.1))
+(c) provethataseriesoffeed-forwardlayerscanmaptheoutputofthecontextualmapping
+tothedesiredoutputofthetargetpiecewise-constantapproximation
+(3) provethata(classical)transformernetworkcanapproximatesuchmodifiedtransformer
+networktoarbitraryaccuracy
+Fortunately,someofthestepsoutlinedabovedonotrelyonaspecificnonlinearfunctionbeingused
+withintheattentionmechanism,andcanbedirectlyreusedinourproof,virtuallyunchanged. Notice
+howeverthatSteps(2-b)and(3)aredirectlyimpactedbymodificationstotheattentionlayer,and
+hencerequireadaptationinourcase. Thisisthefocusofthenextsections.
+C.1 ProofofStep(3): SigmoidTransformerscanApproximateModifiedSigmoid
+Transformers
+InYunetal.(2020),toimplementcontextualmappings,theauthorsrelyonamodifiedversionof
+transformers, for the sake of simplifying the analysis. In their modified version, the (row-wise)
+softmax operation is substituted with a (row-wise) hardmax operation. This substitution is valid
+becauseaclassicaltransformercanstillbemadearbitrarilyclosetosuchmodifiedtransformer,in
+20lightofthefactthat
+λ→∞
+softmax(λX) hardmax(X). (10)
+−−−−→
+Inourproof,wefollowasimilarstrategytodefineourmodifiedsigmoidtransformer(andinparticular,
+itsself-attentionmechanism). Wehavethat
+λ→∞
+σ(λX) H(X), (11)
+−−−−→
+whereσ(x)=(1+e−x)−1isthe(elementwise)sigmoidfunction,while
+1 x>0
+H(x)= 1 x=0 (12)
+2
+0 x<0
+denotesthe(elementwise)Heavisidestepfunction. Thisallowsustodefineourmodifiedsigmoid
+self-attentionlayer,asfollows.
+DefinitionC.1(Modifiedsigmoidself-attentionlayer). GivenaninputX Rd×n,theactionof
+∈
+amodifiedsigmoidself-attentionlayerwithshiftsandasingleone-dimensionalheadisdefinedas
+X X+ψ(X;q,b ,k,b ,v,o),where
+q k
+(cid:55)→
+ψ(X;q,b ,k,b ,v,o)=o vTX H qTX bT T kTX bT (13)
+q k − q − k
+withq,k,v Rd representingthequery,(cid:0) key, a(cid:1) ndv(cid:16) a(cid:0) luevectors, b(cid:1) ,(cid:0) b Rn the(cid:1)(cid:17) corresponding
+q k
+queryandke∈ ybiasvectors,whileo Rddenotestheoutputvector. ∈
+∈
+Analogously to (10), (11) guarantees that sigmoid attention can approximate modified sigmoid
+attentionbysimplyincreasingthemagnitudeofitsinnerparameters.
+Hereandinthefollowing,thelengthoftheinputsequenceisdenotedasn,whiledrepresentsthe
+dimensionalityofthetokens. NoticethatweareconsideringtheinputtensorX Rd×n,(asopposed
+to Rn×d)tobetteralignoutnotationwiththeoneusedinYunetal.(2020). ∈
+∈
+C.2 ProofofStep(2-b): ModifiedSigmoidTransformerscanImplementContextual
+Mappings
+Thecoreoftheproofconsistsinshowinghow,byopportunelycombiningtheoperationsin(13),
+onecanbuildanarchitecturecapableofimplementingacontextualmapping. Forcompleteness,we
+reportnextthedefinitionofsuchamap(seealsoYunetal.(2020,Def.3.1)).
+DefinitionC.2(Contextualmapping). Amapq :L RnfromafinitesetL Rd×nissaidtobea
+→ ⊂
+contextualmappingifboththefollowingconditionshold:
+(i) q (X)=q (X), i=j and X L
+i j
+̸ ∀ ̸ ∀ ∈
+(ii) q (X)=q (X′), i,j and X,X′ L,withX =X′
+i j
+̸ ∀ ∀ ∈ ̸
+whereq (X)denotesthei-thcomponentofq(X).
+i
+Namely,acontextualmappingissuchthatittransformseachtokeninaninputsequencetoavalue
+depending uniquely on the whole sequence. By satisfying this property, we can ensure that any
+elementofthequantizationoftheinputdomain(achievedbyStep(2-a))canbemappedtoaunique
+identifyingvalue(dependingonthewholeinput)viaasequenceofmodifiedsigmoidself-attention
+layers. ItisthenuptotheMLP(inStep(2-c))tocorrectlymapthisvaluetothecorrespondingoutput
+valueinthepiece-wiseconstantapproximation.
+Inparticular,afterdefiningauniformdiscretization(characterizedbytheparameterδ)oftheunitary
+hypercube[0,1]d Rd,namely
+⊂
+G := g :g 0,δ,2δ,...,1 δ , i=1...d , (14)
+δ i
+{ ∈{ − } ∀ }
+weconsiderasinputatensorX (composedofcolumnsX =[x ]n )suchthat
+i i=1
+X L:= X :x G i=1...n, and x =x i=j Rd×n, (15)
+i δ i j
+∈ { ∈ ∀ ̸ ∀ ̸ }⊂
+21thatis,a2DtensorwhosecolumnsareelementofthediscretizationG ,andthatalldifferfromeach
+δ
+other(atleastforoneelement). WewanttobuildacontextualmappingactingonL,bystacking
+layersparameterizedaccordingtoDef.C.1. InApp.C.2.1wedefinethebasicbuildingblocksofour
+architecture;inApp.C.2.2wedescribehowtostackthem,andtheeffectthearchitecturehasona
+giveninput;finally,inApp.C.2.4weprovethatthisarchitectureindeedimplementsacontextual
+mapping.
+C.2.1 BasicBuildingBlocksofContextualMapping
+Thestrategywefollowtoassembleacontextualmappingconsistsinsequentiallylookingateach
+columnoftheinput,progressivelyupdatingandstoringinformationregardingitscontentinauniquely
+identifiablemanner,andfinallybroadcastingthisinformationbacktoeveryelementinthesequence.
+Thedifficultyliesinthefactthateachoftheseupdatesmustbecarriedonwhilerelyingsolelyon
+applicationsofthemodifiedSigmoidAttnlayerinDef.C.1. Inthefollowing,wedescribehowwe
+cantweakitsparameterstoachieveexactlythis.
+Fromd-dimensionalquantizedvectorstoscalars Asafirstsimplification,wecangetridofthe
+d-dimensionintheX tensorbymappingeachofitscolumnstoacorrespondingidentifyingscalar,
+uniquelydefinedbythespecificcolumncomponents. ThisstepisalsoperformedinYunetal.(2020,
+App.B.5),andcanbeachievedratherstraightforwardly,bydefining
+v q k u:=[1,δ−1,δ−2,...,δ−d+1]T. (16)
+≡ ≡ ≡
+Noticeinfactthat,sinceeachcolumnx belongstoG ,itcanequivalentlybewrittenintheform
+i δ
+x = δ [id ,id ,...,id ]T, where id 0,1,2,...,δ−1 1 represents the (indexed)
+i 0,i 1,i d−1,i j,i
+· ∈ { − }
+coordinateofthediscretizationalongthej-thdimension. Scalar-multiplyingX byuin(16),then,
+turnsthistupleofindicesintoasingleone,inabijectivefashion6.
+ThisallowsustoequivalentlyconsiderasinglevectoruTX Rn, ratherthanthewholetensor
+X Rd×nintheremainderofouranalysis. Analogously,choos∈ ingo e :=[1,0,...,0]T in(13)
+0
+∈ ≡
+constraintstheeffectofthelayerapplicationtoimpactonlythefirstrowofthetensor:thegoalisthen
+tostoreinthisrowtheresultofthetargetcontextualmappingqinDef.C.2. Toslimournotation,in
+thefollowingweoftenrefertouTX asthevectorl Rn,withcomponentsl .
+i
+∈
+Inlightofthesimplificationabove,wecanrewrite(13)morecompactly,asfollows:
+ψ(X;q =k=v u,o e ;b ,b )=e lTH((l b ) (l b )) (17)
+0 q k 0 q k
+≡ ≡ − ⊗ −
+Notice that, since the elements of both X and u are always non-negative, so are those of l, too.
+Moreover,sinceweareinterestedinpermutation-equivariantfunctionswithrespecttothecolumnsof
+X,withoutlossofgeneralitywecanconsidertheelementsofl=uTX tobeordered: 0 l <l ,
+i j
+≤
+i<j.
+∀
+Selective shift operation for sigmoid attention Since we aim to recover a contextual map by
+sequentiallyupdatingtheelementsofl,weproceedbydesigningamodificationof(17)whichaffects
+onlyacertainselectedelementatatime. Thisiswereoursecondsimplificationcomesintoplay,
+andthistimeitpertainstherolesofthebiasvectorsb andb . Sincel 0,thesevectorshavethe
+q k
+≥
+effectoftweakingthesignoftheinnerargumentsoftheHeavisidefunctionin(17),hencedirectly
+impactingwhenitsapplicationoutputs0or1. Byaptlyselectingthevaluesofb andb ,then,we
+k q
+canexplicitlydecidewhenaspecificlayertriggersanupdate,whichelementsareaffectedbythe
+update,andwhatelementstoconsidertocomputetheupdateitself.
+Moreindetail,takeb = 1b andb = 1b ,forsomescalarsb ,b ,andwith1beingtheall-one
+q q v v q v
+vector. Pluggingthisinto(17),wehave
+ψ˜(X;b ,b ):=ψ(X;q =k=v u,o e ,b =1b ,b =1b )
+q k 0 q q k k
+≡ ≡
+l ifl <b (18)
+=e 0lTH((l 1b q) (l 1b k))=e
+0
+i:li<bv i j k ;
+− ⊗ − (cid:26)(cid:80)i:li>bvl i ifl j >b k
+6Forexample,considerd=3andthecolumndefinedasx
+i
+=[3δ,10(cid:80) δ,2δ]T,thatis,thecolumnidentified
+bythetripletofindices[3,10,2].MultiplyingbyuwouldthengivethescalaruTx
+i
+=(3+10N +2N2)δ,
+whereN =δ−1,whichisuniquelyidentifiedbythesingleindex(3+10N +2N2).
+22noticehowb determineswhatelementsoflcomposetheupdate(asitimpactstheindicesconsidered
+q
+in the sum), while b defines the elements impacted by the update itself 7. If we opportunely
+k
+combine four modified sigmoid self-attention heads ψ˜(X;b ,b ), we recover, for a given index
+q k
+i=0...δ−d 1,
+−
+ψ˜ X;b =0,b = i 1 δ
+1 ψ˜ X;q b =0,k b = − i+2 1 δ
+Ψ(i)(X):=X+ 2c − ψ(cid:0) ˜ X;bq =b =k (cid:0) i+ 1(cid:1)2 δ(cid:1) 
+
+− +ψ˜(cid:0) X;bq
+=
+k
+i+ 1
+(cid:0) ,b2 =(cid:1) i(cid:1)
+1 δ 
+ (cid:0) q 2(cid:0) k (cid:1) (cid:1) − 2 
+1
+ (cid:0)H Hl ⊗
+l
+l (cid:0) −
+l
+i − i(cid:1) +1 2 1δ δ(cid:0) (cid:1) (cid:1) 
+=X+ 2ce 0lT  − H(cid:0) l⊗(cid:0) i−(cid:0) + 1 δ(cid:1)2 (cid:1)(cid:1) l i+ 1 δ  (22)
+
+− +H(cid:0) l−(cid:0) i+(cid:0)12
+δ
+(cid:1)⊗(cid:1)(cid:1) l−
+i
+12
+δ 
+ (cid:0)(cid:0) −(cid:0) 2(cid:1) (cid:1)⊗(cid:0) −(cid:0) − 2(cid:1) (cid:1)(cid:1) 
+ 
+= ⇒Ψ( 1i ,) j(X)=X
+1,j
++c(cid:0)(cid:0)
+0
+k:l(cid:0) k>iδl k(cid:1) (cid:1) oif thl j(cid:0) er= wii sδ(cid:0)
+e
+(cid:1) (cid:1)(cid:1)
+(cid:26)(cid:80)
+= Ψ(i) (X)=X ,
+⇒ k>1,j k,j
+wherec c(δ,d,n)isamultiplicativeconstantwhichwillbechosenlater.
+≡
+Theoperatorassembledin(22)definesthebasiclayerofthearchitecturethatweuseinourproof.
+NoticeΨ(i)(X)hastheeffectofmodifyingonlythecolumnx whichhasindexl =uTx =iδ
+j j j
+(if at all present in the input X). This layer covers a similar role to the selective shift operation
+introducedinYunetal.(2020,App.B.5),butithasbeenadaptedtoaccountforthepresenceofa
+sigmoidnonlinearity: noticethisrequiredustouse4-headedattention,whileinYunetal.(2020)a
+2-headedversionissufficient.
+C.2.2 ResultofApplyingaSequenceofSelectiveShifts
+Ultimatelywewanttoshowhow,bystackingasequenceofselectiveshiftlayers(22)forincreasing
+i=0...δ−d 1andoneadditionalglobalshift,wecanbuildanarchitecturecapableofrepresenting
+−
+7 This can be better seen by considering independently the effects of the two parameters b k, b q on the
+modifiedsigmoidattentionmatrixH((l−1b q)⊗(l−1b k)).Wehaveinfact,withb
+q
+=0,
+l <b l >b
+j k j k
+0 ··· 0 1 ··· 1
+H(l⊗(l−1b k)) =  . . . ... . . . . . . ... . . . . (19)
+0 ··· 0 1 ··· 1
+T inh di es xsh
+l
+jow >s bh ko .w B, yby com mo bd ii nfy inin gg twb k o, so un ce hc oa pn ed rae tc oid rse ww ih thic bh kco =lu (cid:0)m in −sw
+1
+2(cid:1)ill δr ae nce div be ka =nu (cid:0)p id +ate
+1
+2: (cid:1)n δa ,m we ely t, ha el nlt rh eo cose vew rith
+l =iδ
+j
+0 ··· 0 1 0 ··· 0
+−HH
+(cid:0)(cid:0)
+ll ⊗⊗
+(cid:0)(cid:0)
+ll −− 11
+(cid:0)(cid:0)
+ii +− 2
+11(cid:1)
+(cid:1)δ
+δ(cid:1) (cid:1)(cid:1)
+(cid:1) =  . . . ... . . . . . . . . . ... . . . , (20)
+2 0 ··· 0 1 0 ··· 0
+whichallowsustolimittheupdatetoonlyonespecificcolumn:theonewithindexl
+j
+=iδ.
+ratT heh re tp ha ar nam the ete cr ob luq ma nct ss .a Tn ha elo sg ao mu esl oy, pb eu rat tv oa rr aie ss inth (e 2o 0u ),tp bu ut to wf it th he bH qe =av (cid:0)is iid +ef 21u (cid:1)n δct gio ivn ea ss uw se inm fo acv te :downtherows,
+l =iδ
+j
+0 ··· 0 −1 0 ··· 0
+H(cid:0)(cid:0) l−1(cid:0)
+i+
+1(cid:1) δ(cid:1) ⊗(cid:0) l−1(cid:0)
+i−
+1(cid:1) δ(cid:1)(cid:1)  
+0. .
+.
+·. ·..
+·
+0. .
+.
+−. .
+.
+1
+0. .
+.
+·. ·..
+·
+0. .
+.  
+
+l j <iδ
+. (21)
+−H(cid:0)(cid:0) l−1(cid:0)
+i+
+12(cid:1) δ(cid:1) ⊗(cid:0) l−1(cid:0)
+i+
+2 1(cid:1) δ(cid:1)(cid:1) = 
+0 ··· 0 1 0 ···
+0
+
+2 2   . . . ... . . . . . . . . . ... . . .   l j >iδ
+0 ··· 0 1 0 ··· 0
+Finally,(22)canberecoveredbycombining(20)and(21):thishastheeffectofremovingthe−1’sin(21).
+23acontextualmapping. Asapreliminarystep,inthissectionweprovideanexplicitformulaforthe
+resultofapplyingsuchanarchitecture. Onceagain, weareproceedinganalogouslytoYunetal.
+(2020,App.B.5.1).
+Afterthefirstselectiveshiftapplication ConsideraquantizedinputsequenceX Lasdefinedin
+(15),withitscolumnsorderedaccordingtotheirscalarindicesl=uTX. Thesequ∈ enceofselective
+shiftlayersΨ(0),Ψ(1),... initiallyhasnoeffectontheinputitself,anditleavesitunchangeduntilwe
+hitthelayercorrespondingtotheindexofthefirstcolumnintheinput,Ψ(ˆi),wherel =uTx =ˆiδ.
+1 1
+Atthispoint,following(22),thefirstcolumnoftheinputismodifiedinto
+n
+x
+Ψ(ˆi)(X)=x
++ce l =x +ce l l (23)
+1 (cid:55)→ |,1 1 0 k 1 0 (cid:32) k − 1 (cid:33)
+k: (cid:88)lk>l1 k (cid:88)=1
+whiletheothercolumnsarestillleftuntouched. Inthefollowing,wecompactlyrefertothequantities
+n
+l l ass :
+k=1 k − i i
+(cid:80) n n n T
+s=[s ,s ,...,s ]T := l l , l l ,..., l l . (24)
+1 2 n k 1 k 2 k n
+(cid:34) − − − (cid:35)
+k=1 k=1 k=1
+(cid:88) (cid:88) (cid:88)
+Accordingto(23),theindexl ofcolumnx isthenanalogouslymappedto
+1 1
+l =uTx ˜ l :=uTΨ(ˆi)(X)=uTx +cs =l +cs . (25)
+1 1 (cid:55)→ 1 |,1 1 1 1 1
+Noticethat,bychoosingc>1,wecanensure
+n n
+c>1 = ˜ l >(cid:19)l(cid:19)+ l (cid:19)l(cid:19)> >l i, (26)
+1 1 k 1 i
+⇒ − ∀
+k=1 k=1
+(cid:88) (cid:88)
+˜
+andparticularlyl >l ,implyingthatatthenext(effective)applicationoftheselectiveshiftoperation,
+1 2
+thisterm,too,willcontributetotheupdate.
+Subsequentselectiveshiftapplications Followingsimilarconsiderations,thenexteffectiveupdate
+willbeappliedbythelayerΨ(ˆi) withl = uTx =ˆiδ. Atthispoint,thesecondcolumnindexis
+2 2
+updatedasfollows:
+l =uTx ˜ l :=uTΨ(ˆi)(X)=uTx +c l +˜ l
+2 2 (cid:55)→ 2 |,2 2 (cid:32) k 1 (cid:33)
+k: (cid:88)lk>l2
+(27)
+n
+=l +c l l (cid:19)l(cid:19)+(cid:19)l(cid:19)+cs =l +cs +c2s
+2 k 2 1 1 1 2 2 1
+(cid:32) − − (cid:33)
+k=1
+(cid:88)
+˜
+wherel isalsoincludedinlightof(26),andweusedthedefinitions(24)and(25). Continuingto
+1
+applyΨ(i)(X),forincreasingi,andunrollingtherecursion,werecover
+n
+˜ l =l +c l l l l +˜ l +˜ l =l +cs +c2(s +s )+c3s
+3 3 k 1 2 3 1 2 3 3 2 1 1
+(cid:32) − − − (cid:33)
+k=1
+(cid:88)
+n
+˜ l =l +c l l l l l +˜ l +˜ l +˜ l
+4 4 k 1 2 3 4 1 2 3
+(cid:32) − − − − (cid:33)
+k=1
+(cid:88)
+=l 4+cs 4+c2(s 3+s 2+s 1)+c3(s 2+2s 1)+c4s 1 (28)
+n
+˜ l =l +c l l l l l l +˜ l +˜ l +˜ l +˜ l
+5 5 k 1 2 3 4 5 1 2 3 4
+(cid:32) − − − − − (cid:33)
+k=1
+(cid:88)
+=l +cs +c2(s +s +s +s )+c3(s +2s +3s )+c4(s +3s )+c5s
+5 5 4 3 2 1 3 2 1 2 1 1
+.
+.
+.
+24whicheventuallyallowsustowritethegeneralformula8
+j−2 j−2
+k
+˜ l :=l +cs + ci+2 s , j =1...n. (29)
+j j j k−i+1
+i
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+C.2.3 ResultofApplyingOneLastGlobalShiftLayer
+Afterthelastselectiveshiftlayer,theoriginalinputXhasbeenmappedtoamodifiedoneX˜
+whereby
+eachcolumnx˜ ischaracterizedbytheindex˜ l = uTx˜ givenin(29). Rememberourgoalisto
+j j j
+recoveracontextualmapping,butnoticethatthese˜ l indicesarenotuniquelydefinedbytheinput9;
+j
+inotherwords,theydonotsatisfyproperty(2)inDef.C.2. Theonlyexceptiontothisisthelast
+˜
+indexl ,as(looselyspeaking)ithas“seen”allthepreviousupdates-andindeedinApp.C.2.4we
+n
+provethisrigorously,undersomeassumptionontheyet-undefinedcoefficientc(δ,d,n).
+Astraightforwardwaytorecoveraone-to-onemappingforthewholesequence,then,istoupdate
+˜ ˜
+everyindexl viaaquantitydirectlydependingonl . Thisispreciselywhatthelastglobalshift
+j n
+layerΨ¯(X)aimstoaccomplish.
+Thislastlayerisalsodefinedstartingfromthesimplifiedmodified
+sigmoidattention(18),bypickingb = 0andb = c(δ,d,n)n+ 1 δ: if,foranyinput,wecan
+k q 2
+guaranteethat
+˜ l c(δ,d,n)nδ j <n an(cid:0) d ˜ l >c(δ,d(cid:1) ,n)nδ, (30)
+j n
+≤
+thentheapplicationoftheglobalshiftlayerwouldresultin10:
+1
+Ψ¯(X˜):=X˜ +cn+1ψ˜ X˜;b = cn+ δ,b =0
+q 2 k
+(cid:18) (cid:18) (cid:19) (cid:19)
+= Ψ¯ (X˜)=X˜ +cn+1˜ l (32)
+1,j 1,j n
+⇒
+= Ψ¯ (X˜)=X˜ .
+k>1,j k,j
+⇒
+Theglobalshift(32)isthelastlayerweneedtodefineourcandidatecontextualmapping. Collecting
+the results from this section together, our architecture is defined by sequentially composing the
+selectiveshiftlayerswiththeglobalshiftone,
+Ψ(X):=Ψ¯ Ψ(δ−d−1) Ψ(2) Ψ(1)(X). (33)
+◦ ◦···◦ ◦
+Afterbeingscalar-multipliedbyu,thisresultsinasequence
+q(X):=uTΨ(X)=l˜+cn+11˜
+l (34)
+n
+whichweaimtoproveisacontextualmapping. Thisisshowninthenextsection.
+8From(28),wecannoticethat,foragiven˜l k,thecoefficientsa( i,k j)appearinginfrontofthevariouss k−ifor
+eachofthecj terms,arefirstgivenbyalistofones,a(k) =1,thenalistofincreasingnumbersa(k) =i=⇒
+i,1 i,2
+a(k) =cumsum(a(k)),thenalistoftriangularnumbersa(k) =i(i+1)/2=⇒a(k) =cumsum(a(k)),and
+−,2 −,1 i,3 −,3 −,2
+soon:a(k) =cumsum(a(k) ).Theresultofiteratedapplicationsofcumsum,startingfromanall-onevector,
+−,j −,j−1
+canbecompactlydescribedviathebinomialcoefficient:wehaveinfact
+(cid:32) (cid:33)
+i+j−2
+a
+i,j
+=[cumsumj([1,1,...])]
+i
+=
+j−1
+.
+Theactualformula(29)canberecoveredafterafewalgebraicsteps,byrearrangingthesummationindices.
+9Toconvinceourselvesofthis, itsufficestolookattheformulafor(25): twosequenceswithdifferent
+elementsl̸=l′,butsuchthatl
+1
+=l 1′ ands
+1
+=s′ 1(thatis,with(cid:80)n i=1l
+i
+=(cid:80)n i=1l i′)wouldmaptothesame
+˜l
+1
+=˜l 1′.
+10Asinfootnote7,thisisalsobetterseenbyconsideringtheresultingmodifiedsigmoidattentionmatrix.
+Withb
+k
+=0andb
+q
+=(cid:0) c(δ,d,n)n+ 1 2(cid:1) δ,infact,ifcondition(30)isverified,thismatrixisgivenby
+0 ··· 0
+H(cid:16)(cid:16) l˜−1(cid:0) cn+ 21(cid:1) δ(cid:17) ⊗l˜(cid:17) =   0. . . ·. ·..
+·
+0. . .  
+
+˜l j, j <n . (31)
+1 ··· 1 ˜l
+n
+25C.2.4 ASequenceofSelectiveShiftsFollowedbyaGlobalShiftProducesaContextual
+Mapping
+Tocompletetheproof,itremainstoshowthattherecoveredsequence(34)representsacontextual
+mappingand,inparticular,thatitis(i)one-to-oneinL,andthat(ii)allofitselementsaredistinctfor
+differentinputs. Todoso,weneedafewpreparatorylemmas. Thefirstfewareneededtoshowthat
+eachofthebasiccomponentsof(34)isindeedaone-to-onemap.
+LemmaC.3. Themapl sin(24)isone-to-one.
+(cid:55)→
+Proof. ThetargetmapcanbecompactlyrepresentedasalinearoperatorS:
+n
+l s:=1 l l=(1 1 I)l=:Sl (35)
+k
+(cid:55)→ − ⊗ −
+k=1
+(cid:88)
+whichisinvertible11,denotingthatl sisbijective.
+(cid:55)→
+LemmaC.4. Themapl ˜ l in(29)isone-to-one,underthecondition
+n
+(cid:55)→
+n 1
+c(δ,d,n)>(n 1)(δ−d 1) − . (36)
+− − n−1
+(cid:18) 2 (cid:19)
+(cid:6) (cid:7)
+Proof. Considertwovectorsofcolumnindicesl,l′ differingforatleastoneelement. Wehaveby
+definition(29)that
+n−2 n−2
+k
+˜ l ˜ l′ =(l l′)+c(s s′ )+ ci+2 (s s′ ) (37)
+n − n n − n n − n i k−i+1 − k−i+1
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+Byabsurd,assume˜ l ˜ l′ =0eventhough i:l =l′. Wehavethenthatitmusthold
+n − n ∃ i ̸ i
+n−2 n−2
+k
+(l′ l )=c(s s′ )+ ci+2 (s s′ )
+n− n n − n i k−i+1 − k−i+1
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88) (38)
+n−2 n−2
+k
+=c (s s′ )+ ci+1 (s s′ )
+(cid:32) n − n i=0 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88)
+Notice that, for c(δ,d,n) large enough, the right-hand side does not have enough granularity to
+countertheleft-handside: infact,sincel 0,δ,2δ,...,δ−d+1 δ ,theleft-handsidecanattain
+n
+∈{ − }
+values
+l′ l 0, δ, 2δ,..., (δ−d+1 δ) (39)
+n− n ∈{ ± ± ± − }
+while the former, in light of the presence of the c(δ,d,n) factor, can only attain values
+∈
+0, cδ, 2cδ,... . Picking c > δ−d 1, then, ensures that equality between the two sides
+{ ± ± } −
+of(38)canonlybeachievediftheyareboth0. Inthiscase,weneedtoimpose
+n−2 n−2
+k
+c(s′ s )= ci+1 (s s′ )
+n− n i k−i+1 − k−i+1
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88) (40)
+n−2 n−2
+k
+s′ s =c ci (s s′ ) .
+⇐⇒ n− n (cid:32) i=0 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88)
+Similarly,noticethat12, i,
+∀
+n n
+s s′ = (l l′) (l l′) = (l l′) <(n 1)(δ−d+1 δ), (41)
+11Indee| di i− tsini v| erse(cid:12) (cid:12) (cid:12) (cid:12) (cid:12)ck (cid:88) a= n1 bek ex− plik citl− yreci o− verei d(cid:12) (cid:12) (cid:12) (cid:12) (cid:12)byd(cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)ik re= c(cid:88)1 tl, yk̸= ai pplk yi− ngSk h(cid:12) (cid:12) (cid:12) (cid:12) (cid:12) (cid:12)erman-M− orrisonformu− la.
+12ThisisadirectconsequenceofthedefinitionofoperatorSin(35):sinceithas1’severywherebutonits
+diagonal,its∞-normissimplyn−1.
+26implyingthats′ s 0, δ, 2δ,..., (n 1)(δ−d 1)δ . Again, bypickingc(δ,d,n) >
+n − n ∈ { ± ± ± − − }
+(n 1)(δ−d 1)weensurethattheright-handsidedoesnothaveenoughgranularity,andhence
+− −
+c(δ,d,n)>(n 1)(δ−d 1) = s′ s =0, (42)
+− − ⇒ n− n
+implying
+n−2 n−2
+k
+c ci (s s′ ) =0
+(cid:32) i=0 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88)
+n−2 n−2 n−2
+k k
+(s′ s )=c ci−1 (s s′ ) (43)
+⇐⇒ k=0(cid:18)0 (cid:19) k+1− k+1 (cid:32) i=1 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88) (cid:88)
+n−2 n−2 n−2
+k
+(s′ s )=c ci−1 (s s′ ) .
+⇐⇒ k=0 k+1− k+1 (cid:32) i=1 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88) (cid:88)
+Followingasimilarreasoningastheoneappliedaboveshowsusthatpicking
+n−2
+c(δ,d,n)>(n 1)2(δ−d 1) = (s s′ )=0, (44)
+− − ⇒ k+1 − k+1
+k=0
+(cid:88)
+andrequiresustosatisfy
+n−2 n−2
+k
+c ci−1 (s s′ ) =0
+(cid:32) i=1 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88)
+n−2 n−2 n−2
+k k
+(s′ s )=c ci−2 (s s′ ) (45)
+⇐⇒ k=1(cid:18)1 (cid:19) k− k (cid:32) i=2 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88) (cid:88)
+n−2 n−2 n−2
+k
+k(s′ s )=c ci−2 (s s′ ) .
+⇐⇒ k=1 k− k (cid:32) i=2 k=i(cid:18)i (cid:19) k−i+1 − k−i+1 (cid:33)
+(cid:88) (cid:88) (cid:88)
+Onceagain,then,bychoosing
+(n 2)(n 1)2 n−2
+c(δ,d,n)> − − (δ−d 1) = k(s s′)=0. (46)
+2 − ⇒ k − k
+k=1
+(cid:88)
+Thisreasoningcanberepeatedrecursively: ateachstepioftherecursion,byimposingastricter
+andstricterboundonc(δ,d,n)wegainmoreandmoreconditionsthatthequantitys′ sneedsto
+−
+satisfy:
+n−2 n−2
+k k
+c(δ,d,n)>(n 1)(δ−d 1) = (s s′ )=0. (47)
+− − i ⇒ i k−i+1 − k−1+1
+k=i(cid:18) (cid:19) k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+Noticethat,everytimeweincreasei=0...n 2,theseconditionsinvolveonelessterms
+k−i+1
+s′ ,k =i...n 2: ifweweretocollecta− lltheseconditionswithinasinglelinearsystem,th− e
+k−i+1 −
+systemwouldhaveanupper-triangularstructure,andhencebenon-singular. Thisimpliesthatforthe
+setofnindependentconditionsons s′ tohold(wehaven 1in(47),plusonemorein(42)),
+theonlypossibilityisthats s′. Bec− auseofLemmaC.3,thou− gh,thisalsoimpliesl l′: wehave
+finallyreachedacontradicti≡ on,andproventhatindeedl ˜ l isone-to-one,under≡ anopportune
+n
+conditiononc(δ,d,n). Suchconditioncanbepromptlyrec(cid:55)→ overed13by(47):
+n−2
+k n 1 n 1
+max = max − = − . (48)
+i=0...n−2 i i=0...n−2 i+1 n−1
+k=i(cid:18) (cid:19) (cid:18) (cid:19) (cid:18) 2 (cid:19)
+(cid:88)
+Substitutingthisin(47),werecoverthatitsufficestoimpose (cid:6) (cid:7)
+n 1
+c(δ,d,n)>(n 1)(δ−d 1) − . (49)
+− − n−1
+(cid:18) 2 (cid:19)
+(cid:6) (cid:7)
+13Thisisaconsequenceofsomeusefulpropertiesofthebinomialcoefficient,namelytheHockeystickidentity
+Jones(1994),andthesymmetryof(cid:0)k(cid:1)
+withrespecttoi.
+i
+27˜
+Thenextfewlemmasareneededtoboundtheelementsinthel sequence,whichinturnareusedto
+j
+proveproperty(ii)inDef.C.2.
+LemmaC.5. ˜ l in(29)isanincreasingsequence.
+j
+Proof. Thiscanbeprovendirectly: wehaveinfact,bydefinition(29),
+j−2 j−2
+k
+˜ l >˜ l l +cs + ci+2 s
+j j−1 j j k−i+1
+⇐⇒ i
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+j−3 j−3
+k
+>l +cs + ci+2 s
+j−1 j−1 k−i+1
+i
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+j−2
+j 2
+combinesums (l l )(1 c)+ ci+2 − s >0
+j j−1 j−1−i
+⇐⇒ − − i
+i=0 (cid:18) (cid:19)
+(cid:88)
+j−2
+(cid:16)j− i2(cid:17) ≥1,ci+2≥c2 = (l
+j
+l j−1)(1 c)+c2 s
+j−1−i
+>0
+⇐ − −
+i=0
+(cid:88)
+j−2 n
+(24) (l l )(1 c)+c2 l l >0
+j j−1 k j−1−i
+⇐⇒ − − (cid:32) − (cid:33)
+i=0 k=1
+(cid:88) (cid:88)
+n j−1
+(l l )(1 c)+c2 (j 1) l l >0
+j j−1 k k
+⇐⇒ − − (cid:32) − − (cid:33)
+k=1 k=1
+(cid:88) (cid:88)
+n n
+(1 c)l +(c 1)l +c2(j 2) l +c2 l >0
+j j−1 k k
+⇐⇒ − − −
+k=1 k=j
+(cid:88) (cid:88)
+n n
+(c2 c+1)l +(c 1)l +c2(j 2) l +c2 l >0
+j j−1 k k
+⇐⇒ − − −
+k=1 k=j+1
+(cid:88) (cid:88)
+(50)
+Alreadywithc>1,allthecoefficientsarepositive(andatleastoneisnon-zero),implyingthatthe
+˜
+conditionaboveisalwayssatisfiedandthatindeedl isanincreasingsequence.
+j
+LemmaC.6. Underconstraint(36),eachterm˜ l ,j >1in(29)isboundedfrombelowby
+j
+˜ l >cjδ,
+j
+andeachterm˜ l ,1<j <nisboundedfromaboveby
+j
+˜ l <cj+1δ.
+j
+Proof. Westartbyprovingthelowerbound. Bydefinition(29),wehave
+j−2 j−2 j−3 j−2
+k k
+˜ l =l +cs + ci+2 s =l +cs +cjs + ci+2 s . (51)
+j j j k−i+1 j j 1 k−i+1
+i i
+i=0 k=i(cid:18) (cid:19) i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88) (cid:88) (cid:88)
+Sincebyassumptionl isanorderedsequencewithoutrepetitions,forj > 1wenecessarilyhave
+j
+l >l 0,andhencel δ. Alltheothertermsin(51)arenon-negative,sowecansafelyclaim
+j 1 j
+≥ ≥
+that
+˜ l δ+cjδ >cjδ j >1, (52)
+j
+≥ ∀
+whichconfirmsthelowerbound.
+28˜
+Fortheupperbound,westartagainfromthedefinitionofl :
+j
+j−2 j−2
+k
+˜ l =l +cs + ci+2 s
+j j j k−i+1
+i
+i=0 k=i(cid:18) (cid:19)
+(cid:88) (cid:88)
+j−2
+j 1
+<(δ−d 1)δ+c(n 1)(δ−d 1)δ+s ci+2 − (53)
+− − − 1 i+1
+i=0 (cid:18) (cid:19)
+(cid:88)
+j 1 j j 1 1 cj+1
+(n 1)(δ−d 1) − δ ci =(n 1)(δ−d 1) − δ − ,
+≤ − − j−1 − − j−1 1 c
+(cid:18) 2 (cid:19) i=0 (cid:18) 2 (cid:19) −
+(cid:88)
+whereweusedrelationship(48)(cid:6)andc(cid:7)ollectedallctermswithinthesu(cid:6)m. N(cid:7)oticethat,foragiven
+a>1wehavethat
+1 cj+1
+− acj, (54)
+1 c ≤
+−
+providedthatc a . Infact,
+≥ a−1
+1 cj+1 1 cj+1 acj +acj+1
+− acj − − 0
+1 c ≤ ⇐⇒ 1 c ≤
+− − (55)
+1 a 1
+= + c cj 0 = 0
+⇐ a 1 − a 1 ≥ ⇐ a 1 ≥
+− (cid:18) − (cid:19) −
+whichisalwayssatisfied. Aftersubstituting(54)in(53),thisallowsustowrite
+j 1
+˜ l <a(n 1)(δ−d 1) − δcj. (56)
+j − − j−1
+(cid:18) 2 (cid:19)
+Toprovethat˜ l <δcj+1,then,itremainstoshowthat (cid:6) (cid:7)
+j
+j 1
+c a(n 1)(δ−d 1) − 1<j <n. (57)
+≥ − − j−1 ∀
+(cid:18) 2 (cid:19)
+Substitutingcondition(36)intheinequalityabove(cid:6),we(cid:7)areleftwithproving
+n 1 j 1 n 2
+− max a − =a − . (58)
+n−1 ≥j=2...n−1 j−1 n−2
+(cid:18) 2 (cid:19) (cid:18) 2 (cid:19) (cid:18) 2 (cid:19)
+Theoutcomedependsont(cid:6)hepar(cid:7)ityofn. Fornodd(cid:6),weh(cid:7)ave (cid:6) (cid:7)
+n 1 n 2 n 1
+− a − 2 − a, (59)
+n−1 ≥ n−2 ⇐⇒ n 1 ≥
+(cid:18) 2 (cid:19) (cid:18) 2 (cid:19) −
+tosatisfywhichitsuffice(cid:6)stop(cid:7)icka=2(cid:6). This(cid:7)requireshavingc a =2,whichisautomatically
+≥ a−1
+satisfied. Forneven,ontheotherhand,thebinomialcoefficientssimplifyto
+n 1 n 2 n 1
+− a − 2 − a. (60)
+n−1 ≥ n−2 ⇐⇒ n ≥
+(cid:18) 2 (cid:19) (cid:18) 2 (cid:19)
+Tosatisfythis,weneed(cid:6)topic(cid:7)ka = 2n(cid:6)−1,w(cid:7)hichrequiresc a = 2n−1;however,thistoois
+n ≥ a−1 n−2
+automaticallysatisfiedby(36)providedn 4. Thiscompletestheproof.
+≥
+LemmaC.7. Undertheconstraint(36),condition(30)holds.
+Proof. Weremindthatcondition(30)isnecessaryforthecorrect“functioning”oftheglobalshift
+layer, and it composes of two parts. The first part requires that ˜ l < cnδ j < n. Thanks to
+j
+LemmaC.5,itsufficestoshowthat˜
+l
+<cnδ,butthisisalreadygrantedby∀
+theupperboundin
+n−1
+LemmaC.6. Analogously,forthesecondpart,weneedtoshowthat˜ l >cnδ: forthistoowecan
+n
+usethelowerboundinLemmaC.6.
+Wefinallyhavealltheingredientstoprovethemaintheoremofthissection:
+29TheoremC.8. Themapin(34),givenby
+X q(X)=uTΨ(X)
+(cid:55)→
+representsacontextualmapping.
+Proof. AsdefinedinDef.C.2,acontextualmappingmustsatisfytwoconditions. Thefirstoneisthat
+q (X)=q (X), i=j and X L. (61)
+i j
+̸ ∀ ̸ ∀ ∈
+˜
+ThisisdirectlyprovenbyconsideringLemmaC.5: sincel isa(strictly)increasingsequence,all
+j
+itselementsarealreadydistinct. Theactionofthelastglobalshiftlayermerelytranslatesallthese
+elementsbyasamequantity,buttheyremaindistinctnonetheless.
+Thesecondconditionforacontextualmappingisgivenby
+q (X)=q (X′), i,j and X,X′ L, with X =X′. (62)
+i j
+̸ ∀ ∀ ∈ ̸
+Weprovethatthisholdsfor(34)bydirectlyconsideringthedifferencebetweentwocomponentsi,j
+fordifferentinputs:
+q (X) q (X′)=˜ l ˜ l′ +cn+1 ˜ l ˜ l′ =0 ˜ l ˜ l′ =cn+1 ˜ l′ ˜ l . (63)
+i − j i − j n − n ⇐⇒ i − j n− n
+(cid:16) (cid:17) (cid:16) (cid:17)
+Noticethat,duetoLemmaC.4,wehave˜ l ˜ l′ =0andparticularly, ˜ l ˜ l′ δ.Ontheotherhand,
+inlightoftheboundsinLemmaC.6,wen h− avn et̸ hattheleft-handside|n ˜ l− n ˜ l|≥ <cnδ. Consequently,
+j i
+| − |
+thetwosidescannevercanceleachotherout,andtheproofiscomplete.
+D LipschitznessofSigmoidAttention
+Inthefollowing,wereporttheprooffortherecoveringtheLipschitznessconstantassociatedwith
+SigmoidAttn,asstatedinThm.3.2.
+LettingA = WTW ,andcallingσ = σ( W x ,W x )andσ′ = σ′( W x ,W x ),wefind
+q k ij ⟨ q i k j ⟩ ij ⟨ q i k j ⟩
+thattheJacobianofϕinthedirection(δ ,...,δ )forthesamplex isgivenby:
+1 n i
+n n
+Jac = σ′ x xTAT δ + σ′ x xTA+σ I δ , (64)
+i  ij j j  i ij j i ij p j
+j=1 j=1
+(cid:88) (cid:88)(cid:0) (cid:1)
+ 
+WeseethatthisJacobianisthesumoftwoterms. Tocontrolitsnorm,wecancontroleachnorm
+individually.
+The first term, n σ′ x xTAT δ is of the form U δ with U a matrix. Its squared-norm is
+j=1 ij j j i i i i
+therefore: (cid:16) (cid:17)
+(cid:80) n
+U δ 2 max U 2 δ . (65)
+∥ i i ∥ ≤ i ∥ i ∥2∥ ∥F
+i=1
+(cid:88)
+Hence,itssquaredspectralnormisboundedbymax U 2.
+i ∥ i ∥2
+Wenowletσ′ beaboundonn σ′ ;Wehave:
+∞ ×| |
+n
+U σ′ x x⊤A (66)
+∥ i ∥2 ≤ ∥ ij j j ∥2
+j=1
+(cid:88)
+n
+1
+σ′ A x 2 (67)
+≤ ∞∥ ∥2 n ∥ j ∥
+j=1
+(cid:88)
+σ′ A E[ x 2]. (68)
+≤ ∞∥ ∥2 ∥ j ∥
+Weseethatifthepointsx havenorm R,thentheJacobiangrowsatmostlikeR2,becauseitis
+i
+“quadratic”inx. However,weseethatth≤ equadratictermislikelytobemitigatedbytheσ′(a )term
+ij
+thatgoesto0ifa islarge.
+ij
+30The second term, n σ′ x xTA+σ I δ , is the sum of two terms. Here, too, we use the
+j=1 ij j i ij p j
+triangularinequalitytocontroltheirnormindividually. Weget:
+(cid:80) (cid:0) (cid:1)
+n
+σ δ 2 = δTσ 2 (69)
+ij j i
+∥ ∥ ∥ ∥
+j=1
+(cid:88)
+δ 2 σ 2, (70)
+≤∥ ∥F∥ i ∥
+whereσ Rpisthei-thcolumnofσ ,andδ Rn×p. andbysumming,lettingσ anupperbound
+i ij ∞
+∈ ∈
+onn σ(x):
+×| | n n
+σ δ 2 σ2 δ 2. (71)
+∥ ij j ∥ ≤ ∞∥ ∥F
+i=1 j=1
+(cid:88) (cid:88)
+Sothatσ upperboundsthespectralnormofthelastterm.
+∞
+Forthefinalterm, n σ′ x xTAδ ,defineδˆ=δAT. Weget:
+j=1 ij j i j
+(cid:80) n n
+σ′ x xTAδ = σ′ x ,δˆ x . (72)
+ij j i j ij⟨ i j ⟩ j
+j=1 j=1
+(cid:88) (cid:88)
+Hence,lettingM thematrixofentriesM = σ′ x ,δˆ ,weseethattheprevioustermissimply
+ij ij⟨ i j ⟩
+xTMT,sothatwegettheupperboundonthenormoftheterm:
+i
+n
+xTMT 2 x 2 M 2 (73)
+∥ i ∥ ≤∥ ∥F∥ ∥F
+i=1
+(cid:88)
+and M 2 = (σ′ )2 x ,δˆ 2 1 σ′ x 2 A 2 δ 2,givingoverall:
+∥ ∥F ij ij ⟨ i j ⟩ ≤ n2 ∞∥ ∥F∥ ∥2∥ ∥F
+(cid:80) n
+xTMT 2 σ′ A E[ x 2] δ . (74)
+(cid:118) ∥ i ∥ ≤ ∞∥ ∥2 ∥ j ∥ ∥ ∥F
+(cid:117)i=1
+(cid:117)(cid:88)
+(cid:116)
+Noticehowthisquantitymatchestheonein(68).
+Finally,summingalltogethergives:
+Jac 2σ′ A E[ x 2]+σ , (75)
+∥ ∥2 ≤ ∞∥ ∥2 ∥ j ∥ ∞
+whichcompletestheproof.
+Remark:Thepreviousupperboundmightnotbetight.Indeed,intuitively,ifthex arelarge,thenthe
+i
+termσ′ shouldbeexponentiallysmall(provided,ofcourse,thatW x andW x arenotorthogonal),
+ij q i k j
+whichwouldevenremovethedependencyonthevarianceinthesigmoidattention.
+E TheBiasTermofSigmoidAttention
+OneofthedifferencesbetweenSigmoidAttnandSoftmaxAttnisthenormalizationconstant. In
+SigmoidAttn,onewaytoemulatetheeffectofanormalizationconstant(whichlinksalltheelements
+oftheinputtogetheranddefinesadistributionoverthem),istoincludeabiasterminthedefinition
+asproposedin(3).
+Foraninputvectorz Rn,theoutputofthesigmoidwithbiasbis
+∈
+exp(z )
+σb(z) := i
+i exp(z )+exp( b)
+i
+−
+Contrarytothesoftmax,thisoutputcannotalwayssumtoonebecausethereisnonormalization. We
+thereforeseekavalueforbthatapproximatelynormalizesσb(z),i.e.,suchthat n σb(z) 1.
+i=1 i ≃
+Wehave
+(cid:80)
+PropositionE.1. Letz Rn,andtakem,M Rsuchthatforalli,itholdsm z M. Then,
+i
+theequation n σb(z)∈ =1withvariablebh∈ asasinglesolutionb∗with ≤ ≤
+i=1 i
+log(n 1) M b∗ log(n 1) m .
+(cid:80)
+− − − ≤ ≤− − −
+31Proof. Thefunctionϕ : b n σb(z) issmoothandmonotonicallyincreasing,andwehave
+ϕ( log(n 1) M) 1→ andϕi (=1 log(ni 1) m) 1. Thisshowstheexistenceofb∗aswellas
+the− advertis− edbo− undon≤ b∗. (cid:80) − − − ≥
+Thissuggestsusingaboftheorderof log(n);inpracticeweuseb= log(n).
+− −
+Wecanalsolookforabiastermb,whichhelpstoapproximatethesoftmaxfunctionbythesigmoid
+function.
+Weassumethatsoftmaxprovidesuswiththetruedistributionp⋆,wherep⋆
+i
+= ezi+(cid:80)ez ji ̸=iezj. The
+goalistofindthebiastermbsuchthatsigmoidfunctionwithweightsoverallelementsdenoted
+byp,wherep = σb(z) ,approximatesp⋆. Notethat,asmentionedbefore,pisnotnecessarilya
+i i
+n
+distribution,i.e. p isnotalwaysequaltoone.
+i=1 i
+Intechnicalterm(cid:80)s,weaimtoestimatethenormalizingfactorZ = n i=1ezi.Theexistingapproaches
+forestimatingZ iscompute-expensiveforhighdimensionsandrequiresresamplingmethods. Also,
+the optimal value of b would depend on the exact values of z(cid:80), which is unknown beforehand.
+Therefore,weproposeamoreintuitivewaytoestimatetheorderofbiasbutpossiblywithlarger
+disparity. TodistributetheindependentmassesinSigmoidAttn,weassumethateachelementhas
+uniformweightforthemodelapriori,whichmeansthatnoneoftheelementsoftheinputvectorzhas
+anyknownimportanceovertheothers. Inthesimplestcasewhensoftmaxisauniformdistribution,
+we ideally want to have the same order of values for sigmoid as of softmax, which should be 1.
+n
+Therefore,wecanwritedownthefollowing:
+1 1
+i p = =p⋆ (76)
+∀ i 1+e−(zi+b) ≃ n i
+Ideally,wewouldliketohave1+e−(zi+b) n. Requiringthatp=p∗inthecasewhereallthez
+i
+≃
+are0givesexp( b)=n 1,i.e. b log(n)forlargen. Inthecasethatallthez arebounded,
+i
+− − ≃−
+z M < forsomeconstantM,thenb (M +log(n)) max M,log(n) . However,
+i
+| | ≤ ∞ ≃ − ≈ − { }
+inmostcaseswedonotknowM. Whenthesequencelengthnislargeenough, theconstantM
+losesitsimportancewhileinshortsequencelength,itimpactsdistributingtheweightsoverelements
+more. Toresolvethisissue,weassumethatz aresampledfromastandardGaussiandistribution,i.e.
+i
+z (0,σ2)whereσ =1. Notethatthisassumptioncomesfromthefactthatz inourproblemis
+i i
+∼N
+oneoftheelementsofQKT/ d ,whichisthesumofd randomvariables. UsingCentralLimit
+qk qk
+Theorem,wecanassumethatz issampledfromaGaussiandistribution. TheideaistoestimateM,
+i
+suchthatwithhighprobability(cid:112) , z M,i.e. P(z >M) ϵforadesiredϵ. Therefore,wehave
+i i
+| |≤ | | ≤
+M 1 σ2
+P(z >M)=P z > σ = ϵ, (77)
+| i | | i | σ ≤ (M)2 M2 ≤
+(cid:18) (cid:19) σ
+wheretheinequalityisresultedfromChebychev’sinequality. Settingσ =1,wehaveM 1/ϵ.
+≃
+Therefore, the order-optimal value would be b max 1/ϵ,log(n) , and for long sequence
+≃ − { } (cid:112)
+length, b log(n). For example, if we want 90% accuracy in our estimation, M 3σ = 3,
+whichmea≃ ns− b max 3,log(n) . Notethatthisapproxim(cid:112) ationalsofollowstheintui≈ tionthatas
+≃− { }
+ngrows,weexpecttheSigmoidAttnwithoutbiastermoverestimatethemassoneachpoint,sowe
+needtonormalizethemassaccordingtonateachpointaswell.
+Onanotherside,onemaybemoreinterestedinthegradientsofp⋆andpwithrespecttoz tobehave
+i
+similarly. We show that b log(n) is still a good choice in this scenario. Let us derive the
+≃ −
+derivativeofSigmoidAttnandSoftmaxAttnwithrespecttotheinput. Wenotethatforanyi,both
+functionscanbewrittenas ezi whereZ istheshareofnormalizationfactorexceptelementi
+ezi+Z−i −i
+ofz. ForSoftmaxAttn,Z
+−i
+= j̸=iezj andforSigmoidAttn,Z
+−i
+=e−b. Now,wehave
+(cid:80)∂ ezi
+=
+eziZ
+−i . (78)
+∂z iezi +Z −i (ezi +Z −i)2
+Therefore,wehavethefollowing
+∂p⋆
+i =p⋆(1 p⋆) (79)
+∂z i − i
+i
+∂p
+i =p (1 p ). (80)
+i i
+∂z −
+i
+32We can see that if p i
+≃
+p⋆ i, then ∂ ∂p zii
+≃
+∂ ∂p z⋆ i i. So, the previous choice of bias term b
+≃
+−log(n)
+approximatestheorderofgradientsaswell. Infact,thisistheonlyvalidchoiceeventhoughwehave
+aquadraticterm.
+∂p ∂p⋆
+i i p⋆(1 p⋆)=p (1 p ) (81)
+∂z ≃ ∂z ⇐⇒ i − i i − i
+i i
+(p p⋆)(p (1 p⋆))=0. (82)
+⇐⇒ i − i i − − i
+Whichmeanseitherp p⋆orp 1 p⋆. Thefirstoneprovidesuswithb log(n)whilethe
+secondonecannothapi pe≃ nsii ncethi e≃ nom− inai torofp isdependentonz whileth≃ en− ominatorof1 p⋆
+i i − i
+isindependentofz .
+i
+F Detailsof FLASHSIGMOID
+This appendix provides details of the FLASHSIGMOID algorithm. We begin by discussing the
+implementationdetailsofFLASHSIGMOID,whichwebuildasanextensionofFLASHATTENTION2,
+followed by a benchmark of the performance of the involved kernels. We show that the kernels
+of FLASHSIGMOID provide a considerable performance boost in model inference over those of
+FLASHATTENTION2andamodestperformanceboostformodeltraining. Further,wedemonstrate
+thatthekernelspeedboostsalsoreflectinaconsiderableperformancegaininrealisticend-to-end
+experiments, with an example of training vision transformers (Dosovitskiy et al., 2021) on the
+ImageNet dataset (Deng et al., 2009). Finally, we also provide kernel benchmarking details of
+FLASHSIGMOIDimplementationbytakingintoaccountALiBislopes(Pressetal.,2022),whichis
+oneoftheimportantcomponentsofSigmoidAttnasseeninthemaintextofthepaper.
+F.1 DetailsofFLASHSIGMOIDAlgorithm
+Softmax vs. Sigmoid Attention: In this subsection, we discuss the implementation details of
+FLASHSIGMOIDalgorithm,whichisahardware-awareimplementationofSigmoidAttnapproach.
+Webeginwiththeexpressionsoftheforwardandbackwardpassesofsoftmaxandsigmoidattention
+mechanisms. Let Q, K, and V represent the query, key, and value tensors. Then, the desired
+forward and backward pass expressions are reported in Tab. 4. The application of sigmoid and
+SOFTMAX SIGMOID
+FORWARD BACKWARD FORWARD BACKWARD
+Q K⊤ Q K⊤
+S= · dV =P⊤ dO S= · dV =P⊤ dO
+√d · √d ·
+P =SOFTMAX(S) dP =dO V⊤ P =σ(S) dP =dO V⊤
+O=P V dS=P (dP ROW· SUM(dO O)) O=P V dS=P (1 ·P) dP
+· ⊙ − ⊙ · ⊙ − ⊙
+dQ=√d dS K dQ=√d dS K
+· · · ·
+dK=√d dS⊤ Q dK=√d dS⊤ Q
+· · · ·
+Table4: Descriptionoftheforwardandbackwardpassesofsoftmaxandsigmoidattention. With ,
+⊙
+wedenoteHadamard(element-wise)multiplication.
+softmaxactivationfunctions,ashighlightedinorangecolorinTab.4,istheonlyimplementation
+differenceintheforwardpasses. Similarly, theexpressionsforthegradientsofthepreactivation
+(dS),ashighlightedinpurplecolorinthetableabove,istheonlyimplementationdifferenceinthe
+backward passes. In light of this, we implement the FLASHSIGMOID algorithm as an extension
+ofthe FLASHATTENTION2 (Dao,2023)algorithm, whichisahighlyoptimizedhardware-aware
+implementationofSoftmaxAttn.
+FlashAttentioninBrief:Aspointedatinthemaintext,theFLASHATTENTION(Daoetal.,2022)
+andFLASHATTENTION2(Dao,2023)algorithmsprovidehardware-awareimplementationsofexact
+attentionmechanismbyoptimizingforbottlenecksofmodernaccelerators(Choquetteetal.,2021;
+Choquette, 2023). These GPUs possess massive amounts (e.g., 80GB) of High-Bandwidth
+∼
+Memory(HBM),whichstoreslargetensorsbutisslowinmovingthedatatotheaccelerators. On
+theotherhand,theyhavesmalleramounts(e.g., 20MB)ofSRAM,whichisoftenmorethanan
+∼
+33Algorithm1FLASHSIGMOIDForwardPass
+1: procedureFORWARD(Q,K,V,B r,B c):
+2: """
+3: inputs:MatricesQ,K,V Rn×dareonHBMoftheGPU.
+∈
+4: inputs:IntegersB r andB caretheblocksizeforqueriesandkey-valuesrespectively.
+5:
+6: outputs:MatrixO Rn×donHBMoftheGPU.
+7: #Noneedtoou∈ tputlogsumexpvectorL RnonHBM.
+∈
+8: """
+9: DivideQintoT r := ⌈Bn r⌉blocks: Q 1,
+···
+,Q Tr withQ i ∈RBr×d.
+10: DivideK intoT c := ⌈Bn c⌉blocks: K 1,
+···
+,K Tc withK i ∈RBc×d.
+1 11 2:
+:
+D Di iv vi id de eV Oii nn tt oo TT rc bb ll oo cc kk ss :: OV 1 1, ,· ·· ·· ·, ,V OT Tc rw wit ih thV Oi i∈ ∈R RB Bc× r×d.
+d.
+13: fori=1, ,T r do
+···
+14: LoadblockQ ifromHBMtoSRAMoftheGPU.
+15: Onchip,initializeO iwithzeros: O i 0Br×d.
+16: #Noallocationofeitherrow-sum← ℓ i RBr orrow-maxm i RBr onchip.
+∈ ∈
+17: forj =1 T cdo
+···
+18: LoadblocksK j,V j fromHBMtoSRAMoftheGPU.
+19: Onchip,evaluatepre-activations: S ij ←Q i ·K j⊤/√d ∈RBr×Bc.
+20: Onchip,evaluatesigmoidattention: P ij σ(S ij).
+←
+21: Onchip,updateoutputblock: O i O i+P ij V j.
+← ·
+22: #Noneedtoupdateandtrackℓ iandm ivectors.
+23: endfor
+24: StoreO ifromchiptoHBMasthei thblockofOmatrix.
+−
+25: #Nopost-processingofO iorL iblocksonchip.
+26: #NomovementofL iblockfromchiptoHBM.
+27: endfor
+28: returnmatrixO.
+29: endprocedure
+ordermagnitudefasterforcarryingoutactualcomputationsusingtheregisters/tensorcoresofthe
+GPU.Thistrade-offbetweenmemorysizeandcomputationspeedacrosshierarchiesresultsinthe
+attentionmechanismcomputationbeingbottleneckedbymemoryaccessesbetweentheHBMandthe
+SRAM(Ivanovetal.,2021). Consequently,flashalgorithmsoptimizeformemoryaccessesacross
+thehierarchyofGPUmemorytypesinordertoacceleratecomputationofattentionmechanismand
+itsgradients. FLASHSIGMOIDisnoexceptiontothisapproach.
+Algorithm1describestheforwardpassandAlg.2describesthebackwardpassoftheFLASHSIGMOID
+algorithm. WehighlightinorangecolorthestepsintheforwardpassofFLASHSIGMOIDthatdiffer
+fromthoseinFLASHATTENTION2byvirtueofsigmoidactivation. Similarly,wehighlightinpurple
+colorthedifferencesinthebackwardpass. Finally,wehighlightinbluecolorthesalientpointsof
+FLASHSIGMOIDthatfurtherhelpminimizebottleneckingfactorsonmodernaccelerators.
+Fewer Tensor Allocations, Fewer Memory Accesses, Fast-Tanh: In FLASHATTENTION and
+FLASHATTENTION2, theattentionmechanismiscomputedbysplittingtheattentionmatrixinto
+blocks. Sincesoftmaxactivationrequiresarow-wisereductiontocomputeitsnormalizationfactor
+(i.e.,thedenominator),oneneedstoproperlycomputeandtracksuchfactoracrossblocks. Moreover,
+inFLASHATTENTIONthisnormalizationfactorisstoredafterbeingcomputedintheforwardpass,to
+haveiteasilyaccessibletofurtherspeed-upthebackwardpass. Bycontrast,substitutingsigmoid
+tosoftmaxeliminatestheneedtoallocateandmoveacrosstheGPUmemoryhierarchythetensors
+related to the normalization factor (i.e., moving the logsumexp tensor L Rn on HBM in the
+∈
+forwardandbackwardpasses). Inaddition,applyingsoftmaxinastablemannerrequirestrackingthe
+row-maxvariablem onchip,whichinsteadisnotneededforsigmoidactivation. Thisfurtherhelps
+i
+reducingsomeon-chipoperationsandloweringregisterpressureinFLASHSIGMOID.
+Movingontothebackwardpass(describedinAlg.2), FLASHATTENTION2 requirescomputing
+rowsum(dO O), whichisneededtobackpropagatethegradientsofsoftmaxattentionoutputs
+⊙
+34Algorithm2FLASHSIGMOIDBackwardPass
+1: procedureBACKWARD(Q,K,V,dO,B r,B c):
+2: """
+3: inputs:MatricesQ,K,V,dO Rn×dareonHBMoftheGPU.
+∈
+4: inputs:IntegersB r andB caretheblocksizeforqueriesandkey-valuesrespectively.
+5: #NoneedoflogsumexpvectorL Rntobesavedforthebackwardpass.
+∈
+6:
+7: outputs:MatricesdQ,dK,dV Rn×donHBMoftheGPU.
+∈
+8: """
+9: DivideQintoT r := ⌈Bn r⌉blocks: Q 1,
+···
+,Q Tr withQ i ∈RBr×d.
+10: DivideK intoT c := ⌈Bn c⌉blocks: K 1,
+···
+,K Tc withK i ∈RBc×d.
+1 1 11 2 3: : : D D Di i iv v vi i id d de e eV O dOii nn itt noo toTT r Tc rbb ll :oo =cc kk ⌈ss B:: n rOV ⌉1 1, b,· l· o· · c· · k, , sV O :T dTc r Ow w 1i ,t ih t ·h ·V ·Vi ,i∈ d∈ OR R TB rBc r× w×d id t. h. dO i ∈RBr×d.
+1
+1
+14
+5
+6:
+:
+:
+A
+A
+Al
+l
+ll
+l
+lo
+o
+oc
+c
+ca
+a
+at
+t
+te
+e
+ed
+d
+dQ
+K
+V
+o oon nnH HHB BBM MMa aan nnd ddd ddi iiv vvi iid dde eei iin nnt tto ooT TTr ccb bbl llo ooc cck kks ss: ::d ddQ
+VK
+11
+1
+,,
+,
+··
+·
+··
+·
+··
+·
+,,
+,
+dd
+d
+VQ
+K
+TT cTr wcw
+w
+iti ht ih
+th
+dd VdQ iKi ∈i∈ R∈R BRB c×Br×
+c d×
+.d d.
+.
+17: #Noneedtocomputerowsum(dO O)assigmoidanditsgradientsarepointwise.
+⊙
+18: forj =1, ,T cdo
+···
+19: LoadblocksK j,V j fromHBMtoSRAMoftheGPU.
+20: Onchip,initializedK j,dV j withzeros: dK j 0Bc×d;dV j 0Bc×d.
+← ←
+21: fori=1 T r do
+···
+22: LoadblocksQ i,dO i,dQ ifromHBMtoSRAMoftheGPU.
+23: #Noneedofmovementofblocksrowsum(dO ⊙O) iandlogsumexpL i.
+24: Onchip,evaluatepre-activations: S ij ←Q i ·K j⊤/√d ∈RBr×Bc.
+25: Onchip,evaluatesigmoidattention: P ij σ(S ij).
+←
+26: Onchip,updategradientofvalues: dV i ←dV i+P i⊤ j ·dO j.
+27: Onchip,computegradientsofattentionmatrix: dP ij ←dO i ·V i⊤ ∈RBr×Bc.
+28: Onchip,computegradientsofpre-activations: dS ij P ij (1 P ij) dP ij.
+← ⊙ − ⊙
+29: LoadquerygradientblockdQ ifromHBMtoSRAM,andthenontochip.
+30: Updatequerygradientblockonchip: dQ i dQ i+√d dS ij K j.
+← · ·
+31: StorequerygradientblockdQ ifromchipbacktoHBM.
+32: Onchip,updatekeygradientblock: dK j ←dK j +√d ·dS i⊤ j ·Q i.
+33: endfor
+34: StoredK j,dV j fromchiptoHBMasthej thblocksofdK,dV matricesrespectively.
+−
+35: endfor
+36: returnmatricesdQ,dK,dV.
+37: endprocedure
+tothepreactivations. However,sincesigmoidactivationisappliedelement-wise,itsgradientsalso
+backpropagateacrosssigmoidelement-wise,eliminatingtheneedoftherow-sumvariableandthe
+movementofitsblocksacrossthememoryhierarchy.AnotheroptimizationofFLASHATTENTIONand
+FLASHATTENTION2consistsofpartiallyre-computingtheforwardpassofattentionmechanismin
+thebackwardpasstoavoidbottlenecksandspeed-uptheimplementation. Tokeepthebackwardpass
+implementationfast,theyrequirethelogsumexpvariabletobeavailableandtransferredbetweenHBM
+andSRAMinthebackwardpass. FLASHSIGMOID,beinganelement-wiseactivation,eliminates
+the need of this variable from the backward pass, and consequently, from the entire algorithm.
+Finally,amajorcomponentinourimplementationistheusageofGPU-basedimplementationof
+the tanh activation. Sigmoid activation is related to Tanh activation via the following relation:
+σ(x)=0.5 (1+tanh(0.5 x)). WeutilizethefastGPU-implementationofTanhactivation,which
+· ·
+tradesoffsomeprecisionforbetterspeed,inordertocomputesigmoidactivationinboththeforward
+andthebackwardpass. Thisprovidesaconsiderablespeed-boostinboththeforwardandbackward
+passesofFLASHSIGMOID,whilemaintainingparityinperformancewithanaïveimplementationof
+sigmoidattention. Basedonthesepointsofmodification,weextendFLASHATTENTION2toobtain
+FLASHSIGMOID,ahardware-awareimplementationofSigmoidAttn.
+35F.2 BenchmarkingofFLASHSIGMOIDKernels
+BenchmarkingSetup:HavingseenthedetailsoftheFLASHSIGMOIDalgorithm,wenextconsider
+thebenchmarkingofitskernels. Forthis,wecreateasmallmodelinPyTorch(Paszkeetal.,2019)
+that inputs query, key, and value tensors (all of shape [batch,tokens,heads,features]) and passes
+thesethrough anumber ofattention layers. Mimickingthe designof visiontransformers (ViTB-
+16/224)(Dosovitskiyetal.,2021),wesetthenumberofheadsandper-headfeaturesas12and64,
+respectively. Wesetabatchsizeof32,andconsidera10-layerarchitecture. Then,forthenumberof
+tokenssampledfromawiderangeof[64,78k],wecomputetheforwardandbackwardpassesofthis
+model. Forthesecomputations,wemeasurethekernelGPUtimeusingPyTorch’sprofiler. Wecarry
+outourexperimentsonbothH100(Choquette,2023)andA100(Choquetteetal.,2021)GPUs.
+1750 FlashAttention2 (Full) FlashAttention2 (Full)
+FlashSigmoid (Full) 6000 FlashSigmoid (Full)
+1500 FlashAttention2 (Causal) FlashAttention2 (Causal)
+FlashSigmoid (Causal) 5000 FlashSigmoid (Causal)
+1250
+4000
+1000
+3000
+750
+500 2000
+250 1000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonH100. (b)TrainingmodekernelsonH100.
+Figure 10: On average, for sequence lengths between [64,78k], the inference mode kernel of
+FLASHSIGMOIDis17.39%fasterthanFLASHATTENTION2forself-attentionand18.76%forcausal
+attention. ThetrainingmodekernelsofFLASHSIGMOIDare6.53%fasterthanFLASHATTENTION2
+forself-attentionand9.46%forcausalattention. Notethatinferenceinvolvesonlytheforwardpass
+ofthemodelandtraininginvolvesboththeforwardandthebackwardpassofthemodel.
+3000
+FlashAttention2 (Full) FlashAttention2 (Full)
+FlashSigmoid (Full) 10000 FlashSigmoid (Full)
+2500
+FlashAttention2 (Causal) FlashAttention2 (Causal)
+FlashSigmoid (Causal) 8000 FlashSigmoid (Causal)
+2000
+6000
+1500
+1000 4000
+500 2000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonA100. (b)TrainingmodekernelsonA100.
+Figure 11: On average, for sequence lengths between [64,78k], the inference mode kernel of
+FLASHSIGMOIDis14.33%fasterthanFLASHATTENTION2forself-attentionand16.92%forcausal
+attention. ThetrainingmodekernelsofFLASHSIGMOIDare6.02%fasterthanFLASHATTENTION2
+forself-attentionand5.27%forcausalattention. Notethatinferenceinvolvesonlytheforwardpass
+ofthemodelandtraininginvolvesboththeforwardandthebackwardpassofthemodel.
+Results: Figures 10 and 11 show the GPU time comparisons of kernels in inference mode and
+trainingmodeofFLASHSIGMOIDandFLASHATTENTION2respectively. Weobservethatweobtain
+alargeaveragespeed-boostforinferenceandamodestaveragespeed-boostfortraining. Notethat
+thespeed-upsinallthesubsequentfiguresareobtainedbyaveragingtheperformancesfortokens
+sampledintherangeof[64,78k].
+36
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreKDetailsofIndividualKernels:Next,wealsoshowtheperformanceofindividualflashkernelsof
+FLASHSIGMOIDandFLASHATTENTION2. Notethatinferencemodeinvolvesonlytheforwardpas
+ofthemodel,whiletrainingmodeinvolvesboththeforwardandthebackwardpassofthemodel. The
+forwardpassofboththeseapproachesinvolvesonekernel,whichwetermflash_fwd_kernel,andthe
+backwardpassofboththeseapproachesismadeupofthreekernels,whichwetermbwd_dq_dk_dv,
+bwd_dot_do_o,andbwd_convert_dq. Incode,therealnamesofthesekernelsareasfollows.
+fwd:=flash_fwd_kernel
+bwd_dq_dk_dv:=flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel
+(83)
+bwd_dot_do_o:=flash_bwd_dot_do_o_kernel
+bwd_convert_dq:=flash_bwd_convert_dq_kernel
+Here,wefirstprovideabriefdescriptionofthetasksperformedbyeachofthesekernels;foradetailed
+explanation,wereferthereadertoFLASHATTENTION2(Dao,2023)paperandcode. Thefwdkernel
+computesthefullforwardpassofthemodelasshowninTab.4. Thebulkofcomputationsofthe
+backwardpasshappeninthebwd_dq_dk_dvkernel,whichperformsre-computationofattention
+matrixandreductionofkeyandvaluegradienttensors(dK,dV). Again,theexactstepscarriedout
+inthebackwardpasscanbecheckedfromTab.4. Thebwd_convert_dqkernelperformsthereduction
+ofquerygradienttensor(dQ). Finally,notethatthebwd_dot_do_okernelinFLASHATTENTION2
+performsthetaskofcomputingtherowsum(dO O)tensoralongwithclearingoftheaccumulators
+⊙
+of query gradients (dQ). Although FLASHSIGMOID does not require this row-sum tensor, the
+clearingofaccumulatorsofquerygradientsisstillneeded. Forthisreason,bwd_dot_do_okernel
+alsoappearsintheprofilingofFLASHSIGMOID.
+Performance of Individual Kernels: Figures 12 and 13 show the performance comparison of
+eachflashkernelinFLASHSIGMOIDwiththecorrespondingkernelinFLASHATTENTION2when
+tested on an H100 GPU and an A100 GPU respectively. We observe that on both the H100 and
+A100 GPU architectures, the fwd kernel of FLASHSIGMOID is significantly faster than that of
+FLASHATTENTION2andthebwd_dq_dk_dvkernelofFLASHSIGMOIDhasamodestaveragespeed
+boostoverFLASHATTENTION2. Thebwd_dot_do_okernelinFLASHSIGMOIDissignificantlyfaster
+onA100GPUs. Notethateventhoughthebwd_dot_do_okernelofFLASHSIGMOIDappearstobe
+sloweronaverageonH100GPUs,thekerneltimeofbwd_dot_do_o( 5ms)isnegligiblecompared
+∼
+tothatofthemainbwd_dq_dk_dvkernel( 5000ms). Thus,thecombinedbackwardpasskernelin
+∼
+FLASHSIGMOIDtimedoesnotsufferfromthisslowdown. Finally,notethatforbwd_convert_dq,
+FLASHSIGMOIDandFLASHATTENTION2haveidenticalperformance. Thisisexpected,sincethe
+taskofthiskernelistoreducethegradientofthequeriesdQ,whichisacommonstepinboththe
+approachesandisnotmodifiedinFLASHSIGMOID.
+1750 FlashAttention2 (Full) FlashAttention2 (Full) FlashAttention2 (Full) 4.0 FlashAttention2 (Full)
+1500 F Fl la as sh hS Ai tg tem no tii od n ( 2F u (l Cl) ausal) 4000 F Fl la as sh hS Ai tg tem no tii od n ( 2F u (l Cl) ausal) 5 F Fl la as sh hS Ai tg tem no tii od n ( 2F u (l Cl) ausal) 3.5 F Fl la as sh hS Ai tg tem no tii od n ( 2F u (l Cl) ausal) 1250 FlashSigmoid (Causal) FlashSigmoid (Causal) 4 FlashSigmoid (Causal) 3.0 FlashSigmoid (Causal)
+3000 2.5
+1000 3 2.0
+750 2000 2 1.5
+25 50 00 1000 1 01 .. 50
+0 0 0 0.0
+0 10000 20000 T30o00k0en40s0 00 50000 60000 70000 0 10000 20000 T30o00k0en40s0 00 50000 60000 70000 0 10000 20000 T30o000ken4s00 00 50000 60000 70000 0 10000 20000 T30o00k0en40s0 00 50000 60000 70000
+fwd: bwd_dq_dk_dv: bwd_dot_do_o: bwd_convert_dq:
+17.39%fasterfor 3.29%fasterfor 2.24%slowerfor 0.03%fasterfor
+self-attentionand self-attentionand self-attentionand self-attention,0.02%
+18.76%forcausal. 6.97%forcausal. 2.17%forcausal. slowerforcausal.
+Figure12: FLASHSIGMOIDandFLASHATTENTION2kernelcomparisononH100GPUs.
+F.3 SpeedBoostsofFLASHSIGMOIDinRealisticSettings
+Inthissection,wedemonstratehowtheperformanceboostsmeasuredinApp.F.2fortheindividual
+kernelsofFLASHSIGMOIDcontributestospeeding-uprealisticrunswithend-to-endtraining.
+Setup:Asatargetexperiment,weconsidertrainingavisiontransformer(Dosovitskiyetal.,2021)
+ontheImageNetdataset(Dengetal.,2009). Wecreatetwovisiontransformermodelvariants–one
+37
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK3000 FlashAttention2 (Full) 8000 FlashAttention2 (Full) 10 FlashAttention2 (Full) 7 FlashAttention2 (Full)
+22 05 00 00 F F Fl l la a as s sh h hS A Si itg gtem mno otii iod dn ( (2F C u a(l C ul) a sau ls )al) 67 00 00 00 F F Fl l la a as s sh h hS A Si itg gtem mno otii iod dn ( (2F C u a(l C ul) a sau ls )al) 8 F F Fl l la a as s sh h hS A Si itg gtem mno otii iod dn ( (2F C u a(l C ul) a sau ls )al) 56 F F Fl l la a as s sh h hS A Si itg gtem mno otii iod dn ( (2F C u a(l C ul) a sau ls )al)
+1500 45 00 00 00 6 4
+1000 3000 4 3
+2000 2
+500 1000 2 1
+0 0 0 0
+0 10000 20000 T30o00k0en40s0 00 50000 60000 70000 0 10000 20000 T30o00k0en40s0 00 50000 60000 70000 0 10000 20000 T30o000ken40s0 00 50000 60000 70000 0 10000 20000 T30o000ken4s00 00 50000 60000 70000
+fwd: bwd_dq_dk_dv: bwd_dot_do_o: bwd_convert_dq:
+14.33%fasterfor 3.50%fasterfor 7.95%fasterfor 0.01%fasterfor
+self-attentionand self-attentionand self-attentionand self-attention,0.03%
+16.92%forcausal. 1.39%forcausal. 8.00%forcausal. slowerforcausal.
+Figure13: FLASHSIGMOIDandFLASHATTENTION2kernelcomparisononA100GPUs.
+withFLASHATTENTION2attentionandtheotherwithFLASHSIGMOIDattention. Wecarryoutthe
+trainingofthesemodelswithadistributeddata-parallel(DDP)setupusingPyTorch(Paszkeetal.,
+2019). Weperformtwosetsofexperiments–i. thefirstperformsDDPtrainingonfournodesof
+H100GPUswitheightGPUspernodeandEFA/RDMAinterconnectforthenodes,andii. thesecond
+performs DDP training on four nodes of A100 GPUs with eight GPUs per node. In each set of
+experiments,weusethreedifferentimagesizes(64 64,90 90,and100 100),alongwithpatch
+× × ×
+sizeof1toresultindifferentnumberoftokensfortheunderlyingattentionmechanisminthevision
+transformermodel(64 64 = 4096,90 90 = 8100,and100 100 = 10000tokens). Foreach
+× × ×
+oftheseconfigurations,weselectbatchsizessothattheGPUmemoryutilizationwouldbegreater
+than80%. Theseconsiderationsareinordertominimize,ifnoteliminate,otherconfoundersthat
+canunfairlyaffectestimationspeed-upsinrealisticruns. Forinstance,alowGPUutilizationwould
+leadtoalargernumberofupdates,whichinturnwouldincurunnecessarydelays,variations,and
+slow-downsduetoacross-nodescommunications.
+Results:TheresultsoftherunsonH100nodesandA100nodesareshowninTab.5and6respectively.
+There,weshowhowthekernelGPUtimesforforwardandbackwardpassesvaryaccordingtothe
+numberoftokensconsidered,andincludethewall-clocktimeoftheend-to-endrunsasexplained
+above. Weobservethatthekernelspeed-upreflectssignificantlyinthespeed-upofinferenceofthe
+models(duringtesting)andmodestlyinthetrainingofthemodels. Weobserve 8%speed-upin
+∼
+wall-clocktimeofinferenceand 4%speed-upinwall-clocktimeoftraining.
+∼
+TOKENS KERNELGPUTIMECOMPARISON FULLRUNWALL-CLOCKTIMECOMPARISON
+KERNELS FLASHATTENTION2(MS) FLASHSIGMOID(MS) MODE FLASHATTENTION2(S) FLASHSIGMOID(S)
+4096 FWD 4.98±0.01 4.17±0.01(−16.31%) INFERENCE 11.17±0.18 10.68±0.18(−4.42%)
+FWD+BWD 19.58±0.06 18.12±0.04(−7.45%) TRAINING 1563.39±1.30 1521.68±2.27(−2.67%)
+8100 FWD 20.46±0.05 16.73±0.05(−18.22%) INFERENCE 28.21±0.18 25.93±0.17(−8.06%)
+FWD+BWD 77.63±0.13 72.70±0.12(−6.35%) TRAINING 4282.75±2.14 4129.25±4.14(−3.58%)
+10000 FWD 31.17±0.07 25.49±0.05(−18.20%) INFERENCE 38.71±0.19 35.37±0.17(−8.62%)
+FWD+BWD 117.53±0.13 109.87±0.12(−6.52%) TRAINING 5990.72±2.21 5751.43±5.77(−3.99%)
+Table5: FLASHSIGMOIDvs. FLASHATTENTION2onH100nodes. ThekernelGPUtimeforboth
+theapproachesisreportedinmillisecondsandwall-clocktimesisreportedinsecondsperepoch.
+TOKENS KERNELGPUTIMECOMPARISON FULLRUNWALL-CLOCKTIMECOMPARISON
+KERNELS FLASHATTENTION2(MS) FLASHSIGMOID(MS) MODE FLASHATTENTION2(S) FLASHSIGMOID(S)
+4096 FWD 8.32±0.02 7.84±0.03(−5.79%) INFERENCE 19.05±0.22 18.74±0.19(−1.65%)
+FWD+BWD 31.81±0.08 31.11±0.08(−2.19%) TRAINING 2795.03±2.35 2769.44±5.10(−0.92%)
+8100 FWD 33.65±0.09 27.92±0.07(−17.04%) INFERENCE 47.35±0.20 44.05±0.17(−6.96%)
+FWD+BWD 128.18±0.13 119.04±0.12(−7.13%) TRAINING 7519.64±4.21 7254.84±12.64(−3.52%)
+10000 FWD 51.17±0.07 42.49±0.06(−16.96%) INFERENCE 64.61±0.32 59.55±0.18(−7.82%)
+FWD+BWD 194.54±0.14 180.59±0.15(−7.17%) TRAINING 10455.64±8.85 10052.04±18.87(−3.86%)
+Table6: FLASHSIGMOIDvs. FLASHATTENTION2onA100nodes. ThekernelGPUtimeforboth
+theapproachesisreportedinmillisecondsandwall-clocktimesisreportedinsecondsperepoch.
+38
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreKConnectionofWall-ClockTimeSpeed-UpandKernelSpeed-Up:FromTab.5and6,itisclear
+thatthespeed-upinkernelsislargerthanthatinthewall-clocktimesofthefullruns. Infact,the
+speed-upinkernelsistheupperboundforthespeed-upthatwewouldseeinwall-clocktimes. Tosee
+why,letusdenotebyτ andτ thetotalkernelGPUtimeforsoftmaxattentionandsigmoidattention
+sm σ
+respectively. Then,thekernelspeed-upisgivenbys :=1 τσ. However,inafullrun,thetotal
+kernel − τ sm
+wallclocktimealsoincorporatesthetimerequiredtoloaddata,timetakenbyotherlayersofthe
+underlyingmodels,timerequiredtocommunicategradientsandotherdataacrossGPUsandacross
+nodes,andsoon. Forourcorrespondingsigmoidandsoftmaxruns,theseextrafactorsaredesigned
+toadd,uponexpectation,inthesameextratimeτ. Thus,thewall-clocktimespeed-upofafullrun
+withend-to-endtrainingiss :=1 τσ+τ. Sincewehavefastersigmoidkernels,wehave
+wall-clock − τ sm+τ
+τ σ <τ sm,whichinturnshowsthats wall-clock =1 −ττ sσ m+ +τ τ <1 −ττ sσ
+m
+=s kernel.Thisexplainsthespeed
+boosttrendsinkerneltimeversusfullrunwall-clocktimeforeachsettinginTab.5and6. However,
+inparticular,ifamodelperformsattentionmechanismoverlargenumberoftokens,theattention
+mechanism,andhencethecorrespondingkerneltime,startstodominatetheothercomputationsinthe
+network. Inthatcase,weseethatthewall-clocktimespeed-boostisclosertothekernelspeed-boost.
+Mathematically,ifτ ,τ >> τ,wehave: τ +τ τ ,τ +τ τ . Thus,s s ,
+σ sm σ σ sm sm kernel wall-clock
+≈ ≈ ≈
+therebymakings /s 1.
+wall-clock kernel
+→
+FlashAttention2 + ALiBi (Full) 7000 FlashAttention2 + ALiBi (Full)
+1750
+FlashSigmoid + ALiBi (Full) FlashSigmoid + ALiBi (Full)
+6000
+1500 FlashAttention2 + ALiBi (Causal) FlashAttention2 + ALiBi (Causal)
+FlashSigmoid + ALiBi (Causal) FlashSigmoid + ALiBi (Causal)
+5000
+1250
+4000
+1000
+3000
+750
+500 2000
+250 1000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonH100. (b)TrainingmodekernelsonH100.
+Figure 14: On average, for sequence lengths between [64,78k], the inference mode kernel of
+FLASHSIGMOIDis17.04%fasterthanFLASHATTENTION2forself-attentionand10.87%forcausal
+attention. ThetrainingmodekernelsofFLASHSIGMOIDare8.91%fasterthanFLASHATTENTION2
+forself-attentionand4.72%forcausalattention. Notethatinferenceinvolvesonlytheforwardpass
+ofthemodelandtraininginvolvesboththeforwardandthebackwardpassofthemodel.
+Significance of Wall-Clock Speed-Up of Inference: Although FLASHSIGMOID provides only
+modestgainsduringtraining,thespeed-upininferenceissignificant(>15%forunderlyingkernels
+and5 10%duringinferenceoffullruns). Wepositthatthisspeed-upininferenceisextremely
+−
+criticalaswell. Contemporarylarge-scalemodels,oncetrained,spendahugeportionoftheresttheir
+lifetimeininferencemode(OpenAI,2023). Thus,significantperformanceboostsininferencemode
+haveimmensepotentialforsavingresourcesindeploymentoflargemodelsforinference.
+F.4 FLASHSIGMOIDwithALiBi
+Itisevidentfromthemaintextofthepaperthatimprovedpositionalembeddings,likeALiBi(Press
+etal.,2022),canbecrucialforcertaintasksanddatamodalities. Thus,wealsoprovideaFLASH-
+SIGMOIDimplementationthatincorporatesALiBi. WecomparetheFLASHSIGMOIDwithALiBi
+implementationwiththeFLASHATTENTION2withALiBiimplementation(Dao,2023). Figures14
+and15showthekernelGPUtimefortheforwardandbackwardpasskernelsofFLASHSIGMOID
+withALiBiimplementationversus FLASHATTENTION2 withALiBiimplementation. Again,we
+observethatFLASHSIGMOIDkernelsforinferencehavesignificantspeed-upinwall-clocktimeover
+thoseinFLASHATTENTION2andthekernelsfortrainingalsohavemodestwall-clockimprovements.
+39
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK3000 FlashAttention2 + ALiBi (Full) 12000 FlashAttention2 + ALiBi (Full)
+FlashSigmoid + ALiBi (Full) FlashSigmoid + ALiBi (Full)
+2500 FlashAttention2 + ALiBi (Causal) 10000 FlashAttention2 + ALiBi (Causal)
+FlashSigmoid + ALiBi (Causal) FlashSigmoid + ALiBi (Causal)
+2000 8000
+1500 6000
+1000 4000
+500 2000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonA100. (b)TrainingmodekernelsonA100.
+Figure 15: On average, for sequence lengths between [64,78k], the inference mode kernel of
+FLASHSIGMOIDis12.28%fasterthanFLASHATTENTION2forself-attentionand5.30%forcausal
+attention. ThetrainingmodekernelsofFLASHSIGMOIDare14.64%fasterthanFLASHATTENTION2
+forself-attentionand6.80%forcausalattention. Notethatinferenceinvolvesonlytheforwardpass
+ofthemodelandtraininginvolvesboththeforwardandthebackwardpassofthemodel.
+F.5 DirectionsforFutureWorkonFLASHSIGMOID
+Inthissection,wediscussedFLASHSIGMOID,ahardware-awareimplementationoftheSigmoidAttn
+algorithm. Then,wedemonstratedviakernelbenchmarkingandrealisticsettingrunsthatFLASH-
+SIGMOIDprovidessignificantgainsininferenceaswellasmodestgainsintrainingofmodelswith
+attentionmechanism. Inthissubsectionwefurtherdiscussadditionalavenuesforimprovingthe
+implementationofFLASHSIGMOID,andpointoutsomeinterestingdirectionsforfuturework.
+Optimization of Block Shapes for Different Input and GPU Settings: As stated before, our
+FLASHSIGMOIDimplementationbuildsonFLASHATTENTION2byaddingfunctionalityforforward
+and backward pass of sigmoid attention in place of the standard softmax attention. In particular,
+forallFLASHSIGMOIDresultsdiscussedsofar,weinheritdirectlyfromFLASHATTENTION2the
+details of optimal block shapes, grid shapes, and other kernel launch parameters, and keep them
+unchangedinourimplementation. Forinstance,thisisthecasefortheblocksizesB ,B inAlg.1
+r c
+and2,whichareidenticalinFLASHATTENTION2andFLASHSIGMOID. Thischoiceisdictatedby
+theneedtoensureafaircomparisonbetweenthetwoimplementations,andallowsustodemonstrate
+thespeed-upofsigmoidattentionbyminimizingconfoundersassociatedwithparallelcomputations
+ondifferentGPUarchitecturesfordifferentinputshapes.
+AlthoughFLASHSIGMOIDkernelsleadtospeed-upsininferenceandtrainingforbothH100and
+A100GPUs,weobservethatthekerneltimingspeed-upsonA100arenotuniformacrosssequence
+lengths: forasmallsubsetofthese,ourkernelprovidessignificantlylowerspeed-upcomparedtothe
+overalltrendforothersequencelengths. Ideally,theimplementationofattentionmechanismsshould
+notassumeanyinformationonthetokencountininput, anditisthendesirabletohaveuniform
+speed-upsacrossallinputlengths. Here,weshowthatthisisachievablebysimplyupdatingtheblock
+shapeinformationinFLASHSIGMOIDtovaluesthataredifferentthanthoseinFLASHATTENTION2.
+NotethattheimplementationofFLASHATTENTION2istemplatedaccordingtoblockshapes,grid
+shapes,andotherkernellaunchparameters.
+NotethatFLASHATTENTION2providesvarioustailoredimplementations,optimizedfordifferent
+inputshapes(e.g.,differentrangesoffeaturedimensionperhead),inputtypes(e.g.,causalattention
+vs. self-attention, ALiBi vs. no ALiBi in attention, etc.), and GPU types (e.g., A100 vs. H100
+viacheckingsharedmemorysizeonGPUs). Thisisachievedbyopportunelyselectingthekernel
+template parameters defining block shapes, grid shapes, and other kernel launch parameters for
+parallel computation on GPUs. In our case, we create a variant of FLASHSIGMOID, denoted by
+FLASHSIGMOID†, where we update the block sizes for query and key tensors from (B r,B c) =
+(128,128) of FLASHSIGMOID to (B r,B c) = (128,64) of FLASHSIGMOID† only for our input
+setting(templatewithfeaturesperheadbeing64).
+40
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreK3000
+FlashAttention2 (Full) FlashAttention2 (Full)
+FlashSigmoid (Full) 10000 FlashSigmoid (Full)
+2500
+FlashAttention2 (Causal) FlashAttention2 (Causal)
+FlashSigmoid (Full) 8000 FlashSigmoid (Full)
+2000
+6000
+1500
+1000 4000
+500 2000
+0 0
+0 10000 20000 30000 40000 50000 60000 70000 0 10000 20000 30000 40000 50000 60000 70000
+Tokens Tokens
+(a)InferencemodekernelsonA100. (b)TrainingmodekernelsonA100.
+Figure 16: On average, for sequence lengths between [64,78k], the inference mode kernel of
+FLASHSIGMOID†is14.82%fasterthanFLASHATTENTION2forself-attentionand18.02%forcausal
+attention. ThetrainingmodekernelsofFLASHSIGMOID†are6.18%fasterthanFLASHATTENTION2
+forself-attentionand5.76%forcausalattention. Notethatinferenceinvolvesonlytheforwardpass
+ofthemodelandtraininginvolvesboththeforwardandthebackwardpassofthemodel.
+KERNELGPUTIMECOMPARISON
+TOKENS
+KERNELS FLASHATTENTION2(MS) FLASHSIGMOID(MS) FLASHSIGMOID†(MS)
+FWD 8.32±0.02 7.84±0.03(−5.79%) 7.26±0.02(−13.21%)
+4096
+FWD+BWD 31.81±0.08 31.11±0.08(−2.19%) 30.62±0.09(−4.03%)
+FWD 33.65±0.09 27.92±0.07(−17.04%) 28.54±0.07(−15.50%)
+8100
+FWD+BWD 128.18±0.13 119.04±0.12(−7.13%) 119.85±0.13(−6.81%)
+FWD 51.17±0.07 42.49±0.06(−16.96%) 43.53±0.09(−15.32%)
+10000
+FWD+BWD 194.54±0.14 180.59±0.15(−7.17%) 181.97±0.17(−6.87%)
+FWD 134.19±0.12 125.43±0.10(−6.53%) 116.75±0.10(−13.40%)
+16384
+FWD+BWD 494.65±0.28 482.08±0.23(−2.54%) 474.52±0.28(−4.48%)
+Table7: FLASHATTENTION2vs. FLASHSIGMOIDvs. FLASHSIGMOID†onA100nodes. Thekernel
+GPUtimeforallthreeapproachesarereportedinmilliseconds. WeobservethatFLASHSIGMOID†
+providesbetterandmoreuniformspeed-upsacrossallexampletokens.
+Experimentation and Results: For this variant, we perform kernel benchmarking as described
+inApp.F.2,andreportthecorrespondingresultsinFig.16. Comparingtheplotsforkerneltiming
+withFLASHSIGMOIDplotsfromFig.11,weobservethatFLASHSIGMOID†notonlyprovidesamore
+uniforminferenceandtrainingkernelspeed-uponallsequencelengths,butalsoimprovestheaverage
+ofthesespeed-upsacrossalllengths. Tofurtherbolsterourobservations,Tab.7showstheinference
+modeandtrainingmodekernelspeed-upsforasubsetofsequencelengthsunderconsideration. This
+experimentindicatesthatitispossibletoobtainhigherandmoreuniformspeed-upsinkerneltimings
+acrossawiderangeoftokensbyinvestigatingoptimalblockshape, gridshape, andotherkernel
+launchparametersforeachinputsettingandGPUtype. Weleavethisoptimizationforfuturework.
+G Experiments
+G.1 ExtraAblations
+G.1.1 TheEffectofMultiplicativeSequenceLengthNormalization
+Wortsmanetal.(2023a)notesthatmodelstrainedwithsigmoidorReLUattentionrequirescaling
+bythesequencelength,n−ασ(QKT/ d )V. Weablatethisbycomparingthescaledsolutionto
+qk
+theoneweproposeinApp.E.Wealsogeneralizethevariantproposedin(Wortsmanetal.,2023a)
+(cid:112)
+tovariadicsequencelengthssuchthatitworkswithauto-regressive(AR)training,forexamplefor
+41
+)sm(
+emiT
+UPG
+lenreK
+)sm(
+emiT
+UPG
+lenreKFigure19: n−0.5
+Figure17: b= lnn. Figure18: n−1normalization.
+− normalization.
+n=3:
+1 1 1 1 0 0
+0.5−α 0.5−α 1 1 1 0 σ(QKT/ d )V. (84)
+qk
+ 0.33−α 0.33−α 0.33−α⊙(cid:34)1 1 1(cid:35)⊙
+(cid:112)
+ 
+n−α CausalMaskM
+Werepeatthee(cid:124)xperimentfrom(cid:123)(cid:122)Fig.5,using(cid:125)ALi(cid:124)Bip(cid:123)o(cid:122)sitio(cid:125)nalembeddingsforalltrials. Weapply
+α= 1,0.5 ARnormalizationproposedin(84). Whilethereisanobservabledifferenceinterms
+{ }
+oftheattentionnorm, σ(QKT/ d )V ,wefindthatthetrainNLLisslightlyworseforboth
+qk
+∥ ∥
+normalizedvariants(Fig.18and19)incomparisontotheb= lnnvariantinFig.17.
+(cid:112) −
+G.1.2 AttentionBiasStabilityAblation
+TovalidatethestabilizingeffectsofattentionbiaswerepeattheexperimentfromFig.7and8,keeping
+allofthesamehyper-parameters,whileenablingQKnormandLayerScale(initializedat10−4). We
+trainwitharangeofconstantbiasoffsets, b 15, 10, 6, 4, 1 andvisualizetheresults
+∈ {− − − − − }
+belowinFig.20. Weobserveasystematicincreaseinstability(andlowerSigmoidAttnNLL)for
+7.5 attn_bias=-15 attn_bias=-10 attn_bias=-6 attn_bias=-4 attn_bias=-1
+NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name NNoonn--eemmbbeedd which_attn_act_name
+7.0 PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid PPaarraammss ((MM)) sigmoid
+6.5 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax 2 42 4. .. .2 92 9 softmax
+6.0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0 1 61 65 75 7. .. .0 00 0
+5.5 444400..00 444400..00 444400..00 444400..00 444400..00
+5.0
+4.5
+4.0
+3.5
+3.0 103 102 101 103 102 101 103 102 101 103 102 101 103 102 101
+Learning rate Learning rate Learning rate Learning rate Learning rate
+wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee wwhhiicchh__aattttnn__aacctt__nnaammee
+ssiiggmmooiidd ssiiggmmooiidd ssiiggmmooiidd ssiiggmmooiidd ssiiggmmooiidd
+ssooffttmmaaxx ssooffttmmaaxx ssooffttmmaaxx ssooffttmmaaxx ssooffttmmaaxx
+101
+107 108 107 108 107 108 107 108 107 108
+Non-embed Params (M) Non-embed Params (M) Non-embed Params (M) Non-embed Params (M) Non-embed Params (M)
+Figure20: Attentionbiasablation.
+values less than 1 up till 10, after which the 15 plot shows an over-regularizing effect with
+− − −
+decreasedperformance.
+G.2 Vision
+G.2.1 TestImageNet1kTop-1%
+Fig.21reportsthetestlinearproberesultsfortheViT-B/16BYOL(Grilletal.,2020;Busbridge
+etal.,2023),ViT-B/16SimCLR(Chenetal.,2020;Zhaietal.,2023a)andthefinetunedperformance
+42
+ssol
+laniF
+ytivitisnes
+RLBYOLViT-B/16 SimCLRViT-B/16 MAEViT-L/16Finetune SupervisedViT-B/16
+80.0
+60.0
+40.0
+20.0
+Softmax
+Sigmoid
+0.0
+0 200 400 600 0 100 200 300 0 10 20 30 40 50 0 100 200 300
+Epoch Epoch Epoch Epoch
+Figure21: ImageNet1ktesttop-1%forSoftmaxAttnvs. SigmoidAttnusingmodelsfromFig.2.
+fortheViT-L/16MAE(Heetal.,2022)andthetesttop-1%resultsforforViT-B/16supervisedmodel
+(Dosovitskiyetal.,2021). AcrossthesewiderangeofSSLandsupervisedlearningtasks,trained
+withcontrastive(SimCLR),EMAdistillation(BYOL)andreconstructiveobjectives(MAE),wefind
+thatSigmoidAttnnotonlymatchesthetrainingdynamics(Fig.2), butalsothelinearprobeand
+finetunedperformanceofthebaselineSoftmaxAttn.
+G.2.2 LayerScaleFreeSigmoidAttention
+Train Test Figure22: AcompetitiveSigmoidAttn
+7.0
+t=10,b=-10 ViT-B/16 model can be learned with-
+t=-10,b=-10 out LayerScale or QK norm using a
+4.7
+not,nob large initial learnable scalar tempera-
+n−αReLU2
+ture t = 10 and bias b = 10 (sim-
+2.3 n−αSigmoid −
+ilar to SigLIP (Zhai et al., 2023b)):
+0.0 σ(et[QKT/ d qk]+b)V, b,t R.
+{ } ∈
+85 This regularizes the model, as it must
+(cid:112)
+move the temperature to a learnable
+60 regime. The t = 10,b = 10 curve
+−
+makesnoprogressintrainNLLortest
+30
+top-1for 25epochs(nearmaxLR),but
+∼
+0 ultimatelyoutperformsbaselines.
+0 100 200 300 0 100 200 300
+Epochs Epochs
+WhileFig.22demonstratesthepossibilityoflearningSigmoidAttnwithoutLayerScale,itinvolves
+task specifictuning of t,b . Wealso explored gatingattention fromlearning (through asimple
+{ }
+multiplybyzero)for 25epochsandwereabletomatchthet=10,b= 10trainingcurvesfrom
+∼ −
+above. However,weoptedfortheLayerScalemethodduetoitssimplicity.
+G.2.3 SigmoidAttentionvs. AttentionRelaxations
+SupervisedViT-B/16 Figure 23: Supervised ViT-B/16 ImageNet1k
+classification. We contrast SigmoidAttn and
+80.0
+SoftmaxAttn against (a) linear attention with
+no activation: QKT/ d and (b) fast atten-
+qk
+60.0
+tion via positive orthogonal random features,
+(cid:112)
+used in Performer (Choromanski et al., 2021).
+40.0 SigmoidAttn, likeSoftmaxAttn, differsfrom
+Softmax
+attentionrelaxationslikePerformerwhichuses
+20.0 Sigmoid low-rank representations of the attention ma-
+Performer
+trix.SigmoidAttnmaintainsperformanceparity
+Linear
+0.0 withSoftmaxAttn,whileoutperformingother
+0 50 100 150 200 250 300 efficientattentionvariants.
+Epoch
+43
+%1-poTtseT
+LLN
+%1-poT
+%1-poTtseTG.2.4 Hyper-Parameters
+Table8: SigmoidAttnSimCLRandBYOLViT-B/16hyperparameters.
+Parameter SimCLR BYOL
+Attentionbias None None
+LayerScaleInit 10−4 10−4
+QKNorm Yes Yes
+PosEmbed SinCos Learnable
+FreezePatcher Yes No
+Weightinit MocoV3(Chenetal.,2021) trunc_normal(.02)
+Normalization LayerNorm LayerNorm
+LRschedule SingleCycleCosine SingleCycleCosine
+LRwarmup 10Epochs 40Epochs
+MinLR 1×10−6 1×10−6
+Trainingduration 300Epochs 600Epochs
+Optimizer AdamW AdamW
+Optimizerscalingrule Linear Linear
+BaseAdam(β1,β2) (0.9,0.95) (0.9,0.95)
+BaseLR 2×10−4 1×10−4
+Basebatchsize 256 256
+Totalbatchsize 4096 4096
+Baseteachermomentum - 0.996
+Weightdecay 0.1 0.3
+Weightdecayskipbias Yes Yes
+Numericalprecision bf16 bf16
+Stochasticdepth 0.0 0.2
+Augmentationstack SimCLR(Chenetal.,2020) DINOmulticrop(Caronetal.,2021)
+ColorJitterScaling 0.5(Chenetal.,2021) 1.0
+Table9: SigmoidAttnSupervisedViT-B/16andMAEViT-L/16hyperparameters.
+Parameter Supervised MAE
+Attentionbias None b=−lnn
+LayerScaleInit 10−4 10−4
+QKNorm Yes Yes
+PosEmbed Learnable Learnable
+Architecture ViT-B/16 ViT-L/16
+MaskRatio - 0.75
+FreezePatcher No No
+Weightinit trunc_normal(.02) trunc_normal(.02)
+Normalization LayerNorm LayerNorm
+LRschedule SingleCycleCosine SingleCycleCosine
+LRwarmup 20Epochs 40Epochs
+MinLR 1×10−6 0.0
+Trainingduration 300Epochs 400Epochs
+Optimizer AdamW AdamW
+Optimizerscalingrule Linear Linear
+BaseAdam(β1,β2) (0.9,0.95) (0.9,0.95)
+BaseLR 1×10−4 1.5×10−4
+Basebatchsize 256 256
+Totalbatchsize 4096 4096
+Weightdecay 0.3 0.05
+Weightdecayskipbias Yes Yes
+Numericalprecision bf16 bf16
+Stochasticdepth 0.28 0.0
+Augmentationstack RandAug(Cubuketal.,2020) RRC+HFLIP
+G.3 LanguageModel
+G.3.1 Hyper-Parameters
+Tab.10showsthehyper-parametersforthefinalcomparison. MuP-simple(Wortsmanetal.,2023b)
+isused,wherethepeaklearningrateissetto1e-2. Weightdecayisdecoupled,followingLoshchilov
+&Hutter(2017). Inaddition,toconfirmthatapplyingQK-Normdoesnothurtthebaseline,weshow
+trainingparitywithandwithoutQK-NorminFig.24.
+44Table10: TrainingdetailsfortheLlama-style1BLMtraining.
+Parameter Value
+Params 1B
+ContextLength 2048
+TotalTokens 300B
+Batchsize 4Mtokens
+LRSchedule Cosine
+LRWarmupSteps 5000
+PeakLR 1e-2
+FinalLR 10%ofpeak
+Optimizer AdamW
+Optimizermomentum 0.9,0.95
+Weightdecay 1e-4
+Gradientclipping 1.0
+Positionencoding ALiBi
+Q/KNorm Applied
+Numlayers 24
+Numheads 32
+Hiddendim 2048
+2.5
+3.75 Without QK Norm 85M
+With QK Norm 1B
+3.50
+2.0
+3.25
+3.00 1.5
+2.75
+1.0
+2.50
+2.25
+0.5
+2.00
+0.0
+0 50000 100000 150000 200000 250000 300000 0 50000 100000 150000 200000 250000 300000
+Steps Steps
+Figure24: 1BSoftmaxAttnLLMtraining Figure25: 85Mand1BLLMtrainingusing
+withandwithoutQKNorm,convergingtothe SigmoidAttn(n=4096). Smoothtraining
+sameloss. losscurves,butgradientnormshowsspikes.
+4.00 Softmax Softmax
+Sigmoid 4.0 Sigmoid
+3.75
+3.50 3.5
+3.25
+3.0
+3.00
+2.75 2.5
+2.50
+2.0
+0 50000100000150000200000250000300000350000400000 0 50000 100000 150000 200000 250000 300000
+Steps Steps
+Figure26: 85MtrainingusingSigmoidAttn Figure27: 1BtrainingusingSigmoidAttn(n
+andSoftmaxAttn(n=4096). Trainingloss =4096). Highersequencelengthwithalarger
+matches. modelshowsaslightlydifferentlosscurve.
+45
+LLN
+niarT
+LLN
+niarT
+mroN
+tneidarG
+LLN
+niarTG.3.2 GradientNorm
+WhileaSigmoidAttnbasedLMusingaforementationhyper-parametershasasmoothlosscurve,
+wedoseemoregradientnormfluctuations. SeeFig.25,wherespikeslargerthan0.5arenotvisible
+intheSoftmaxAttnequivalent.
+G.4 AutomaticSpeechRecognition
+G.4.1 TrainingDetails
+Allacousticmodelsarefed80channellog-melfilterbankswitha25msslidingwindowstridedby
+10ms.
+Thetransformer-basedencodermodelhas255Mparameters: 1Dconvolutionofkernel7andstride3
+followedbyCAPEpositionalembeddingifitisusedand36transformerblockswithpre-LayerNorm,
+anembeddingdimensionof768,4heads,3072unitsintheMLPlayers. Themodelistrainedwith
+CTClossandacharactervocabulary,includingapostrophe(‘). Inadditionalexperiments,wevary
+thedepthto12and24layers,andchangepre-LayerNormtopost-LayerNorm.
+We implemented our own conformer-based encoder model, also trained with a CTC loss and a
+charactervocabulary. Theconformermodelhas104Mparametersandconsistsof1Dconvolutionof
+kernel7andstride3followedby16conformerblockswithanembeddingdimensionof512,4heads,
+2048unitsintheMLPlayers. VariationalnoiseisnotusedandRoPEisusedasarelativepositional
+embeddinginsteadofrelativesinusoidalpositionalembedding.
+Forallmodels,SpecAugment(Parketal.,2019)isusedforaugmentationwith2frequencymasks
+(maxwidth30)and10timemasks(maxwidth50,ratio0.1). Allmodelsaretrainedwithdynamic
+batching and mixed precision with BF16. Models are trained with different configurations of
+optimizers and hyperparameters to have diverse coverage of use-cases. We first optimize every
+configurationforSoftmaxAttnandthenchangeonlyattentiontotheintroducedconfiguration
+ofSigmoidAttnwhileallotherparametersarekeptthesame. Detailedconfigurationsareshown
+inTable11. WetrainmodelsuntilthegreedyWERstopsimprovingonthevalidationsets(dev-clean,
+dev-other)andreportfinaltestsets(test-clean,test-other)greedyWERwithoutintegrationofany
+externallanguagemodel.
+Forthebiastermb= logninSigmoidAttn,wedonotusemaxsequencelengthasinlanguage
+−
+modelexperiments. Instead,foreveryaudiosampleweuseitsowndurationasabiastermsresulting
+intonon-trainablebiasvectorfortheminibatch. Forexperimentswithsequencenormalization,we
+alsousenotthemaxsequencelengthintheminibatchbutratherthegroundtruthsampledurationto
+properlynormalizeencoderattention.
+To evaluate behaviour for length generalization we use TED-LIUM v3 dataset Hernandez et al.
+(2018)asitsvalidationandtestsetshavelongeraudiodurationthanLibriSpeech: LibriSpeechhasin
+average10-15sduration,whileinTED-LIUMthereareaudiolongerthan30s(themaxdurationof
+LibriSpeech). ToperformevaluationonTED-LIUMv3,wecombinetogethervalidationandtestsets
+ofTED-LIUMv3(wedon’tusethemfortrainingandhyper-parameterssearchandjustperformfinal
+evaluation)andsplittheminto4datasetsaccordingtotheduration: 0-10s,10-20s,20-30s,and30s+.
+For positional embeddings we use not only CAPE, but change it to AliBi or RoPE. As ALiBi
+wasoriginallyintroducedforthedecoderonlymodelsandthereisnoofficialadoptionofityet14
+fortheencodermodels(withoutcausalmasking),wefollowthebestpracticesfoundinhttps:
+//iclr-blogposts.github.io/2024/blog/alibi-mlm/ofnonsymmetricALiBi
+withdifferentslopesinsteadofsymmetricversionusedby(Leeetal.,2022).
+G.4.2 ResultsandAblations
+Initialinvestigationonpost-LayerNormandpre-LayerNormtransformersonbothLibriSpeech100h
+and960h revealedthat SigmoidAttn withoutanybias isunstable resultinginhuge andfrequent
+gradient norm and training loss spikes throughout the training which in turn result in spikes of
+14See discussion in https://github.com/ofirpress/attention_with_linear_
+biases/issues/5.
+46Table11: TrainingdetailsfortheASRmodelsonLibriSpeech100h(LS-100)andLibriSpeech960h
+(LS-960)fortransformersandconformers.
+Parameter TransformerLS-960 ConformerLS-960 TransformerLS-100 TransformerLS-100
+Params 255M 104M 255M/170M/85M 255M
+LayerNorm pre pre+post pre post
+Dropout 0.1 0.1 0.3 0.3
+Layerdrop 0.1 0.0 0.3 0.3
+Trainingsteps 400k 400k 400k 500k
+Batchsize 3.56h 4.44h 1.1h 1.1h
+LRschedule step-wise step-wise step-wise step-wise
+SpecAugmentstart 0k 10k 0k 0k
+LRWarmupSteps 64k 10k 64k 64k
+PeakLR 1e-3 2e-3 0.1 0.03
+LRstartdecay 250k 250k 200k 330k
+LRdecaystep 50k 50k 30k 50k
+Optimizer AdamW AdamW Adagrad Adagrad
+Optimizermomentum 0.9,0.999 0.9,0.98 - -
+Weightdecay 1e-6 1e-6 0 0
+Gradientclipping 1.0 0.5 1.0 1.0
+Positionencoding CAPE/ALiBi/RoPE RoPE CAPE CAPE/ALiBi/RoPE
+Q/KNormSoftmaxAttn NotApplied NotApplied NotApplied NotApplied
+Q/KNormSigmoidAttn Applied Applied NotApplied Applied
+Numlayers 36 16 36/24/12 36
+Numheads 4 4 4 4
+Table12: Worderrorrate(%)onLibriSpeechdev/testsetsandTED-LIUMv3(Hernandezetal.,
+2018)(“TED”,jointvalidationandtestsetswithsplitaccordingtoaudioduration)forpre-LayerNorm
+transformer(255M/170M/85Mparams)withCAPEandwitheitherSoftmaxAttnorSigmoidAttn
+(w/LayerScale,w/oQKnorm,w/b= logn)trainedonLibriSpeech100hdata(averageduration
+−
+is10-15s). Hyper-parameterscanbefoundinTable11.
+ATTN #LAYERS DEV-CLEAN TEST-CLEAN DEV-OTHER TEST-OTHER TED0-10S TED10-20S TED20-30S TED30S+
+SOFTMAX 36 6.7 7.1 20.0 20.4 26.4 22.4 23.3 21.8
+SIGMOID 36 7.0 7.3 20.3 20.5 26.2 23.4 23.6 21.8
+b=0 36 6.8 7.1 19.8 20.3
+SOFTMAX 24 6.4 6.8 20.2 20.5 25.4 22.1 23.3 21.8
+SIGMOID 24 7.1 7.3 21.0 21.3 26.6 23.3 24.0 22.0
+b=0 24 6.7 6.9 20.2 20.7
+SOFTMAX 12 8.2 8.7 25.0 25.4 29.0 25.6 27.1 27.4
+SIGMOID 12 8.3 8.7 24.8 25.2 29.0 25.7 26.3 25.5
+b=0 12 8.7 8.5 24.4 24.7
+Table13: Worderrorrate(%)onLibriSpeechdev/testsetsforpost-LayerNormtransformer(255M)
+witheitherSoftmaxAttn(w/oQKnorm)orSigmoidAttn(bydefaultw/LayerScale,w/QKnorm,
+w/b= logn)trainedonLibriSpeech100hdata. Hyper-parameterscanbefoundinTable11.
+−
+ATTN PE DEV-CLEAN TEST-CLEAN DEV-OTHER TEST-OTHER
+SOFTMAX CAPE 6.4 6.5 18.4 18.2
++QKNORM 6.1 6.3 18.2 18.1
+SIGMOID 8.0 8.4 22.7 22.7
+-QKNORM 7.5 7.9 22.1 27.6
+-LAYERSCALE UNSTABLE,GRADIENTNORMANDLOSSSPIKES
+-QKNORM-LAYERSCALE 6.5 6.9 19.9 20.1
+SIGMOID(b=−10,LEARNABLE) 8.7 9.4 23.5 24.0
+SOFTMAX ROPE 6.6 6.9 18.3 18.5
+SIGMOID 6.8 7.1 20.8 20.8
+SIGMOID(b=−10,LEARNABLE) 8.7 9.4 23.5 24.0
+SOFTMAX ALIBI 6.4 6.9 18.3 18.3
+SIGMOID 6.9 7.2 20.8 21.1
+SIGMOID(b=−10,LEARNABLE) 6.8 7.1 20.4 20.5
+validationandtestWER,seeFigure28. NeitherLayerScalenorQKnormwereabletostabilizethe
+training,thoughwedidnotobserveanymodeldivergence.
+47Table14: Worderrorrate(%)onLibriSpeechdev/testsetsandTED-LIUMv3(Hernandezetal.,
+2018)(“TED”,jointvalidationandtestsetswithsplitaccordingtoaudioduration)forconformer
+(104M)withRoPEandwitheitherSoftmaxAttnorSigmoidAttn(w/LayerScale,w/QKnorm,w/
+b= logn)trainedonLibriSpeech960hdata(averagedurationis10-15s). Hyper-parameterscan
+−
+befoundinTable11.
+ATTN DEV-CLEAN TEST-CLEAN DEV-OTHER TEST-OTHER TED0-10S TED10-20S TED20-30S TED30S+
+SOFTMAX 2.2 2.5 5.4 5.6 13.0 11.1 13.2 7.1
+SIGMOID 2.3 2.5 5.6 5.8 13.5 10.8 13.3 10.2
+SIGMOID(b=−10,LEARNABLE) 2.4 2.7 5.8 5.8 12.9 11.1 14.1 54.9
+post-LayerNorm pre-LayerNorm
+700
+softmax
+600 sigmoid
+500
+400
+300
+200
+100
+103
+102
+20.0
+17.5
+15.0
+12.5
+10.0
+7.5
+5.0
+2.5
+0.0
+20
+18
+16
+14
+12
+10
+8
+6
+0 100000 200000 300000 400000 500000 0 100000 200000 300000 400000 500000
+Steps Steps
+Figure28: ASRTransformermodel(255M)trainingwithpost-LayerNorm(left)andpre-LayerNorm
+(right)onLibriSpeech960hwithSigmoidAttn(w/biasterm,b=0,w/oQKnorm,w/LayerScale)
+orwithSoftmaxAttn. HugegradientnormsandtraininglossspikesareobservedforSigmoidAttn
+whichcanresultinworsefinalmodelperformancehencemodelsforSigmoidAttnareunstable.
+FurtherexperimentswithbiastermintheSigmoidAttndefinitionforpost-LayerNormtransformers
+onLibriSpeech100hrevealthattrainingisnowstable(onlyfewmarginalspikesingradientnorm
+occur, while train loss is smooth all the time). However, both LayerScale and QK norm restrict
+modelcapacitythusnotmatchingSoftmaxAttn. Moreover,somecombinationofthemisneeded
+forthestabletraining,thoughw/obothofthemwegotthebestperformanceforSigmoidAttn(still
+behind SoftmaxAttn), see Table 13. We believe, further adaptation and deeper investigation is
+neededforSigmoidAttnandpost-LayerNorm,thoughrecentadvancesinmachinelearningdonot
+usepost-LayerNormmodelsduetohightraininginstabilityevenforSoftmaxAttn.
+Switchingtopre-LayerNormtransformersandvaryingthedepthofthemodelsleadtostabletraining
+withSigmoidAttnandbiastermb= lognwithfew(2-5times)spikesinthegradientnormand
+−
+smoothloss. Inthiscase,SigmoidAttnmatchesresultsforSoftmaxAttnandtheybothgeneralize
+toTED-LIUMdatasimilarly,seeTable12. Ifthebiastermisremoved,SigmoidAttncanstillmatch
+SoftmaxAttnbutlargespikesingradientnormandlosscanoccur.
+48
+ssoLniarT
+WLd
+d
+REWnaelc-ved
+REWrehto-ved
+(cid:13)
+(cid:13)
+(cid:13)
+(cid:13)100
+alibi
+rope
+80
+cape
+Figure 29: ASR Transformer model
+60
+(255M) training with pre-LayerNorm
+40
+onLibriSpeech960hwithSigmoidAttn
+(w/biasterm,b= logn,w/QKnorm,
+−
+20 w/LayerScale)anddifferentpositional
+100 embeddingsCAPE,RoPE,ALiBi. The
+biasbisabletostabilizeSigmoidAttn
+80
+training: smoothtraininglossandonly
+marginalrarespikesingradientnorms
+60
+areobserved.
+40
+20
+0 50000100000150000200000250000300000350000
+Steps
+Table15:Worderrorrate(%)onLibriSpeechdev/testsetsandTED-LIUMv3(Hernandezetal.,2018)
+(“TED”,jointvalidationandtestsetssplitaccordingtoduration)fortransformer(255Mparams)with
+eitherSoftmaxAttnorSigmoidAttn(LayerScaleandQKnormareusedwithb= logn)trained
+−
+onLibriSpeech960hdata(meandurationis10-15s). Hyper-parametersareinApp.G.4.
+ATTN PE DEV-CLEAN TEST-CLEAN DEV-OTHER TEST-OTHER TED0-10S TED10-20S TED20-30S TED30S+
+SOFTMAX 2.2 2.3 5.6 5.7 12.4 10.5 11.9 9.1
+SIGMOID CAPE 2.2 2.4 5.2 5.5 12.4 10.3 12.3 9.7
+SIGMOID,b=−log(maxbatchn) 2.1 2.3 5.2 5.3 12.2 10.6 12.0 9.3
+SOFTMAX 2.2 2.2 5.4 5.5 12.7 10.6 12.8 9.5
+SIGMOID ROPE 2.0 2.3 5.2 5.4 12.3 10.1 12.3 8.6
+SIGMOID,b=−log(maxbatchn) 2.1 2.3 5.0 5.1 12.3 10.1 12.1 10.4
+SOFTMAX 2.1 2.2 5.3 5.4 12.3 10.7 12.1 8.6
+SIGMOID ALIBI 2.1 2.3 5.0 5.1 12.3 10.5 12.6 9.1
+SIGMOID,b=−log(maxbatchn) 2.0 2.3 5.2 5.2 12.3 10.5 11.9 10.2
+Finally, we experiment with a conformer model, in Table 14. Again, we found that bias term
+b = lognstabilizestraining. Thelearnableb = 10worksthoughweseesignificantgradient
+− −
+normspikeswhilethetrainlossremainssmooth. Besides,b = logngeneralizeswelltolonger
+−
+sequenceswhilelearnableb= 10failstodosowithRoPEforconformer. Overall,SigmoidAttn
+−
+isabletomatchSoftmaxAttnhavingstabletrainingwithb= logn.
+−
+InexperimentswithdifferentvariantsofbiastermforSigmoidAttn,thebiasb= lognisfound
+−
+to be the most stable (only few marginal gradient norm spikes are observed with the train loss
+beingsmooth)anditprovidessimilarperformanceasSoftmaxAttninmostsettings. Thesourceof
+instabilityiscomingfromthelargerattentionoutputnorms(80kforCAPE,40kforRoPEand20kfor
+AliBiwhilebeing200forSoftmaxAttn). Thishappensduetohighattentionweightofeverytoken
+whichcanbebiasedtowardszerowithabiasterminSigmoidAttndefinition. Preliminaryresultsto
+connectthistothelocalattentionpropertyneededatthebeginningofthetrainingforstabletraining
+failed,aslocalattentiondidnotconvergewellatall(itisdeactivatedaftersomeinitialtraining).
+Tofullybenefitfromtheimprovedthroughputof FLASHSIGMOID,forthebiastermb = logn
+−
+in SigmoidAttn, we experimented with configuration when the maximum audio duration in the
+minibatchisusedasnresultingintonon-trainablebiasscalarwhichchangesbetweenminibatches
+asweusedynamicbatching. Comparisonbetweenthebiasvectorwithpersampleownduration
+normalizationandthebiasscalarasmaximumdurationintheminibatchisshownin Table15: final
+model performance is similar and stability is same (only 2-3 minor spikes in CAPE for gradient
+normsareobserved). Thus,perbatchmaximumaudiodurationcanbeusedwithb= lognasthe
+−
+finalconfiguration.
+49
+ssoLniarT
+Ld Wd
+(cid:13)
+(cid:13)
+(cid:13)
+(cid:13)G.5 SimpleExperiments
+G.5.1 k–SummationProblemDefinition
+Herewelookatasynthetic,simpletaskinordertoinvestigatethebehaviorofsoftmaxandsigmoid
+attentionactivations. TheproblemchosenistominimizetheMSElossofaRn Rtargetfunction.
+→
+Inthefirsthalfofeachinputaresamplesfroma (0,1)distribution,andthesecondhalfisak-hot
+N
+binaryvectorindicatingwhichvaluesinthefirsthalftosum.
+Theresultspresentedhereareforthen=40problemwithvariousvaluesfork. Whereatransformer
+isused,thetransformerisasinglelayertoaidvisualization. Inallcases(unlessnotedotherwise),
+theoptimizerisAdamwithaconstantlearningrateof0.001,andthetrainingdataiscontinuously
+generatedtoprecludeover-fitting.
+Afewexamplesforn=10(notdrawnfrom (0,1))areshownbelow. Inputsinthesecondhalfof
+N
+theinputareshowinorangeonlyasavisualaid.
+1 2 3 4 5 0 0 0 0 1 5
+→
+1 2 3 4 5 1 0 0 0 1 6
+→
+8 1 2 0 5 0 1 1 1 0 3
+→
+2 0 2 2 2 1 1 0 1 0 4
+→
+G.5.2 ComparisontoSoftmax
+In Figure 30, we see the performance of three architectures on the k-summation problem as k
+increases. Thesigmoidactivatedtransformerhassimilarscalingtothesoftmaxactivation.
+Figure 30: Final loss is shown after training convergence as k-summation problem complexity
+increases. The ReLU MLP has two hidden layers (900, 300) for 307k parameters, while the
+transformer has an embedding dimension of 120, 8 heads, and an MLP ratio of 4, giving 187k
+parameters. TheSigmoidAttnisappliedafteralearnedoffsetinitializedto-4,A+param(-4).
+G.5.3 AttentionEvolution
+InFigures31and32,fortysamplesareusedtomonitorthesinglehead,singlelayerpost-activation
+attentionmatrixastrainingprogresses. InFigure31,thedistributionofvaluesisvisualizedover
+time;notethesigmoidattentionismorevariablebutreachescomparablevaluesatconvergence. The
+maindifferenceatconvergenceisthatthesigmoidhasfewerhighmagnitudevaluesthansoftmax
+indicatingamoredistributedattention.
+InFigure32,metricsonthepost-activationattentionmatricesareusedandshowcomparablebehavior
+inthefirsthalfoftraining. Inthesecondhalfoftraining,theSigmoidAttncanbeseentoreducein
+normandinsparsity. (seefollowingdiscussionofFigure33forfurtherinsights).
+50Softmax Sigmoid
+Figure31: Thepost-activationattentionevolvesduringtrainingonthek = 1,n = 40summation
+problem. Themodelhasoneheadtosimplifythevisualization. Fortyrepeatedtestsamplesareused.
+Norm HoyerSparsity
+Figure 32: Metrics on the post-activation attention evolve during training on the k = 1,n = 40
+summationproblem. Themodelhasoneheadtosimplifythevisualization. Quartilesandmeanfrom
+40repeatedtestsamplesareshown.Ontheright,theHoyerSparsity(Hurley&Rickard,2009)isused
+tomeasurethechangeinsparsityastrainingprogresses: Hoyer:= √n (cid:80) jcj (√n 1)−1.
+− √(cid:80) c2 −
+(cid:18) j j(cid:19)
+InFigure33,weseepost-activationattentionvaluesforeightsamplesattrainingprogresses. The
+mostnotabledifferencebetweentheactivationsis,thatbytheendoftraining,theSigmoidAttnis
+lesssparseinthe (0,1)self-attentionintheupper-leftquadrant. Wecanseethatsoftmaxtendsto
+N
+producesparservalues(asitisdesignedto)whilesigmoidcontrolsthemagnitudeandlocationof
+peakattentionindependently,leadingtoalesssparseattentionattheendoftraining.
+G.5.4 PairRepeatProblem
+Wedefineasynthetictaskofidentifyingifthefirsttwosymbolsinasequencerepeat. Thesymbols,
+s belowcomefromafixedvocabularyofsizeK,andtherepeatlocation(whenpresent)isuniformly
+i
+distributedinthesequence.
+1, if n>1 (s ,s )=(s ,s ),
+f(s 0,s 1,s 2,...,s N)=
+0
+oth∃
+erwise
+| 0 1 n n+1
+(cid:26)
+Asimpletwolayertransformeristrainedonthisproblem. Themodelhasanembeddingdimension
+of 160, MLP ratio of 4, QK norm, and layers with eight heads. The results for different model
+architecturesareshowninFigureFigure34. Themaximuminputlengthis22,K =9,shorterlengths
+arepaddingwithvalueK,andthetrainingsetonlycontainslengths14and15. Acosinelearning
+51Figure33: For8samples,thepost-activationattentionsisvisualizedastrainingprogressesonthe
+k = 1,n = 40 summation problem. The model has one head to simplify the visualization. The
+attentionisshowninpairsforeachsamplewithsoftmaxattentionisinblackandsigmoidisinblue.
+A2 2blockstructureisevidentinbothcases,resultingfromeachhalveoftheinputcontaining
+×
+differentinformation.
+rateschedulewith5%linearwarmupandamaximumlearningrateof1e-3isusedwiththeAdam
+optimizer.
+Inthisresult,weseethesigmoidactivationhashigherdataefficiencyandsimilarfall-offintheoutof
+distributioncases. Fromshorterruns,weestimatethatthesoftmaxnetworkwouldfitthetraining
+with4–5xmoredata. Ourconjectureisthatthetwolayertransformermoreeasilylearnsthepair
+findingtaskwithsigmoidbecausesoftmaxisbiasedtofocusonsinglevalues,thoughitisunclear
+whymultipleheadsarenotabletocompensateforthisproposedcauseinthesoftmaxcase.
+Figure34: Validationaccuracyforoutofdistributionsequencelengthsisshowsafter5Msamplesof
+training;trainedlengthsareshownwithverticallines. Quartilesandmeansareshownfromsixtrials.
+TheMLPhastwohiddenlayers,ReLUactivation,andasimilarnumberofparameters. Thesigmoid
+transformerhasalearnedoffsetinitializedto-4.
+52H Contributions
+Allauthorscontributedtowritingthispaper,designingtheexperiments,discussingresultsateach
+stageoftheproject.
+Preliminarywork PreliminaryviabilityofSigmoidAttndonebyJasonRamapuram.
+UniversalFunctionApproximation ProofofUFA(Section3.1andApp.C)sculptedbyFederico
+Danieli.
+LipschitznessofSigmoidAttention Lipschitznessanalysis(Section3.2andApp.D)moldedby
+PierreAblin.
+FlashSigmoid ImplementationandanalysisdrivenbyEeshanDhekaneincollaborationwithJagrit
+Digani(Section4andApp.F).
+BiasAnalysis Theoreticalgroundingforbias(AppendixE)donebyAmitisShidaniindiscussion
+withPierreAblin.
+LanguageModelingResults Alllargescalelanguagemodelpretrainingandevaluation(Section5.5
+andApp.G.3)drivenbyFlorisWeers.
+StabilityAnalysis QKnorm(Figure8),LayerScale(Figure7)andbias(Figure20)ablationscrafted
+byDanBusbridgeusingAttentionSimulator. AttentionSimulatorwrittenbyJasonRamapuramand
+usedtovalidatenormgrowth(Figures3to6,18and19).
+ASRResults AllASRexperiments(Section5.4)andablations(AppendixG.4.2)areconductedby
+TatianaLikhomanenkoindiscussionswithJasonRamapuramandZijinGu. BaselineASRmodels
+codeiswrittenbyZijinGuandTatianaLikhomanenko. BaselinemodelsareoptimizedbyZijinGu
+tobeclosetostate-of-the-artresults.
+VisionResults Allvisionexperiments(Sections5.2and5.3)andablations(Figures9,22and23
+andApp.G.2.1)conductedandwrittenbyJasonRamapuram.
+SimpleExperiments SimpleexperimentstocompareSigmoidAttntoSoftmaxAttn,including
+visualizingattentionevolutionandsimplesequencelengthgeneralizationanalysis(AppendixG.5)
+conductedbyRussWebb.
+53
