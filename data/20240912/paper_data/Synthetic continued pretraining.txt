@@ -1,0 +1,2480 @@
+SYNTHETIC CONTINUED PRETRAINING
+ZitongYang∗ NeilBand∗ ShuangpingLi
+DepartmentofStatistics DepartmentofComputerScience DepartmentofStatistics
+StanfordUniversity StanfordUniversity StanfordUniversity
+EmmanuelCande`s TatsunoriHashimoto
+DepartmentofStatistics DepartmentofComputerScience
+StanfordUniversity StanfordUniversity
+ABSTRACT
+Pretrainingonlarge-scale,unstructuredinternettexthasenabledlanguagemodels
+to acquire a significant amount of world knowledge. However, this knowledge
+acquisition is data-inefficient—to learn a given fact, models must be trained on
+hundreds to thousands of diverse representations of it. This poses a challenge
+when adapting a pretrained model to a small corpus of domain-specific docu-
+ments,whereeachfactmayappearrarelyoronlyonce. Weproposetobridgethis
+gapwithsyntheticcontinuedpretraining: usingthesmalldomain-specificcorpus
+tosynthesizealargecorpusmoreamenabletolearning,andthenperformingcon-
+tinued pretraining on the synthesized corpus. We instantiate this proposal with
+EntiGraph, a synthetic data augmentation algorithm that extracts salient entities
+from the source documents and then generates diverse text by drawing connec-
+tions between the sampled entities. Synthetic continued pretraining using Enti-
+Graphenablesalanguagemodeltoanswerquestionsandfollowgenericinstruc-
+tionsrelatedtothesourcedocumentswithoutaccesstothem.Ifinstead,thesource
+documentsareavailableatinferencetime,weshowthattheknowledgeacquired
+throughourapproachcompoundswithretrieval-augmentedgeneration. Tobetter
+understandtheseresults,webuildasimplemathematicalmodelofEntiGraph,and
+showhowsyntheticdataaugmentationcan“rearrange”knowledgetoenablemore
+data-efficientlearning.
+1 INTRODUCTION
+Languagemodelshavedemonstratedaremarkableabilitytoacquireknowledgefromunstructured
+text,enablingthemtoperformchallengingknowledge-intensivetasks(Brownetal.,2020;OpenAI
+etal.,2024;Gemini,2024;Anthropic,2024b;Dubeyetal.,2024;Gunteretal.,2024). Thesesuc-
+cessesareenabledbythecombinationofthenext-tokenpredictionobjective(Shannon,1951)and
+large-scale internet data (Common Crawl, 2007). However, it is becoming increasingly apparent
+that this approach is data-inefficient; for example, a 13-year-old human acquires knowledge from
+fewer than 100M tokens, while state-of-art open-source language models are trained on 15T to-
+kens(Warstadtetal.,2023;Dubeyetal.,2024). Recentworkshavehighlightedarangeofrelated
+problematicphenomena,includingthe“reversalcurse”,wheremodelsstruggletolearntherelation
+“B=A”whentrainedon“A=B”(Berglundetal.,2023),andtherequirementthatmodelsbeexposed
+tothousandsofexamplesperfactforknowledgeacquisition(Allen-Zhu&Li,2024).
+Thesedrawbacksposeachallengewhenadaptingthenext-tokenpredictionparadigmtolearnfrom
+small-scalecorpora.Becauselarge-scalepretrainedmodelsalreadycapturemuchofpubliccommon
+knowledge,furtheradvancementswillnecessitatelearningfromthetailsofthedistribution(Kandpal
+et al., 2023): niche data that is either contained in small, private domains or appears only once or
+twiceontheinternet.Thischallengeofdata-efficient,parametricknowledgeacquisitionisbecoming
+increasingly important as growing compute capacity enables language model providers to exhaust
+publiclyavailabledata(Muennighoffetal.,2023;Villalobosetal.,2024).
+∗Equalcontribution.Correspondenceto:zitong@berkeley.edu, nband@cs.stanford.edu.
+1
+4202
+peS
+11
+]GL.sc[
+1v13470.9042:viXraWeproposetoaddressthisproblemofacquiringknowledgefromsmallcorporawithsyntheticcon-
+tinued pretraining. To illustrate, consider the problem of teaching a language model a new area
+ofmathematics,succinctlydocumentedbyasmallsetofauthoritativetextbooks. Directlytraining
+themodelonthosetextbooksisunlikelytobeeffectiveduetothelimitedvolumeoftext(typically
+only tens of thousands of words), and the model will struggle to generalize from this compressed
+representationofknowledge. Incontrast,learningwell-establishedareasofmathematicslikelinear
+algebra is more straightforward, because a large-scale corpus with diverse knowledge representa-
+tionsisaccessible: forexample,onlinelecturenotes,StackExchangediscussions,orPythonimple-
+mentationsofthesingularvaluedecomposition. Syntheticcontinuedpretrainingbridgesthisgapby
+firstconvertingasmallanddata-constraineddomainintoasyntheticcorpuswithdiverseknowledge
+representations,andthencontinuingpretrainingonit.
+Onebasicapproachistosimplyparaphraseorrewritethesourcedocumentsinmultipleways.How-
+ever,wedemonstratethatthisgenericrephrasingcannotcoverthegapinthediversityofknowledge
+representations. Afteracoupleroundsofrephrasingasmallcorpus,therephraserfailstosynthesize
+noveldatathatfurthercontributestolearning,andthemodelperformancesaturates.Weattributethis
+failure to the lack of diversity in paraphrasing alone. In the linear algebra example, online lecture
+notes and Stack Exchange discussions go beyond a simple rewrite of any textbook—they provide
+deeperanalysisandapplicationoftheunderlyingconceptsandtechniques.
+Toaddressthisshortcoming,weproposeEntiGraph,anentity-centricaugmentationalgorithm.Enti-
+Graphfirstbreaksdownatextcorpusintoalistofentitiesandthenusesalanguagemodeltogenerate
+textdescriptionsaboutrelationsamongtheextractedentities,iteratively“fillingin”theknowledge
+graphunderlyingthecorpus.
+To concretely measure progress towards effective knowledge acquisition from small corpora, we
+propose an experimental setting based on a standard reading comprehension dataset (QuAL-
+ITY, Pang et al. (2022)). This setup enables the evaluation of synthetic data generation methods
+for data-efficient learning without incurring the high compute costs of pretraining from scratch.
+Specifically, we evaluate methods in a scenario where we are given access to a collection of 265
+books,totaling1.3Mtokens. Ourtaskistosynthesizeacorpussuchthatcontinuedpretrainingonit
+enablesamodeltoanswerqueries(e.g.,multiple-choiceQAoruserinstructionsrelatedtothebook
+content)withoutaccesstothesourcetexts.
+Inourmainexperiments(§5),weuseEntiGraphtogenerate600Msynthetictokensfrom1.3Mreal
+tokens using gpt-4-turbo (OpenAI et al., 2024). Then, we continually pretrain Llama 3 8B
+(Dubeyetal.,2024)onthesynthetictokensandevaluateitsQAaccuracyontheQuALITYquestion
+set. We observe a log-linear scaling trend in the accuracy as the number of tokens increases, up
+to 600M synthetic tokens (§4.2). At the endpoint, we find that synthetic continued pretraining
+with 600M EntiGraph tokens provides 80% of the accuracy improvement of having those source
+documentsavailableatinferencetime(§5).BeyondQAaccuracy,wealsoperforminstructiontuning
+onthecontinuallypretrainedmodelandfindthatitiscapableoffollowingopen-endedinstructions
+(e.g.,summarization)relatedtotheQuALITYbooks(§4.3).
+Tosummarize,ourkeycontributionsareasfollows:
+• Weproposetolearnfromsmallcorporawithsyntheticcontinuedpretraining—convertingthe
+smallcorpusintoalarge,diverse,syntheticcorpusandcontinuingpretrainingonit—andinstan-
+tiatethisapproachusingtheEntiGraphsyntheticdataaugmentationalgorithm(§2.2).
+• We demonstrate that continued pretraining on the EntiGraph-synthesized corpus yields a QA
+accuracy scaling trend that is log-linear in the synthetic token count, whereas continued pre-
+trainingontheoriginaldocumentsorparaphrasesyieldslittle-to-noimprovementcomparedwith
+ourmethod(§4.2). Furthermore,weshowthatinstructiontuningtheEntiGraphcontinuallypre-
+trainedmodelenablesittofollowmorediversequeriesrelatedtothesourcedocuments(§4.3).
+• Wecomplementthemainexperimentswithanopen-booksetup(§5), providingthemodelwith
+access to the source documents when answering queries. We demonstrate that the knowledge
+acquiredthroughsyntheticcontinuedpretrainingwithEntiGraphiscomplementarytotheknowl-
+edge accessed through retrieval-augmented generation (RAG, Lewis et al. (2020))—RAG with
+theEntiGraphcontinuallypretrainedmodeloutperformsRAGwiththebasemodel.
+• Lastly,webuildamathematicalmodelthatcapturestheintuitionbehindsyntheticdataaugmen-
+tationwithEntiGraph. Analysisofthismodelprovidesaparametricformulaforthescalingtrend
+2ofacontinuallypretrainedmodel’saccuracywithrespecttoEntiGraphsynthetictokens, which
+closelymatchesourempiricalobservations(§6).
+Practically,syntheticcontinuedpretrainingusingEntiGraphenablespretrainedlanguagemodelsto
+adapttospecializeddomainsbyacquiringparametricknowledge,asopposedtothenon-parametric
+knowledge accessed through retrieval methods. At a higher level, our approach points toward a
+familyofsyntheticdatagenerationalgorithmsthatallowustoconvertcomputeintodataefficiency
+for(continued)pretraining(Kaplanetal.,2020).
+1.1 RELATEDWORK
+Synthetic data generation. There is a rich literature on using neural nets to generate synthetic
+data. Manysuchapproacheswereoriginallydevelopedforsemi-supervisedlearning—self-training
+andpseudo-labelingmethodsimprovemodelsbyiterativelytrainingthemontheirownpredictions
+(Scudder, 1965; Lee, 2013; Yalniz et al., 2019; Berthelot et al., 2019; Xie et al., 2020), and co-
+training uses two models to supervise each other (Blum & Mitchell, 1998; Balcan et al., 2004).
+Before language models rose to prominence, few approaches attempted to synthesize inputs. One
+exception is membership query synthesis, which explored the synthesis of inputs in a supervised
+learningcontext(Angluin,1988;Schumann&Rehbein,2019).
+Contemporaryworksemployco-training(Langetal.,2022)andself-trainingtoimprovelanguage
+model performance, often on mathematical reasoning tasks (Huang et al., 2023; Gulcehre et al.,
+2023;Zhangetal.,2024a), orsynthesizeinput-outputpairsforinstructiontuning, usuallybycon-
+ditioningonacuratedseedset(Wangetal.,2023b;Honovichetal.,2023;Taorietal.,2023;Peng
+etal.,2023;Yuanetal.,2024b;Lietal.,2024).
+Most relevant to the present work are methods that synthesize pretraining data using hierarchical
+prompting methods to promote dataset diversity. Eldan & Li (2023) prompt API-based LLMs to
+generatechildren’sstoriescontainingsampledkeywords,anddemonstratethatevensmalllanguage
+modelstrainedontheirdatasetcangeneratefluenttext. Gunasekaretal.(2023)synthesizeadiverse
+dataset of textbooks and code exercises by conditioning on topic, target audience, and function
+names, and later release strong LLMs pretrained on synthetic data in follow-up work (Li et al.,
+2023b; Abdin et al., 2023; 2024). However, their datasets and prompts are not publicly available.
+Maini et al. (2024) prompt an LM to rephrase documents for pretraining, improving training effi-
+ciency. Different from all above works, our focus is teaching a pretrained LLM the knowledge of
+a small corpus. Mecklenburg et al. (2024) propose a fact-based synthetic generation approach but
+didnotshowimprovementongenericinstructionfollowingtasksbeyondsimpleQA.Ovadiaetal.
+(2024)continuallypretrainLlama2–basedlanguagemodelsonsyntheticparaphrasesofWikipedia
+articles,butdonotobserveconsistentperformanceimprovements. WeadapttheapproachofMaini
+etal.(2024)andMecklenburgetal.(2024)tooursmallcorpussettingastheRephrasebaselinein§4.
+We find that our graph-based augmentation algorithm outperforms it, likely because our approach
+enforcesdiversitythroughentity-basedgeneration.
+Continuallearningandpretraining. Continuallearningisrootedinhistoricalworkonconnec-
+tionistnetworks(McCloskey&Cohen,1989;Ratcliff,1990)andconsiderslearningwithtasksar-
+riving in an online manner (Schlimmer & Fisher, 1986; Grossberg, 2012). The main focus is on
+mitigating a neural net’s “catastrophic forgetting” of previously encountered tasks (Robins, 1995;
+Goodfellowetal.,2015;Kemkeretal.,2018). Approachesincluderegularizingparameterupdates
+topreserveimportantparameters(Nguyenetal.,2017;Zenkeetal.,2017;Kirkpatricketal.,2017);
+dynamically modifying the architecture (Rusu et al., 2016; Golkar et al., 2019); and recalling or
+replayingpreviousexperiences(Rebuffietal.,2017;Shinetal.,2017;Lopez-Paz&Ranzato,2017).
+Continual or continued pretraining works (Gururangan et al., 2020) successfully adapt pretrained
+largelanguagemodelstobroadtargetdomainssuchascode(Rozie`reetal.,2024),medicine(Chen
+etal.,2023),ormathematics(Lewkowyczetal.,2022;Shaoetal.,2024;Azerbayevetal.,2024)by
+curatingmassivedatasets(often>100Btokens,showninTable1)anddevelopingefficienttraining
+recipes using causal language modeling (Gupta et al., 2023; Ibrahim et al., 2024; Parmar et al.,
+2024). Catastrophicforgettingiseffectivelymitigatedbyscalingparametercount(Ramaseshetal.,
+2022) and mixing in updates on pretraining data (Ouyang et al., 2022). This work aims to extend
+the success of continued pretraining to small, specialized domains such as proprietary document
+3Study Domain ModelParameterCount TotalUniqueCPTTokens
+Minerva(Lewkowyczetal.,2022) STEM 8B,62B,540B 26B-38.5B
+MediTron(Chenetal.,2023) Medicine 7B,70B 46.7B
+CodeLlama(Rozie`reetal.,2024) Code 7B,13B,34B 520B-620B
+Llemma(Azerbayevetal.,2024) Math 7B,34B 50B-55B
+DeepSeekMath(Shaoetal.,2024) Math 7B 500B
+SaulLM-7B(Colomboetal.,2024b) Law 7B 30B
+SaulLM-{54,141}B(Colomboetal.,2024a) Law 54B,141B 520B
+HEAL(Yuanetal.,2024a) Medicine 13B 14.9B
+Oursetting Articles&Books 7B 1.3M
+Table1: Comparingthescaleofmoderncontinuedpretraining(CPT)workswithoursmallcorpus
+setting. Priorworkadaptslanguagemodelstobroaddomainswithdiverse,large-scalecorpora. We
+aimtodownscalecontinuedpretrainingtosmallcorpora; weuseacorpusthatis10,000×smaller
+thanthesmallestmoderncorpusfordomain-adaptiveCPT.
+stores. Observingthatstandardcontinuedpretrainingisineffectiveonsmallcorpora,weproposea
+knowledgegraph–inspiredapproachtosynthesizeadiverserelatedcorpusandfinditmoreamenable
+tolearning.
+Knowledgeediting. Arelatedlineofliteratureupdateslanguagemodelswithsmallunitsoffac-
+tual knowledge, such as (subject,relation,object) tuples. Zhu et al. (2020) studies a constrained
+fine-tuning approach, limiting the model’s complexity to better suit the learning of simple factual
+relations. Later approaches attempt to localize where factual knowledge is stored in Transformers
+andupdateonlythoseweights(Mitchelletal.,2022;Mengetal.,2022;2023), ormaintainanex-
+ternalmemoryofeditsandprependthemascontextduringgeneration(Zhongetal.,2023;Cohen
+etal.,2023). Mostrelevanttoourworkisdeductiveclosuretraining(Akyu¨reketal.,2024),which
+firstdeducesimplicationsofafactualeditandthenfinetunesthelanguagemodelonthoseimplica-
+tions. The line of knowledge editing differs from our setting in that we aim to learn from a small
+corpusofdocuments,ratherthanatomic,sentence-lengthfacts.
+2 OUR METHOD
+Wefocusonlearningparametricknowledgefromasmalltextcorpus. Morespecifically,ourgoalis
+tocontinuallypretrainalanguagemodeltoacquiretheknowledgeofanichecorpusofdocuments.
+Observingthatsimplecontinuedpretrainingonthissourcecorpusisineffective(§4),weproposeto
+usesyntheticcontinuedpretraining,whichfirstusesthesmallcorpustosynthesizealargeronemore
+amenabletolearning,andthencontinuespretrainingonthesyntheticcorpus.Inthissection,wefirst
+outlinethisproblemsettingandourevaluationapproachinmoredetail(§2.1). Then,weprovidea
+concreteinstantiationofsyntheticcontinuedpretrainingusingadataaugmentationalgorithmcalled
+EntiGraph(§2.2).
+2.1 PROBLEMSETUP
+Continuedpretrainingeffectively adaptslanguagemodelsto variousdownstreamdomainssuch as
+mathematics (Lewkowycz et al., 2022; Azerbayev et al., 2024), medicine (Chen et al., 2023) or
+law (Colombo et al., 2024a;b), but it requires diverse, large-scale corpora with billions of tokens
+(Table1). Giventhesuccessofcontinuedpretraininginhigh-resourcedomains,weaimtoextendit
+tonichedomainswithonlysmall,specializedtextcorporaavailable.
+Continuedpretrainingonsmallcorpora. Wefocusonapproachesthatusecontinuedpretraining
+to teach a pretrained language model the knowledge of a small set of source documents D .
+source
+These approaches acquire “parametric knowledge”, i.e., the knowledge of D is learned in the
+source
+model’sparametersmuchlikeduringthepretrainingprocess.
+Synthetic continued pretraining (synthetic CPT). We find that simple continued pretraining
+failstoacquiretheknowledgeinasmallcorpusD ,evenwithdatarepetition(§4). Wehypoth-
+source
+esize that this failure occurs because D is highly condensed (e.g., 1.3M tokens in our experi-
+source
+4ments)andlacksdiversityinhowitsunderlyingknowledgeisrepresented. Toaddressthisfailure,
+we propose to use a two-step synthetic continued pretraining procedure (synthetic CPT, where
+CPTstandsforcontinuedpretraining). First,weapplyasyntheticdatagenerationalgorithmA
+synth
+toconvertasmallcorpusD intoasyntheticcorpusD :
+source synth
+A :D (cid:55)−→D . (1)
+synth source synth
+Then,weperformcontinuedpretrainingonD insteadofdirectlyonD . Inpractice,weuse
+synth source
+languagemodelstoimplementA .Anaturalconcernisthatthelanguagemodelsmayhallucinate
+synth
+and fabricate false knowledge. Therefore, we focus on synthetic data augmentation algorithms
+that condition the generation process on the source documents to improve the synthesized data’s
+faithfulness.
+Evaluationwithknowledge-intensivequeries. Weevaluatethequalityofasyntheticdataaug-
+mentationalgorithmA bytestingwhetherthedownstreamsyntheticCPTmodelhaseffectively
+synth
+acquired the knowledge of D in its parameters. More precisely, we curate some test queries
+source
+Q thatprobetheknowledgeaboutD acquiredbythemodel. Forexample,inthelinearalge-
+test source
+brasetting,Q couldbeheld-outexamquestions. Totestparametricknowledge,wedonotallow
+test
+themodeltoaccessthesourcedocumentsD attesttime. Therefore,thequeriescannotbeam-
+source
+biguouswithoutaccesstoD . Forexample,areadingcomprehensionquestionlike“Wherewas
+source
+heborn?” isambiguouswithoutcontext. Altogether,wecanevaluatedataaugmentationalgorithms
+A forsyntheticCPTusingapairedsourcecorpusandrelatedtestqueries(D ,Q ).
+synth source test
+Successcriterion. Wetreatretrieval-basedapproachesasanupperbound,giventheirstrongper-
+formanceinadaptingLMstosmallcorpora(Lewisetal.,2020). Inotherwords,weconsideradata
+augmentationalgorithmA tobesuccessfulforsyntheticCPTiftheperformanceofthecontin-
+synth
+ually pretrained model on Q approaches the performance of a retrieval approach with test-time
+test
+accesstoD .
+source
+2.2 ENTIGRAPH
+Next, we present EntiGraph, our instantiation of a synthetic data augmentation algorithm A .
+synth
+At a high level, EntiGraph generates diverse representations of knowledge from a small corpus
+D by using a prompted LLM to synthesize a knowledge graph representation of D . In
+source source
+practice, EntiGraphisanoperationappliedindependentlytoeachseeddocumentD ∈ D , so
+i source
+inthefollowing, weuseD torefertoagivendocument. ForeachdocumentD, EntiGraphusesa
+promptedlanguagemodelLM togenerateaknowledgegraphovertheentitiesofthedocumentin
+aug
+naturallanguage. EntiGraphconsistsofthreesteps/prompts: extractingentitiesfromthedocument,
+describing single entities in the context of the document, and finally, analyzing relations between
+arbitrary subsets of the entities. Altogether, this hierarchical prompting strategy externalizes the
+problemofgeneratingdiversesynthetictexttoacombinatorialstructure—namely,agraphrelating
+variousentitiesappearinginthecorpusdocuments.Inwhatfollows,weprovideabbreviatedprompts
+toillustratethealgorithm,anddeferfullpromptstoAppendixB.1.
+Step 1: Entity extraction. First, EntiGraph extracts a list of salient entities {E ,E ,...,E }
+1 2 n
+fromthedocumentDbypromptingLM withanentity extractionprompt:
+aug
+(cid:0) (cid:1)
+{E ,E ,...,E }∼LM entity extraction(D) . (2)
+1 2 n aug
+Concretely,theentity extractionpromptisabbreviatedbelow:
+## System message
+As a knowledge analyzer, identify salient entities in the given
+text. Include: (a) Names (b) People (c) Places (d) Concepts, etc.
+## User
+* Document {document_text}
+Inthelinearalgebraexample,Dcouldbeonespecificlinearalgebratextbook. Wewouldexpectto
+extractentitiessuchas{E =Linear space, E =Vector, E =SVD,...}.
+1 2 3
+5Step 2: Single entitydescription. Next, wewill generateadditional information oneach of the
+extractedentitiesE inthecontextoftheirsourcedocumentD. Fromtheknowledgegraphperspec-
+i
+tive,wewishtogeneratedatathatenablesthelanguagemodeltolearnwhateachentityis.EntiGraph
+iteratesoverextractedentitiesE ,i ∈ {1,...,n}andappliesanentity descriptionprompt
+i
+togenerateasyntheticdocumentD(cid:101)Ei focusingontheroleofentityE iinitssourcedocumentD:
+(cid:0) (cid:1)
+D(cid:101)Ei ∼LM
+aug
+entity description(D,E i) . (3)
+Belowisanabbreviatedentity descriptionprompt:
+## System message
+As a knowledge analyzer, analyze the given text focusing on the
+specified entity. Summarize or formulate questions highlighting
+the entity’s role in the document.
+## User
+* Document {document_text}
+* Entity {entity_name}
+Inthelinearalgebraexample,ifE =Linear space,asyntheticdocumentdescribingE inthe
+1 1
+contextofD couldbeD(cid:101)E1 = “According to the provided document, a linear
+space is a set satisfying the following algebraic rules...”. Alto-
+gether, in Step2, we sample a synthetic document for each extracted entity to form a synthetic
+corpus{D(cid:101)E1,D(cid:101)E2,...,D(cid:101)En}.
+Step 3: Relation analysis. The last step of EntiGraph analyzes the relations among subsets of
+entities. The intuition is to thoroughly explore the edges of the knowledge graph underlying the
+source document D, analogous to a student writing diverse notes about a linear algebra textbook.
+Weapplyarelation analysisprompttodescribehowasubsetofk ≤ nentitiesarerelated
+inthecontextofthesourcedocumentD,obtainingasyntheticdocumentD(cid:101)Ei1...Eik:
+(cid:0) (cid:1)
+D(cid:101)Ei1...Eik ∼LM
+aug
+relation analysis(D,E i1,E i2,...,E ik) . (4)
+Specifically,weuseprompt
+## System message
+Analyze relations among given entities in the provided text.
+Discuss how their interactions shape the document’s content.
+## User
+* Document {book_text}
+* Entities {entity_name_1}, {entity_name_2}, ...
+Inpractice,itisimpracticaltoexhaustivelyenumerateallpossiblesubsetsofthenextractedentities,
+soinourexperiments,wechoosetogenerateallpairsofD(cid:101)EiEj andtripletsD(cid:101)EiEjEk.
+EntiGraphsyntheticcorpora. Finally,wecollectallsampledsynthetictextsfrom(3)and(4)as
+theoutputoftheEntiGraphalgorithmD(cid:101) ={D(cid:101)E1,...,D(cid:101)Ei1...Eik,...}appliedtosourcedocument
+D. We apply this same procedure to each document D ∈ D , and denote the collection of
+source
+all synthetic text as D
+EntiGraph
+= {D(cid:101)1,D(cid:101)2,...}. Altogether, we have described a synthetic data
+augmentationalgorithmmappingasmallcorporaofsourcedocumentstoalargersyntheticcorpora
+D EntiGraph, as in (1). We provide qualitative examples of a synthetic single entity description D(cid:101)Ei
+andpairwiserelationdescriptionD(cid:101)EiEj inFigure1.
+3 EXPERIMENT SETUP
+Inthissection,wedescribeindetailhowweevaluateagivendataaugmentationalgorithmA .As
+synth
+describedintheproblemsetup(§2.1), weevaluatesuchalgorithmsA byevaluatingwhethera
+synth
+6Singleentitydescription:E =“enamel”inthecontextofthearticleD=“DefiningDecayDown”.
+###Discussionof“DefiningDecayDown”inrelationtoenamel
+The article “Defining Decay Down” by David Plotz dives into the way dentistry has adapted to
+changing circumstances. One of the focal points is enamel, the hard outer layer of teeth that is
+critical to dental health. The article vividly describes how the use of intra-oral cameras by dentists
+can exaggerate the appearance of minor flaws in a patient’s enamel, making the most insubstantial
+microcracksappearsevereandindireneedofcorrection. Thistechnologicaladvancementhasplayed
+a pivotal role in incentivizing patients to opt for cosmetic procedures to improve the appearance of
+theirenamel,aligningwiththeself-improvementtrendsofrecentdecades.[...]
+###Questionsandanswersaboutenamelinthecontextof“DefiningDecayDown”
+Question: How does the article “Defining Decay Down” portray the general public’s perception of
+enamelaspartoftheirdentalaesthetics, andwhatdoesthissuggestaboutsocietalvaluesrelatedto
+self-image?
+Answer:Thearticlesuggeststhatsocietyplaceshighvalueondentalaesthetics,includingtheappear-
+ance of enamel. For instance, when the intra-oral camera magnifies teeth, showing microcracks in
+theenamel,itisreminiscentofa“brokenwindow,”whichnegativelyinfluencespublicperceptionof
+personaldentalhealthandaesthetics(Paragraph1). Thearticlealsonotesthepopularityofservices
+liketeethwhiteningthatdirectlyaffectthevisibilityofenamel,reinforcingtheideathatsocietypri-
+oritizes a perfect, unblemished appearance (Paragraph 6). This suggests that societal values highly
+prioritize self-image, superficial appearances, and immediate cosmetic enhancement over long-term
+dentalhealth.[...]
+Relationanalysis:E =“enamel”andE =“fluoride”inthecontextofD=“DefiningDecayDown”.
+1 2
+###DiscussionofInteractionbetweenenamelandfluorideincontextof“DefiningDecayDown”
+Theinterplaybetweenenamelandfluoridewithinthecontextof“DefiningDecayDown”isatelling
+one,asitunderpinsthesignificantshiftindentistry’sfocusovertheyears.Ononehand,enamel,asthe
+protectiveouterlayerofourteeth,revealsthetalesoforalneglectwhenexaminedupclose. Itisthe
+deteriorationandthevisibleimperfectionsfoundintheenamelthatdentistscapitalizeon,encouraging
+patientstoundergocosmeticprocedurestorectifytheseflaws.
+Fluoride,conversely,hasbeeninstrumentalinpreventingtheseimperfectionsfromarisinginthefirst
+place. Itsroleinenhancingenamel’sresistancetodecayhasresultedinfewercavitiesandthesubse-
+quentneedfortraditionaldentalinterventions. Theinteractiondemonstratesadichotomy: fluoride’s
+contributiontooralhealthinadvertentlycompelsdentiststopivottowardthemarketabilityofaesthetic
+dentistry,sincestructuraldentalissueshavebecomelesscommon[...]
+Figure1: QualitativeexamplesofdatasynthesizedwithEntiGraph.
+languagemodelcontinuallypretrainedontheiroutputsyntheticcorpusA (D )canaccurately
+synth source
+answertestqueriesQ aboutthesourcedocumentsD .
+test source
+Inourmainexperiments,weusequeriesthatareunambiguousevenwithoutthesourcedocuments
+D ,anddisallowthemodelfromaccessingD whileansweringthequeriesQ (§2.1).This
+source source test
+allowsustoevaluatewhichdataaugmentationalgorithmbestpromotestheacquisitionofparametric
+knowledgethroughsyntheticCPT.Later,in§5,weconsideranopen-booksettingwherethemodel
+can access both the source documents D and test queries Q at the same time, in order to
+source test
+testhowtheparametricknowledgeacquiredthroughsyntheticCPTcomposeswithnon-parametric
+accesstoknowledgethroughretrieval(Lewisetal.,2020).
+Wenextintroducethepairingofsmallcorpusandrelatedtestqueries(D ,Q )thatweusein
+source test
+ourexperiments.
+QuALITYcorpusD . OurcorpusandtestqueriesarebasedontheQuALITYdataset(Pang
+source
+et al., 2022), a long-document comprehension benchmark. The QuALITY corpus D is com-
+source
+posedof265articlesandshortbooksongenresrangingfromsciencefictiontojournalism,withan
+averagelengthof∼5,000tokens.
+7QuALITY test queries Q . To source the test queries Q , we use the 10-20 multiple choice
+test test
+questions accompanying each article in QuALITY. These questions serve as high-quality knowl-
+edgeprobesonD ,butthequeryphrasingoftenpresupposesthereadingcomprehensioncontext
+source
+(e.g., “What does the author think about...”). We ensure that each query is unambiguous by con-
+textualizingthemwiththecorrespondingarticlereference: “Inthecontextofarticle{article name}
+by {author name}, what does the author think about...”. Altogether, this provides us with 4,609
+unambiguousqueriesQ totesttheparametricknowledgeofourcontinuallypretrainedlanguage
+test
+models. 2,316of4,609queriesarelabeledas“hard”bythedatasetcurator,sowealsoreportresults
+onboth“Hard”and“Easy”splits.
+Evaluationoninstruction-tunedsummarization. Inadditiontoevaluationusingtheabovetest
+queries Q , we also instruction tune the continually pretrained LMs and evaluate them on more
+test
+generalinstructionfollowingqueries.Specifically,weevaluatetheclosed-booksummarizationabil-
+itiesoftheinstruction-tunedmodelsbypromptingthemtogeneratesummariesofQuALITYarticles
+givenonlytheirtitleandauthor.
+PerformancewithstrongAPI-basedLLMs. Forourcontinuedpretrainingsetting,wemustse-
+lectacorpusD thatisnotalreadywell-representedinstandardpretrainingdatasets.Asaninitial
+source
+testoftheobscurityoftheQuALITYcorpusD ,weevaluateGPT-3.5(Brownetal.,2020)and
+source
+GPT-4 (OpenAI et al., 2024) on Q . In the closed-book setting, we find GPT-3.5 accuracy at
+test
+44.81% and GPT-4 accuracy at 51.30% (Table 2). In the open-book setting, i.e., with the entire
+article placed in the prompt, we find GPT-3.5 accuracy at 72.60% and GPT-4 accuracy at 86.09%
+(Table4). Basedonthelarge(∼30%)improvementwhenD isprovided,weconcludethatthe
+source
+QuALITYcorpusD issufficientlynichetoserveasanappropriatetestbed.
+source
+4 MAIN EXPERIMENTS
+In this section, we present our main experimental results1. Using GPT-42 as our prompted model
+LM ,weapplyEntiGraphtothe1.3MtokenQuALITYcorpusD ,generatinga600Mtoken
+aug source
+syntheticcorpus. Fortheremainderofthepaper,werefertotheformerasthe“Rawcorpus”andthe
+latterasthe“EntiGraphcorpus”. AdditionaldetailsonthesecorporaareprovidedinAppendixC.
+We continually pretrain Llama 3 8B (Dubey et al., 2024) with standard causal language modeling
+on the 600M token EntiGraph corpus. In §4.1, we describe our continued pretraining procedure
+andintroducetwonaturalbaselines. In§4.2,weevaluateallmethodsontheQuALITYtestqueries
+Q and find synthetic CPT using EntiGraph significantly outperforms both baselines; moreover,
+test
+its accuracy scales log-linearly with the amount of EntiGraph synthetic data, up to 600M tokens.
+In §4.3, we show that synthetic CPT using EntiGraph is compatible with downstream instruction
+tuning(Ouyangetal.,2022),animportantfeatureofrealpretrainingdata.
+4.1 CONTINUEDPRETRAININGPROCEDURE
+In all experiments, we continue pretraining the Llama 3 8B Base model with a context length of
+2048andbatchsizeof16.Weapplyalinearlearningratewarmupfor5%oftotalsteps,followedby
+acosinedecaywithpeaklearningrate5e-6. WeperformfullparametertrainingwithFullySharded
+DataParallelism(FSDP,Zhaoetal.(2023)). Tomitigatetheforgettingofpretrainedknowledge,we
+performreplaywitharateof0.1using1BRedPajamatokens(TogetherAI,2023). Moreprecisely,
+foreachtrainingbatch,weflipabiasedcoinsuchthatwith10%probability,weloadtheRedPajama
+datainsteadoftheEntiGraphsyntheticdata.
+EntiGraph CPT. In our main continued pretraining experiment, we continually pretrain Llama
+3 8B Base on the 600M token EntiGraph corpus for 2 epochs. For the remainder of the work, we
+willrefertothiscontinuallypretrainedmodelas“EntiGraphCPT”.Next,wedescribetwobaselines
+whichwecomparetoEntiGraphCPTinclosed-bookQA(§4.2)andinstruction-tunedsummariza-
+tion(§4.3)evaluations.
+1Code to reproduce all experiments is provided at https://github.com/ZitongYang/
+Synthetic_Continued_Pretraining.git.
+2Weusethegpt-4-turbomodelasofAug.19,2024.
+8EntiGraph CPT
+0.55
+Rephrase CPT
+Raw CPT
+0.50 Llama 3 8B Base
+0.45
+0.40
+0.35
+100 101 102
+Number of synthetic tokens (in Millions)
+Figure 2: Accuracy on the QuALITY question set Q (y-axis) as a function of the synthetic
+test
+token count (x-axis). The accuracy of synthetic continued pretraining using the EntiGraph data
+augmentationalgorithm(EntiGraphCPT)scaleslog-linearlyupto600Mtokens,whiletheRephrase
+baselinesaturatesnear2Mtokens.
+RawCPTbaseline. ThefirstnaturalbaselineistocontinuallypretrainLlama38BBaseonthe
+Raw corpus (the raw QuALITY articles D , defined in §3). Because the Raw corpus only has
+source
+1.3Mtokens,wejointlytunethenumberofepochs(repetitionfactor)andtheRedPajamareplayrate
+onaccuracyoveraQuALITYQAvalidationsplit. Theselectedhyperparameterconfigurationuses
+4epochsanda0.1replayrate. Wewillrefertothismodelobtainedwithcontinuedpretrainingon
+theRawcorpusas“RawCPT”.
+RephraseCPTbaseline. Asmentionedin§1,onesimplesyntheticdataaugmentationprocedure
+istorephraseQuALITYarticleswithagenericparaphrasingprompt.Mainietal.(2024)andOvadia
+etal.(2024)executeasystematicextensionofthisidea. Inparticular,Mainietal.(2024)rephrases
+real pretraining data into four different styles—easy, medium, hard, and QA—using a rephrase
+model, andthenpretrainsanLMfromscratchontherephraseddata. Weadaptthissyntheticdata
+augmentation algorithm to our small corpus setting, using the same prompted model LM as is
+aug
+used with EntiGraph (gpt-4-turbo). We refer to this data augmentation algorithm inspired by
+Mainietal.(2024)andOvadiaetal.(2024)asthe“Rephrasebaseline”. Weapplyeachofthefour
+promptstoeverydocumentinD ,resultinginroughly0.9Mtokens. Wefoundthatthelimited
+source
+diversity of LM with these prompts made it difficult to obtain further improvements with the
+aug
+sameprompt,andstoppedafterasecondpasswithatotalof1.8Mtokens. Wewillrefertothisdata
+as the Rephrase corpus. We continually pretrain Llama 3 8B Base on this corpus using the same
+hyperparametertuningprocedureasabove. Wewillrefertothismodelas“RephraseCPT”.
+4.2 QUESTION-ANSWERINGEVALUATIONS
+Next,weprovidethedetailedsetupofourclosed-bookQAevaluationswithQuALITYtestqueries
+Q ,andpresentresults.
+test
+Evaluationprocedure. EachQuALITYquestionisafour-choice,single-answermultiplechoice
+question (similar to MMLU, Hendrycks et al. (2021)). We evaluate with 4-shot chain-of-thought
+prompting (Brown et al., 2020; Wei et al., 2024) and provide our prompt in Appendix D.1. As
+few-shot examples, we use manually drafted and fact-checked QA pairs. To avoid leakage about
+information in the QuALITY books, we use books that are well-known and not contained in the
+QuALITYtestset.
+9
+ycaruccA
+AQContinuallyPretrainedLlama38B BaseModelsandAPI-BasedLLMs
+Split
+EntiGraph Rephrase Raw Llama38B GPT-4 GPT-3.5
+All 56.42 43.08 38.15 39.49 51.30 44.81
+Hard 48.15 36.98 33.66 35.08 42.13 38.07
+Easy 64.75 49.23 42.65 43.93 60.55 51.60
+Table 2: QuALITY accuracy over all test queries Q (All), and the Easy and Hard splits. The
+test
+leftsetofcolumnsareLlama38Bcontinuallypretrainedonvariousdatasources. Therightsetof
+columns are the base model and API-based LLMs not finetuned on QuALITY-related data. Enti-
+GraphCPToutperformstheRephraseandRawCPTbaselines.
+EntiGraph scaling. We find that continued pretraining on the 600M token EntiGraph corpus
+improvesclosed-bookQAaccuracyfrom39.49%(forLlama38BBase)to56.42%(Figure2,Table
+2). A natural question is how performance scales as we synthesize and train on more tokens with
+EntiGraph. To test this, we randomly subsample without replacement the EntiGraph corpus with
+varyingsamplesizes,continuallypretrainLlama38BBaseoneachsubsample,andplotQuALITY
+accuracy with respect to sample size in Figure 2. We observe log-linear scaling of the accuracy
+in the number of synthetic tokens used for continued pretraining, up to 600M tokens. We will
+mathematicallyinvestigatethescalingpropertiesofEntiGraphindetailin§6. Inbroadstrokes,we
+postulatethatQuALITYaccuracyfollowsamixture-of-exponentialshapeandfollowsthreestages:
+(i)lineargrowth,(ii)log-lineargrowth,and(iii)asymptoticplateau.
+Comparison with baselines. In contrast, Rephrase CPT obtains an accuracy of 43.08%. Recall
+thatapplyingthefourrephrasepromptstoeachQuALITYarticleresultsinonly0.9Mtokens,and
+the performance of Rephrase CPT plateaus near the 0.9M token threshold (Figure 2). To demon-
+stratethisplateaumoreclearly,werepeatedthissyntheticdatagenerationprocesstoobtainatotal
+Rephrasecorpusof1.8Mtokensandfoundnearlyidenticalperformancetothe0.9Mtokenmodel.
+Incontrast,theEntiGraphCPTaccuracycontinuestoincreasepastthe1.8Mtokenpoint,alltheway
+to600Mtokens.
+RawCPTperformsevenworsethanLlama38BBase(dashedblacklineinFigure2,Table2). We
+postulatetworeasonsforthis: (i)TheRawcorpusfollowsanarrower,differentdistributionthanthe
+Llama38Bpretrainingcorpus,andheavilytrainingonthesetokensmayharmtheoverallEnglish
+capabilitiesofthemodel. (ii)ThelimiteddiversityofknowledgerepresentationsintheRawcorpus
+leadstolimitedknowledgeacquisitionduetoproblemssuchasthereversalcurse(Berglundetal.,
+2023).
+Discussion of results. We highlight two takeaways from our continued pretraining experiments.
+First, whenthesourcedocumentcorpusD issmalland, therefore, itsknowledgeispresented
+source
+in a condensed representation, continued pretraining with next-token prediction fails to teach the
+model the knowledge in D , even with heavy repetition. Second, generating a larger synthetic
+source
+dataset grounded by the source documents in D can enable a continually pretrained model to
+source
+learn the knowledge of D . However, for synthetic CPT to scale, the synthetic data must be
+source
+sufficientlydiverse. EntiGraphtacklesthisproblemusingahierarchicalpromptingstrategy,which
+externalizesdiversitytothecombinatorialrelationshipsencodedinentityknowledgegraphs.
+4.3 INSTRUCTIONFOLLOWINGEVALUATIONS
+Inthissection,weexploremoregeneraltestqueriesbeyondtheQuALITYtestqueriesQ . Con-
+test
+cretely,wetrainEntiGraphInstructbyperforminginstructiontuningonEntiGraphCPT.Wedemon-
+stratethatsyntheticCPTontheEntiGraphcorpusiscompatiblewithinstructiontuning. Inpartic-
+ular, EntiGraph Instruct can directly use knowledge obtained during synthetic CPT in instruction
+followingtasks(Weietal.,2022),withoutanytest-timeaccesstotheQuALITYbooksandarticles
+D .
+source
+10➤ Explicitarticlereference:Summarizethearticle“DefiningDecayDown”by“David
+Plotz”.
+The article “Defining Decay Down” by David Plotz discusses the evolution of den-
+tistryinAmerica. Ithighlightshowdentistshaveadaptedtochangingtimesbyshift-
+ingtheirfocusfromessentialdentalworktoelectivecosmeticprocedures. [...]
+➤ Implicit article reference: How has the practice of dentistry in the United States
+changed?
+ThedentistrypracticeintheUnitedStateshasundergonesignificantchangesoverthe
+years. Herearesomeofthekeychanges:
+1. Increasedfocusoncosmeticdentistry: Inrecentyears,[...]
+2. Improveddentaltechnology: Advancesindentaltechnology[...]
+3. Increasedemphasisonpreventivecare: Dentistshavebecomemorefocused[...]
+4. Increasedcompetition: Thedentalindustryhasbecomemorecompetitive,[...]
+5. Improvedpatientexperience: [...]
+➤ Crossarticleinstruction:CompareDavidPlotz’scommentarystylebetweenhowhe
+analyzedAmericandentistryandhowhediscussedthemovieFightClub?
+DavidPlotz’scommentarystyleisanalyticalandcriticalinbothhisanalysisofAmer-
+ican dentistry and his discussion of the movie Fight Club. In both cases, he uses a
+sharp, incisive tone to critique the subject matter, highlighting the absurdity and ex-
+cesses of American dentistry and the nihilistic philosophy of Fight Club. However,
+therearesomedifferencesinhisapproach. [...]
+Table 3: Instruction following examples using EntiGraph Instruct. (Top) EntiGraph Instruct can
+performclosed-booksummarizationofQuALITYarticles. (Middle)Knowledgeobtainedthrough
+syntheticCPTaffectsthemodel’sbehavior,evenwithoutanexplicitarticlereferenceintheprompt.
+(Bottom)ThemodelcancomparetwodifferentarticlesfromD ,eventhoughnosyntheticdata
+source
+isexplicitlygeneratedtorelatedocuments.
+Instruction tuning details. We use the UltraChat instruction tuning dataset (Ding et al., 2023)
+filteredbytheHuggingfaceteam(Tunstalletal.,2023)asourinstructiontuningdata. Weusethe
+chattemplateofLlama3.18BInstruct(Dubeyetal.,2024)toformattheUltraChatconversations,
+obtaininga250Mtokeninstructiontuningdataset. Weapplyalinearlearningratewarmupfollowed
+byacosinedecayto0withpeaklearningrate5e-6,andtrainthemodelfor1epochwithabatchsize
+of512andcontextwindowof2048. Tosanitycheckourinstructiontuningprocedure,wemeasure
+the AlpacaEval (Li et al., 2023a) winrate against GPT-4 and find it improves from 0% to 6.35%,
+comparabletoa7.7%baselinewinrateofLlama2Chat13B.
+Instructiontuningqualitativeexamples. Wefirstpresentafewqualitativeexamplestodemon-
+strateEntiGraphInstruct’sabilitytofollowinstructionsrelatedtoQuALITYarticles. Asafirsttest,
+weaskthemodeltosummarizeaQuALITYarticlegivenanexplicitreferencetothetitleandauthor,
+but no access to the article itself (Table 3, top row). This article provides context for the coming
+examples. Next,weshowthatevenwithoutanexplicitreferencetothetitleandauthor,knowledge
+ofthearticleisstoredinthemodel’sparametersandcanaffectitsbehavior(Table3,middlerow).
+Finally, we provide an example where the model performs a comparison using knowledge across
+two articles (Table 3, bottom row). Albeit artificial, this shows that even though EntiGraph does
+notsynthesizedatathatsimultaneouslyinvolvesmultiplearticles,themodelcanreasonabouttheir
+interactionusingitsparametricknowledge. WeprovidethefullresponsesinTable6.
+Evaluation metric for closed-book summarization. We also present quantitative metrics for
+summarization, a well-studied instruction following task. We compare EntiGraph Instruct sum-
+mariesofQuALITYarticleswithhuman-writtensummariesfromsQuALITY(Wangetal.,2022),
+which is a variation of the QuALITY benchmark with human summaries of QuALITY articles.
+CommonscalarsummarizationmetricssuchasROUGE(Lin,2004)orBERTScore(Zhang*etal.,
+2020)mostlyevaluatetextsimilaritybetweenthesummaryandsourcearticles,andmaynotaccu-
+ratelyreflectsummarizationqualityforabstractivesystems(Zhangetal.,2024b).
+11Human Summary (sQuALITY)
+EntiGraph Instruct (short prompt)
+10
+EntiGraph Instruct (medium prompt)
+EntiGraph Instruct (long prompt)
+8 Raw Instruct (short prompt)
+Raw Instruct (medium prompt)
+Raw Instruct (long prompt)
+6 Rephrase Instruct (short prompt)
+Rephrase Instruct (medium prompt)
+Rephrase Instruct (long prompt)
+4
+2
+0
+0.2 0.4 0.6 0.8 1.0
+# Salient claims relative to human
+Figure3: Quantitativeautomatedevaluationofclosed-booksummarization:numberoffalseclaims
+(y-axis)versusnumberofsalientclaims(x-axis)normalizedbythehumansummary. Wefindthat
+EntiGraphInstruct(green)(i)generatessubstantiallyfewerfalseclaimsandmoresalientclaimsin
+its summaries compared to the Raw (blue) and Rephrase (purple) instruction-tuned baselines, and
+(ii)isclosertohumansummaries(red)onthesemetricsthanthetwobaselines.
+We use a simple, automated evaluation metric based on ideas from pyramid evaluation (Nenkova
+et al., 2007; Gao et al., 2019) that simultaneously measures the hallucination rate and how well
+thesummarycapturesthesalientclaimsoftheoriginalarticle. Concretely,wedesignathree-stage
+evaluationprocedure: (i)Inthefirststage,weuseGPT-43tobreakthesummaryintoatomicclaims,
+similartoMinetal.(2023);(ii)Inthesecondstage,weprovideboththelistofclaimsandthesource
+articletoajudgemodel(alsoGPT-4). Weaskthejudgemodeltodeterminewhethereachclaimis
+trueorfalse,basedonthesourcearticle. Iftheclaimistrue,wefurtheraskthemodeltodetermine
+whether the claim is salient (contributes to the main message of the article) or cosmetic (factual
+details that do not help understand the main message). (iii) Finally, for each summary, we obtain
+itsnumberoffalseandsalientclaimsandnormalizeitbythecorrespondingcountfromthehuman
+summary. WereporttheaverageofthesenormalizedmetricsacrosstheQuALITYcorpusarticles
+inFigure3.
+Discussionofquantitativesummarizationresults. InFigure3,wecomparethreesummarizers:
+EntiGraph Instruct, Rephrase Instruct, and Raw Instruct, where the latter two are obtained by ap-
+plying the above instruction tuning procedure to Rephrase CPT and Raw CPT. We provide each
+summarizerwiththreedifferentprompts—short,medium,andlong—askingforprogressivelymore
+detailed summaries. We provide exact prompts in Appendix D.2. Rephrase Instruct and Raw In-
+structconsistentlyhallucinateandgeneratemorefalseclaimsasthesummarybecomeslonger,with
+little improvement in the number of salient claims. In contrast, EntiGraph Instruct is able to gen-
+eratemoresalientclaimsasthesummarygetslonger,withasmallincreaseinthenumberoffalse
+claims. Thegapsinbothsalientandfalseclaimratesaresufficientlylargethattheseresultslikely
+holdbeyondourparticularmetric.
+Additional qualitative summarization results. We complement the automated evaluation met-
+rics above with several qualitative examples in Appendix D.2, where we compare the short sum-
+3Specifically,weusethegpt-4-turbomodelasofAug.19,2024.
+12
+namuh
+ot
+evitaler
+smialc
+eslaF
+#EntiGraphCPT+RAG Llama38BBase+RAG GPT-4+OracleRAG GPT-3.5+OracleRAG
+Split
+Accuracy Recall@8 Accuracy Recall@8 Accuracy Recall@8 Accuracy Recall@8
+All 62.73 99.63 60.35 99.63 86.09 100.0 72.60 100.0
+Hard 53.87 99.65 50.24 99.65 79.59 100.0 63.13 100.0
+Easy 71.68 99.61 70.55 99.61 92.65 100.0 82.14 100.0
+Table4: QuALITYquestion-answeringaccuracyandrecallrateintheopen-booksetting(RAG).
+EntiGraph CPT and Llama 3 8B Base are used in a retrieval-augmented generation pipeline
+withanOpenAItext-embedding-3-largeretrieverandCoherererank-english-v3.0
+reranker(§5.1). Recall@8isdefinedastheproportionofquestionsforwhichthesalientarticleap-
+pearsinthetop8rerankeddocumentchunks. GPT-4andGPT-3.5OracleRAGresultsprovidean
+upperboundwithaperfectretriever,byplacingtheentirerelevantdocumentin-context.
+mariesfromEntiGraphInstruct,RawInstruct,andRephraseInstructagainstthehumansummaries.
+WeobservethatthecontentoftheEntiGraphInstructsummariesalignswellwiththehumansum-
+maries, whereas the Raw and Rephrase Instruct summaries contain clear hallucinations. The con-
+clusionfromourqualitativeexamplesmatchesthatofourautomatedevaluations.
+5 OPEN-BOOK EXPERIMENTS
+Next,weconsideranopen-booksettinginwhichthedomain-specificcorpusD isavailableat
+source
+test time. In this widespread setting, retrieval-augmented generation (RAG; Lewis et al. (2020);
+Gaoetal.(2024))isthepredominantandmostconvenientapproach. Itbenefitsfromstrongtooling
+(Chase, 2022; Han et al., 2023; Pinecone, 2024), avoids finetuning, supports continual learning as
+the corpus is updated over time (Wu et al., 2024), and has high recall (proportion of queries for
+whichthecorrectdocumentsareretrieved).
+Therefore,itisanaturalquestionwhethertheparametricknowledgelearnedthroughsyntheticCPT
+using EntiGraph complements the non-parametric knowledge accessed at test time using RAG. In
+thissection,weanswerthisquestionbycomparingastate-of-the-artRAGpipelinewithandwithout
+EntigraphCPT.
+5.1 RAGEVALUATIONSETUP
+OurRAGpipelinefollowsestablishedbestpractices(Lewisetal.,2020;Gaoetal.,2024).Itinvolves
+an offline stage which indexes document chunks, followed by inference-time retrieval, reranking,
+andplacementofthosechunksinafew-shotLMprompt.
+Details on RAG pipeline. More specifically, our indexing stage chunks documents from the
+given corpus, obtains dense vector embeddings for each chunk using an API-based embedding
+model, and indexes the (embedding, chunk) pairs. Then, at inference time, we embed the query
+withtheAPI-basedembeddingmodel,retrieveK documentchunksusinganapproximatenearest-
+neighbor search, and lastly, select the k < K most relevant chunks using an API-based reranker.
+Throughout,weuseOpenAItext-embedding-3-large(Neelakantanetal.,2022)asourAPI-
+based embedding model, FAISS as our similarity search index (Douze et al., 2024), and Cohere
+rerank-english-v3.0(Cohere,2024)asourreranker.
+Datasetandbasemodels. Followingtheevaluationproceduredetailedin§4,weevaluateparallel
+RAGpipelinesontheQuALITYmultiplechoicetestsetusingfew-shotchain-of-thoughtprompting.
+All hyperparameters are tuned separately for each LM’s RAG pipeline. We refer the reader to
+AppendixEformoredetailsonourevaluationsetup.
+5.2 RESULTS
+Ourresultsintheopen-bookRAGsettingarepresentedinTable4.
+130.550
+0.525
+0.500
+0.475
+0.450
+0.425
+Empirical observation on QuALITY experiments
+0.400
+Fitted Curve
+0 100 200 300 400 500 600
+Number of synthetic tokens (in Millions)
+Figure 4: A mixture-of-exponential functional form (5) closely fits the scaling trend of EntiGraph
+CPTwithrespecttosynthetictokencount(reprintedfromFigure2,inlinearscale).
+EntiGraphcontinuedpretrainingcomplementsRAG. WeobservethatEntiGraphCPToutper-
+forms Llama 3 8B Base, the model from which it is continually pretrained. These results demon-
+strate that the knowledge internalized through synthetic CPT is complementary to that accessed
+during RAG, and demonstrate a competitive new recipe for small corpus QA: (1) synthetic data
+augmentation,(2)continuedpretraining,and(3)RAG.
+EntiGraph continued pretraining alone approaches RAG performance. These results also
+contextualizetheeffectivenessofEntiGraphintheclosed-book,parametricknowledgesetting(§4).
+Comparing Tables 2 and 4, we observe that adding RAG to Llama 3 8B Base provides a 20.86%
+absolute accuracy improvement (39.49% → 60.35%). On the other hand, continued pretraining
+of Llama 3 8B Base on the EntiGraph corpus provides a 16.93% absolute accuracy improvement
+(39.49%→56.42%). Hence,EntiGraphcontinuedpretrainingprovides>80%oftheabsoluteper-
+formanceimprovementofRAG,eveninasmallcorpussettingwhereRAGrecallisnearlyperfect.
+Altogether,ourresultsdemonstratethattheparametricknowledgeacquiredthroughEntiGraphcon-
+tinued pretraining composes well with realistic knowledge-intensive QA pipelines, and that Enti-
+Graph continued pretraining alone—without inference-time corpus access—is nearly competitive
+withastrongRAGbaseline.
+6 THEORETICAL ANALYSIS OF ENTIGRAPH SCALING
+Itmayseemsurprisingthatsimply“rewriting”thefactualcontentofthesourcedocumentsD
+source
+can improve performance at all (§4), as the EntiGraph data augmentation algorithm does not ex-
+plicitlyaddnewfactualinformationbeyondD . Inthissection,webuildamathematicalmodel
+source
+basedonastochasticprocessongraphsinordertoofferanexplanationforthisphenomenon. We
+postulate that EntiGraph does not create knowledge de novo; rather, it simply “rearranges” the
+knowledge of D into a layout more amenable to learning. For example, in D , the en-
+source source
+tity pair (A,B) may appear together in some sentences and (B,C) in others. As a result, models
+traineddirectlyonD withanext-tokenpredictionobjectivemaylearnthe(A,B)relationand
+source
+the (B,C) relation, but not the relation between A and C (Akyu¨rek et al., 2024) We will build a
+mathematicalmodelthatformalizesthisintuition(§6.1). Basedonthismodel,weprovideaquan-
+titativepredictionthatthescalingtrendofEntiGraphCPTfollowsamixture-of-exponentialshape
+(§6.3),whichfitswellwithourempiricallyobservedscalingtrend(Figure4).
+14
+ycaruccA
+hparGitnE6.1 TOYMODELSETUP
+Inthistoymodel,weuseV todenotethesetofentities,andrepresentthesourcedocumentsD
+source
+with pairs of known relations D ⊂ {(x,y) ∈ V2 : x ̸= y}. We assume that each relation
+source
+pair in V2 appears in the source documents D independently at random with probability p.
+source
+Mathematically, P[(x,y)∈D ] = pforallx ∈ V andy ∈ V withx ̸= y. WewriteV = |V|
+source
+andassumethatp=λ/V,forsomeconstantλ>1.
+Trainingasmemorization. Wemodelthelearningoffactualknowledgeasamemorizationpro-
+cess,inwhichamodelmemorizestherelationsitisexplicitlytrainedonbutdoesnotmeaningfully
+generalizebeyondthem(Yangetal.,2023;Feldman,2020). Inourknowledgegraphsetting,alan-
+guagemodel’sknowledgecanberepresentedbyamatrixM ∈{0,1}V×V suchthatM(x,y)=1
+ifthemodel“knows”the(x,y)relationandequals0otherwise.Then,trainingdirectlyonthesource
+documentsD simplymeanssettingallentriesthatappearinD to1. Thisdenotesthatthe
+source source
+modelhasmemorizedtherelationsgiveninthesourcedocuments. Mathematically,wedenotethis
+model trained on D by the matrix M ∈ {0,1}V×V, which has i.i.d. Bernoulli off-diagonal
+source 0
+entrieswithmeanp.
+EntiGraph synthetic data augmentation. Given the source documents D , we define the
+source
+followingiterativeprocedureofsyntheticdatageneration: foreacht=1,2,...
+1. Entitypairselection: Sample(x ,y )∈{(x,y)∈V2 :x̸=y}uniformlyatrandom.
+t t
+2. Relationanalysis: Generatethe“relationbetween(x ,y )”byperformingabreadth-first
+t t
+search(BFS)onthedirectedgraphrepresentedbytheadjacencymatrixM startingatx :
+0 t
+• Ifthereexistsapath(x ,z1,z2,...,zkt,y )connectingx toy ,define
+t t t t t t t
+D ={(x ,z1),(x ,z2),...,(x ,zkt),(x ,y )}∪D ,
+t t t t t t t t t t−1
+where we assume D = D . The model trained on this round of synthetic data
+0 source
+wouldbe
+(cid:88)
+M =M + I ,
+t t−1 xy
+(x,y)∈Dt\Dt−1
+whereI ∈{0,1}V×V isabinarymatrixwithI (x,y)=1and0otherwise.
+xy xy
+• Ifnosuchpathexists,donothing.
+This mirrors the relation analysis step for the EntiGraph synthetic data augmentation algorithm
+(introduced in §2.2). With the setup above, the index t is analogous to the number of synthetic
+tokensthatthemodelhasgenerated,andthemodel’sknowledgeiscapturedbyhowmanyonesthe
+matrix M contains. To make this connection precise, we define the link density (or accuracy) of
+t
+M tobe
+t
+E[∥M ∥ |M ]
+Acc(M )= t 1 0 ,
+t V(V −1)
+wheretheexpectationistakenovertherandomnessarisingfromthesyntheticdatagenerationpro-
+(cid:80)
+cessandnotthesourcedocumentsD .ForamatrixM,weuse∥M∥ todenote |M |.We
+source 1 i,j i,j
+usethenotationAccasthisisintendedtoemulatetheaccuracyonQuALITYtestqueriesstudiedin
+theexperimentalsections(§4and§5).
+6.2 RIGOROUSUPPERANDLOWERBOUND
+In this section, we derive rigorous upper and lower bounds on the scaling trend of Acc(M ). We
+t
+showthatAcc(M )asafunctionoftcanbeboundedaboveandbelowbytwoexponentialfunctions
+t
+withdifferentgrowthrates.NotethatthesetwoboundsdonotnecessarilyimplythatAcc(M )itself
+t
+growsexponentially. Wewillprovideapreciseformulaforitsgrowthin§6.3viaanapproximation
+throughaPoissonbranchingprocess.
+Definition1. LetC =(1−ρ(λ))2,whereρ(λ)denotestheextinctionprobabilityforaPoisson(λ)
+λ
+branchingprocess(i.e.,ρisthesmallestsolutionin[0,1]tothefixed-pointequationρ=exp(λ(ρ−
+151))). Foranyfixedε>0,wefurtherdefine
+1 (1+ε)logV
+C =1− , C =1− .
+LB V(V −1) UB V(V −1)logλ
+Theorem1. Foranytimet≥1andanyε>0,thelinkdensitysatisfies
+(cid:0) p+C (cid:0) 1−Ct (cid:1)(cid:1) (1−ε)≤Acc(M )≤(cid:0) p+C (cid:0) 1−Ct (cid:1)(cid:1) (1+ε),
+λ LB t λ UB
+withprobability→1whenV →∞.
+Even though Theorem 1 provides mathematically rigorous upper and lower bounds on the scaling
+trendofAcc(M ),theexactgrowthcurveismoreintricate,aswewillshownext.
+t
+6.3 ANANALYTICALFORMULA
+Fortheremainderofthesection, weanalyzethelinkdensity Acc(M )usingaPoissonbranching
+t
+processapproximationoftheclustergrowthofvertices. Thisapproachyieldsanapproximationof
+theform
+(cid:32) (cid:88)∞ λ−1(cid:88)∞ (cid:18)
+k
+(cid:19)t(cid:33)
+Acc(M )∼p+C 1− p (k) 1− ,
+t λ λℓ+1 ℓ V(V −1)
+ℓ=0 k=1
+where A ∼ B means that A/B converges to 1 in probability as V → ∞. We refer the reader to
+Appendix F for a comprehensive derivation. Here p denotes the probability mass function of the
+ℓ
+totalprogenyY ofaPoisson(λ)branchingprocessatlevelℓ. Qualitatively,forageneralrepresen-
+ℓ
+tationofsourcedocumentsD beyonddirectedErdo˝s-Re´nyigraphs,westillexpecttoobservea
+source
+mixture-of-exponentialscalingtrend:
+(cid:32) ∞ (cid:33)
+Acc(M )∼p+C 1−(cid:88) µ(k)(1−a )t . (5)
+t k
+k=1
+Inthiscontext, theparameterC governsthelinkdensityAcc(M )ast → ∞. Inourmodel, C is
+t
+determinedbytheproportionofreachablepairsofverticesintheinitialmatrixM . Here, weare
+0
+essentiallyfillingoutthe“deductiveclosure”(i.e.,allthefactsorrelationsthatcanbededucedfrom
+D ;Stine(1976);Akyu¨reketal.(2024))oftheoriginaldata—ifsomefactscannotbededuced,
+source
+then Acc(M ) cannot approach 1. The measure µ(·) is the probability mass function on k, which
+t
+controlstheproportionofpairsofverticeswithaspecificdecayrate.Theparametersµ(·)dependon
+M inamoreintricatemanner. Wefindthattheformulain(5)accuratelyfitstheempiricalscaling
+0
+trendofEntiGraphCPTaccuracyupto600Msynthetictokens(Figure4).
+Sketchofderivation. Intuitively,theedge(i,j)willeventuallybeaddedifandonlyifjisreach-
+able from i in the original graph M . This explains the limiting behavior of Acc(M ) as t ap-
+0 t
+proachesinfinity: theproportionoflinkswillconvergetotheproportionofconnectedvertexpairs
+inM .Tounderstandthemixture-of-exponentialfunctionalform,considerthatattimet,theproba-
+0
+bilityofaddingeachvertexpairfollowsanexponentialpattern,withdifferentvertexpairsexhibiting
+differentexponentialgrowthrates. Specifically,thinkofabreadth-firstsearchinM startingfroma
+0
+vertexi. Ifj isveryclosetotheroot,therearemanypathsfromitootherverticespassingthrough
+j,makingitmorelikelythat(i,j)willbeincludedineachiteration. Incontrast,ifj isfarfromthe
+root(e.g.,attheendoftheexplorationprocess),therearefewersuchpaths,makingitlesslikelyfor
+(i,j)tobeincludedineachiteration.Thisaccountsforthemixture-of-exponentialshape,wherethe
+mixtureprimarilyreflectsthedistanceofeachvertexfromtheroot,thenumberofsuchvertices,and
+theircorrespondingexponentialgrowthrates.
+Qualitativedescription. Finally,tohelpbuildanintuitiveunderstanding,weprovideaqualitative
+descriptionofthemixture-of-exponentialshape. WedemonstrateinAppendixFthatthismixture-
+of-exponential shape comprises three distinct phases: a fast growth phase, a slower growth phase,
+andaplateauphase. Mathematically,weshowtheexistenceoftwodistincttimes,0<t <t ,such
+1 2
+that
+
+Θ(p+t), for0≤t≤t ,
+ 1
+Acc(M )= Θ(logt), fort ≤t≤t ,
+T 1 2
+Θ(1), fort≥t ,
+2
+16(a) Linearregime (b) Log-linear(tinlogscale) (c) Plateauregime
+Figure5: AccuracyAcc(M )withrespecttotimet,forV = 100andp = 0.03. Themixture-of-
+t
+exponentialfunctionalformin(5)leadstothreedistinctregimes.
+where we use a convenient change of variable T = tV(V −1). It is important to note that the
+choice of logt in the second phase is not necessarily canonical. In fact, the bound holds for any
+well-behavedmonotoneincreasingconcavefunctionasareplacementforlogt. Ourrepresentation
+here is motivated by two factors: first, it aligns with the performance observed in our EntiGraph
+CPT numerical results, and second, it reflects the gradual slowdown in growth. We illustrate the
+threephasesinFigure5,whichpresentasimulationofthetoymodelwithp=0.03.
+7 DISCUSSION
+7.1 LIMITATIONS
+BecauseEntiGraphsynthesizesdatausingapromptedlanguagemodel,thereisariskthatitmayhal-
+lucinateandfabricatenon-existentrelationsamongtheentities. Althoughourprocessofgenerating
+syntheticdataisgroundedbythesourcedocumentsasinEquations(3)and(4),itisanassumption
+thatLM iscapableenoughtogeneratefaithfulsyntheticdatawhenconditionedonD . Inour
+aug source
+experimentwithQuALITYbooks,wemanuallyreadafewbooksandfact-checkedasubsetofthe
+synthetic data generated for those books; we did not find factually incorrect synthesized text. We
+postulatethatthisisbecauseweuseasufficientlystrongpromptedmodelLM (gpt-4-turbo).
+aug
+IfEntiGraphwereappliedtomorechallengingcontentlikeacomplexresearchpaper,itispossible
+thatthepromptedmodelcouldbemorepronetohallucination.
+On the other hand, because we use a very capable prompted language model gpt-4-turbo to
+generate synthetic data, one might be concerned that our performance gains come from distilling
+thepromptedLM’sknowledge. Theclosed-bookresultsshowthatdistillationeffectsalonecannot
+explaintheperformanceofourapproach(asweexceedGPT-4’sclosed-bookperformance),butour
+approach does not yet enable bootstrapping, where we use a model to generate its own synthetic
+dataforasmalltargetdomain. Weviewthisasexcitingfuturework.
+7.2 FUTUREDIRECTIONS
+Continuedscalingbeyondrealdata. Thelargebutfinitebodyofhuman-writtentextisrapidly
+beingconsumed. Villalobosetal.(2024)predictthatfrontierlanguagemodelswillexhaustallpub-
+lic, human-generated text in 2028. As we transition from a data-rich to a data-constrained regime
+(Kaplanetal.,2020;Muennighoffetal.,2023),furtherscalingwillrequireustoextractmoreknowl-
+edgefromexistingdata. WedemonstratedthatsyntheticcontinuedpretrainingwithEntiGraphef-
+fectivelyextractsmoreknowledgefromsmallcorpora,whichcouldhelpuslearnfromproprietary
+datasets or tail knowledge that appears only once or twice on the internet. It is an open question
+whethersyntheticdatagenerationmethodslikeEntiGraphcouldimprovedataefficiencymoregen-
+erallyonstandardpretrainingdataandwithoutrelyinguponastrongerpromptedmodel.
+Alternativestolong-contextlanguagemodels. Recentworkhandleslonguserqueries(e.g.,1M-
+10M+tokens)usingefficientimplementationsofattention(Daoetal.,2022;Liuetal.,2023;Gemini,
+2024)oralternativearchitecturesthataresub-quadraticinthecontextlength(Tayetal.,2022;Gu
+et al., 2022; Gu & Dao, 2024; Sun et al., 2024). In settings where many queries share the same
+17long prefix—e.g., a corporation’s proprietary documents or other use cases with prompt caching
+(Anthropic, 2024a)—one could instead continue pretraining on the prefix to internalize its knowl-
+edge,andthenperformstandardquadraticattentiononshorterqueries. Thisapproachpaysafixed
+trainingcosttoamortizetheprefix’sknowledgeintotheweightsofamodelandthenbenefitsfrom
+shorter context lengths (Gururangan et al., 2020; Snell et al., 2022). By adapting the continued
+pretraining paradigm from 10B-100B tokens to as little as 1.3M tokens, our synthetic continued
+pretrainingapproachcouldenableunsupervisedlearningofsharedtextprefixesatmuchsmallerand
+morepracticaltokencounts.
+7.3 CONCLUSION
+Continuedpretrainingwithnext-tokenpredictionisremarkablyeffectiveinteachingpretrainedlan-
+guage models new knowledge, but to date has only been applied successfully in broad, data-rich
+domains with 10B-100B+ tokens. We downscale continued pretraining to small, specialized cor-
+porawith∼1Mtokensusingsyntheticcontinuedpretraining: convertingasmallcorpusintoalarge
+syntheticonewithdiverserepresentationsofknowledge,andcontinuingpretrainingonit.
+WeinstantiatethisapproachusingEntiGraph,aknowledgegraph–inspiredsyntheticdataaugmen-
+tationalgorithm. SyntheticcontinuedpretrainingwithEntiGraphdemonstratesconsistentscalingin
+downstreamclosed-bookQAperformanceuptoa600Mtokensyntheticcorpus,whereasbaselines
+such as continued pretraining on the small corpus or synthetic paraphrases show no improvement
+orasymptoteearly. Moreover,theacquiredparametricknowledgecomposeswithinstructiontuning
+and retrieved non-parametric knowledge in an open-book setting. Lastly, we present a simplified
+mathematicalmodelofEntiGraphandderiveafunctionalformforitsscalingtrend,whichclosely
+matchesourempiricaltrend.WehypothesizethatEntiGraph’s“externalization”ofthesyntheticdata
+generationprocesstoacombinatorialstructure—inthiscase,aknowledgegraphoverentities—isa
+generallyusefulstrategyinsynthesizinghighlydiversedataandapromisingobjectforfuturestudy.
+8 ACKNOWLEDGEMENT
+Zitong Yang would like to thank Ruiqi Zhong for discussion regarding context distillation work,
+XiangLisaLifordiscussionaboutreversalcursework,andtheparticipantsofthestatisticsseminar
+atStanfordUniversityfortheirhelpfulfeedbackaboutapreliminaryversionofthiswork. Wealso
+thank the Tatsu Lab for helpful feedback and interesting discussions that have helped improve the
+paper. ZitongYangissupportedbytheAlbionWalterHewlettStanfordGraduateFellowship. Neil
+Band acknowledges funding from an NSF Graduate Research Fellowship and a Quad Fellowship.
+ThisworkwassupportedbygiftsfromPanasonicResearch,theGoogleResearchScholarProgram,
+and the Tianqiao and Chrissy Chen Institute. E.J.C. is supported by the Office of Naval Research
+grantN00014-20-1-2157,theNationalScienceFoundationgrantDMS-2032014,theSimonsFoun-
+dationunderaward814641.
+18REFERENCES
+Marah Abdin, Jyoti Aneja, Sebastien Bubeck, Caio Ce´sar Teodoro Mendes, Weizhu Chen, Al-
+lieDelGiorno,RonenEldan,SivakanthGopi,SuriyaGunasekar,MojanJavaheripi,PieroKauff-
+mann,YinTatLee,YuanzhiLi,AnhNguyen,GustavodeRosa,OlliSaarikivi,AdilSalim,Shi-
+tal Shah, Michael Santacroce, Harkirat Singh Behl, Adam Taumann Kalai, Xin Wang, Rachel
+Ward, Philipp Witte, Cyril Zhang, and Yi Zhang. Phi-2: The surprising power of small lan-
+guagemodels,2023. URLhttps://www.microsoft.com/en-us/research/blog/
+phi-2-the-surprising-power-of-small-language-models/.
+Marah Abdin, Sam Ade Jacobs, Ammar Ahmad Awan, Jyoti Aneja, Ahmed Awadallah, Hany
+Awadalla,NguyenBach,AmitBahree,ArashBakhtiari,JianminBao,HarkiratBehl,AlonBen-
+haim,MishaBilenko,JohanBjorck,Se´bastienBubeck,QinCai,MartinCai,CaioCe´sarTeodoro
+Mendes, Weizhu Chen, Vishrav Chaudhary, Dong Chen, Dongdong Chen, Yen-Chun Chen, Yi-
+Ling Chen, Parul Chopra, Xiyang Dai, Allie Del Giorno, Gustavo de Rosa, Matthew Dixon,
+RonenEldan,VictorFragoso,DanIter,MeiGao,MinGao,JianfengGao,AmitGarg,Abhishek
+Goswami, Suriya Gunasekar, Emman Haider, Junheng Hao, Russell J. Hewett, Jamie Huynh,
+Mojan Javaheripi, Xin Jin, Piero Kauffmann, Nikos Karampatziakis, Dongwoo Kim, Mahoud
+Khademi,LevKurilenko,JamesR.Lee,YinTatLee,YuanzhiLi,YunshengLi,ChenLiang,Lars
+Liden, Ce Liu, Mengchen Liu, Weishung Liu, Eric Lin, Zeqi Lin, Chong Luo, Piyush Madan,
+MattMazzola,ArindamMitra,HardikModi,AnhNguyen,BrandonNorick,BarunPatra,Daniel
+Perez-Becker,ThomasPortet,ReidPryzant,HeyangQin,MarkoRadmilac,CorbyRosset,Sam-
+budha Roy, Olatunji Ruwase, Olli Saarikivi, Amin Saied, Adil Salim, Michael Santacroce, Shi-
+tal Shah, Ning Shang, Hiteshi Sharma, Swadheen Shukla, Xia Song, Masahiro Tanaka, Andrea
+Tupini,XinWang,LijuanWang,ChunyuWang,YuWang,RachelWard,GuanhuaWang,Philipp
+Witte, Haiping Wu, Michael Wyatt, Bin Xiao, Can Xu, Jiahang Xu, Weijian Xu, Sonali Yadav,
+Fan Yang, Jianwei Yang, Ziyi Yang, Yifan Yang, Donghan Yu, Lu Yuan, Chengruidong Zhang,
+Cyril Zhang, Jianwen Zhang, Li Lyna Zhang, Yi Zhang, Yue Zhang, Yunan Zhang, and Xiren
+Zhou. Phi-3 technical report: A highly capable language model locally on your phone, 2024.
+URLhttps://arxiv.org/abs/2404.14219.
+AfraFeyzaAkyu¨rek,EkinAkyu¨rek,LeshemChoshen,DerryWijaya,andJacobAndreas. Deduc-
+tive closure training of language models for coherence, accuracy, and updatability. In Lun-Wei
+Ku, Andre Martins, and Vivek Srikumar (eds.), Findings of the Association for Computational
+Linguistics ACL 2024, pp. 9802–9818, Bangkok, Thailand and virtual meeting, August 2024.
+Association for Computational Linguistics. URL https://aclanthology.org/2024.
+findings-acl.584.
+ZeyuanAllen-ZhuandYuanzhiLi. Physicsoflanguagemodels: Part3.2,knowledgemanipulation,
+2024. URLhttps://arxiv.org/abs/2309.14402.
+DanaAngluin. Queriesandconceptlearning. MachineLearning,2:319–342,1988. URLhttps:
+//api.semanticscholar.org/CorpusID:11357867.
+Anthropic. Prompt caching (beta), 2024a. URL https://docs.anthropic.com/en/
+docs/build-with-claude/prompt-caching.
+Anthropic. The Claude 3 Model Family: Opus, Sonnet, Haiku. https://www-cdn.
+anthropic.com/de8ba9b01c9ab7cbabf5c33b80b7bbc618857627/Model_
+Card_Claude_3.pdf,2024b.
+ZhangirAzerbayev,HaileySchoelkopf,KeiranPaster,MarcoDosSantos,StephenMarcusMcAleer,
+AlbertQ.Jiang,JiaDeng,StellaBiderman,andSeanWelleck.Llemma:Anopenlanguagemodel
+for mathematics. In The Twelfth International Conference on Learning Representations, 2024.
+URLhttps://openreview.net/forum?id=4WnqRR915j.
+Maria-florina Balcan, Avrim Blum, and Ke Yang. Co-training and expansion: To-
+wards bridging theory and practice. In L. Saul, Y. Weiss, and L. Bottou (eds.), Ad-
+vances in Neural Information Processing Systems, volume 17. MIT Press, 2004. URL
+https://proceedings.neurips.cc/paper_files/paper/2004/file/
+9457fc28ceb408103e13533e4a5b6bd1-Paper.pdf.
+19LukasBerglund, MegTong, MaxKaufmann, MikitaBalesni, AsaCooperStickland, TomaszKor-
+bak,andOwainEvans. Thereversalcurse: Llmstrainedon”aisb”failtolearn”bisa”,2023.
+David Berthelot, Nicholas Carlini, Ian Goodfellow, Nicolas Papernot, Avital Oliver, and Colin
+Raffel. Mixmatch: A holistic approach to semi-supervised learning, 2019. URL https:
+//arxiv.org/abs/1905.02249.
+Avrim Blum and Tom Mitchell. Combining labeled and unlabeled data with co-training. In Pro-
+ceedingsoftheEleventhAnnualConferenceonComputationalLearningTheory,COLT’98,pp.
+92–100,NewYork,NY,USA,1998.AssociationforComputingMachinery. ISBN1581130570.
+doi: 10.1145/279943.279962. URLhttps://doi.org/10.1145/279943.279962.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhari-
+wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agar-
+wal, Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh,
+Daniel Ziegler, Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen, Eric Sigler, Mateusz
+Litwin, Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec
+Radford, Ilya Sutskever, and Dario Amodei. Language models are few-shot learners. In
+H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (eds.), Advances in Neu-
+ral Information Processing Systems, volume 33, pp. 1877–1901. Curran Associates, Inc.,
+2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/
+file/1457c0d6bfcb4967418bfb8ac142f64a-Paper.pdf.
+Harrison Chase. LangChain, 10 2022. URL https://github.com/langchain-ai/
+langchain.
+Zeming Chen, Alejandro Herna´ndez Cano, Angelika Romanou, Antoine Bonnet, Kyle Matoba,
+FrancescoSalvi,MatteoPagliardini,SiminFan,AndreasKo¨pf,AmirkeivanMohtashami,Alexan-
+dreSallinen, AlirezaSakhaeirad, VinitraSwamy, IgorKrawczuk, DenizBayazit, AxelMarmet,
+SyrielleMontariol,Mary-AnneHartley,MartinJaggi,andAntoineBosselut.Meditron-70b:Scal-
+ingmedicalpretrainingforlargelanguagemodels,2023. URLhttps://arxiv.org/abs/
+2311.16079.
+RoiCohen,EdenBiran,OriYoran,AmirGloberson,andMorGeva. Evaluatingtherippleeffectsof
+knowledgeeditinginlanguagemodels. arXivpreprintarXiv:2307.12976,2023.
+Cohere. Improvesearchperformancewithasinglelineofcode,2024. URLhttps://cohere.
+com/rerank.
+PierreColombo,TelmoPires,MalikBoudiaf,RuiMelo,DominicCulver,SofiaMorgado,Etienne
+Malaboeuf,GabrielHautreux,JohanneCharpentier,andMichaelDesa. Saullm-54bandsaullm-
+141b: Scaling up domain adaptation for the legal domain, 2024a. URL https://arxiv.
+org/abs/2407.19584.
+PierreColombo,TelmoPessoaPires,MalikBoudiaf,DominicCulver,RuiMelo,CaioCorro,Andre
+F.T.Martins,FabrizioEsposito,VeraLu´ciaRaposo,SofiaMorgado,andMichaelDesa. Saullm-
+7b: A pioneering large language model for law, 2024b. URL https://arxiv.org/abs/
+2403.03883.
+CommonCrawl. Commoncrawl. https://commoncrawl.org/,2007.
+Tri Dao, Daniel Y Fu, Stefano Ermon, Atri Rudra, and Christopher Re. Flashattention: Fast and
+memory-efficient exact attention with IO-awareness. In Alice H. Oh, Alekh Agarwal, Danielle
+Belgrave,andKyunghyunCho(eds.),AdvancesinNeuralInformationProcessingSystems,2022.
+URLhttps://openreview.net/forum?id=H4DqfPSibmx.
+Ning Ding, Yulin Chen, Bokai Xu, Yujia Qin, Zhi Zheng, Shengding Hu, Zhiyuan Liu, Maosong
+Sun, and Bowen Zhou. Enhancing chat language models by scaling high-quality instructional
+conversations,2023.
+Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy, Pierre-
+Emmanuel Mazare´, Maria Lomeli, Lucas Hosseini, and Herve´ Je´gou. The faiss library, 2024.
+URLhttps://arxiv.org/abs/2401.08281.
+20AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, Anirudh Goyal, Anthony
+Hartshorn, Aobo Yang, Archi Mitra, Archie Sravankumar, Artem Korenev, Arthur Hinsvark,
+ArunRao,AstonZhang,AurelienRodriguez,AustenGregerson,AvaSpataru,BaptisteRoziere,
+BethanyBiron,BinhTang,BobbieChern,CharlotteCaucheteux,ChayaNayak,ChloeBi,Chris
+Marra, Chris McConnell, Christian Keller, Christophe Touret, Chunyang Wu, Corinne Wong,
+CristianCantonFerrer,CyrusNikolaidis,DamienAllonsius,DanielSong,DaniellePintz,Danny
+Livshits, DavidEsiobu, DhruvChoudhary, DhruvMahajan, DiegoGarcia-Olano, DiegoPerino,
+DieuwkeHupkes,EgorLakomkin,EhabAlBadawy,ElinaLobanova,EmilyDinan,EricMichael
+Smith, Filip Radenovic, Frank Zhang, Gabriel Synnaeve, Gabrielle Lee, Georgia Lewis Ander-
+son, Graeme Nail, Gregoire Mialon, Guan Pang, Guillem Cucurell, Hailey Nguyen, Hannah
+Korevaar, Hu Xu, Hugo Touvron, Iliyan Zarov, Imanol Arrieta Ibarra, Isabel Kloumann, Ishan
+Misra, Ivan Evtimov, Jade Copet, Jaewon Lee, Jan Geffert, Jana Vranes, Jason Park, Jay Ma-
+hadeokar, Jeet Shah, Jelmer van der Linde, Jennifer Billock, Jenny Hong, Jenya Lee, Jeremy
+Fu, Jianfeng Chi, Jianyu Huang, Jiawen Liu, Jie Wang, Jiecao Yu, Joanna Bitton, Joe Spisak,
+Jongsoo Park, Joseph Rocca, Joshua Johnstun, Joshua Saxe, Junteng Jia, Kalyan Vasuden Al-
+wala,KartikeyaUpasani,KatePlawiak,KeLi,KennethHeafield,KevinStone,KhalidEl-Arini,
+KrithikaIyer,KshitizMalik,KuenleyChiu,KunalBhalla,LaurenRantala-Yeary,Laurensvander
+Maaten, Lawrence Chen, Liang Tan, Liz Jenkins, Louis Martin, Lovish Madaan, Lubo Malo,
+Lukas Blecher, Lukas Landzaat, Luke de Oliveira, Madeline Muzzi, Mahesh Pasupuleti, Man-
+nat Singh, Manohar Paluri, Marcin Kardas, Mathew Oldham, Mathieu Rita, Maya Pavlova,
+Melanie Kambadur, Mike Lewis, Min Si, Mitesh Kumar Singh, Mona Hassan, Naman Goyal,
+NarjesTorabi,NikolayBashlykov,NikolayBogoychev,NiladriChatterji,OlivierDuchenne,Onur
+C¸elebi,PatrickAlrassy,PengchuanZhang,PengweiLi,PetarVasic,PeterWeng,PrajjwalBhar-
+gava, PratikDubal, PraveenKrishnan, PunitSinghKoura, PuxinXu, QingHe, QingxiaoDong,
+Ragavan Srinivasan, Raj Ganapathy, Ramon Calderer, Ricardo Silveira Cabral, Robert Stojnic,
+RobertaRaileanu,RohitGirdhar,RohitPatel,RomainSauvestre,RonniePolidoro,RoshanSum-
+baly, Ross Taylor, Ruan Silva, Rui Hou, Rui Wang, Saghar Hosseini, Sahana Chennabasappa,
+Sanjay Singh, Sean Bell, Seohyun Sonia Kim, Sergey Edunov, Shaoliang Nie, Sharan Narang,
+SharathRaparthy,ShengShen,ShengyeWan,ShrutiBhosale,ShunZhang,SimonVandenhende,
+Soumya Batra, Spencer Whitman, Sten Sootla, Stephane Collot, Suchin Gururangan, Sydney
+Borodinsky, Tamar Herman, Tara Fowler, Tarek Sheasha, Thomas Georgiou, Thomas Scialom,
+TobiasSpeckbacher,TodorMihaylov,TongXiao,UjjwalKarn,VedanujGoswami,VibhorGupta,
+VigneshRamanathan,ViktorKerkez,VincentGonguet,VirginieDo,VishVogeti,VladanPetro-
+vic,WeiweiChu,WenhanXiong,WenyinFu,WhitneyMeers,XavierMartinet,XiaodongWang,
+XiaoqingEllenTan,XinfengXie,XuchaoJia,XueweiWang,YaelleGoldschlag,YasheshGaur,
+YasmineBabaei,YiWen,YiwenSong,YuchenZhang,YueLi,YuningMao,ZacharieDelpierre
+Coudert, Zheng Yan, Zhengxing Chen, Zoe Papakipos, Aaditya Singh, Aaron Grattafiori, Abha
+Jain,AdamKelsey,AdamShajnfeld,AdithyaGangidi,AdolfoVictoria,AhuvaGoldstand,Ajay
+Menon,AjaySharma,AlexBoesenberg,AlexVaughan,AlexeiBaevski,AllieFeinstein,Amanda
+Kallet, Amit Sangani, Anam Yunus, Andrei Lupu, Andres Alvarado, Andrew Caples, Andrew
+Gu, AndrewHo, AndrewPoulton, AndrewRyan, AnkitRamchandani, AnnieFranco, Aparajita
+Saraf, Arkabandhu Chowdhury, Ashley Gabriel, Ashwin Bharambe, Assaf Eisenman, Azadeh
+Yazdan, Beau James, Ben Maurer, Benjamin Leonhardi, Bernie Huang, Beth Loyd, Beto De
+Paola, Bhargavi Paranjape, Bing Liu, Bo Wu, Boyu Ni, Braden Hancock, Bram Wasti, Bran-
+donSpence,BraniStojkovic,BrianGamido,BrittMontalvo,CarlParker,CarlyBurton,Catalina
+Mejia,ChanghanWang,ChangkyuKim,ChaoZhou,ChesterHu,Ching-HsiangChu,ChrisCai,
+Chris Tindal, Christoph Feichtenhofer, Damon Civin, Dana Beaty, Daniel Kreymer, Daniel Li,
+Danny Wyatt, David Adkins, David Xu, Davide Testuggine, Delia David, Devi Parikh, Diana
+Liskovich,DidemFoss,DingkangWang,DucLe,DustinHolland,EdwardDowling,EissaJamil,
+Elaine Montgomery, Eleonora Presani, Emily Hahn, Emily Wood, Erik Brinkman, Esteban Ar-
+caute,EvanDunbar,EvanSmothers,FeiSun,FelixKreuk,FengTian,FiratOzgenel,Francesco
+Caggioni, Francisco Guzma´n, Frank Kanayet, Frank Seide, Gabriela Medina Florez, Gabriella
+Schwarz, Gada Badeer, Georgia Swee, Gil Halpern, Govind Thattai, Grant Herman, Grigory
+Sizov,Guangyi,Zhang,GunaLakshminarayanan,HamidShojanazeri,HanZou,HannahWang,
+Hanwen Zha, Haroun Habeeb, Harrison Rudolph, Helen Suk, Henry Aspegren, Hunter Gold-
+man,IbrahimDamlaj,IgorMolybog,IgorTufanov,Irina-ElenaVeliche,ItaiGat,JakeWeissman,
+JamesGeboski,JamesKohli,JaphetAsher,Jean-BaptisteGaya,JeffMarcus,JeffTang,Jennifer
+Chan,JennyZhen,JeremyReizenstein,JeremyTeboul,JessicaZhong,JianJin,JingyiYang,Joe
+21Cummings, Jon Carvill, Jon Shepard, Jonathan McPhie, Jonathan Torres, Josh Ginsburg, Junjie
+Wang, Kai Wu, Kam Hou U, Karan Saxena, Karthik Prasad, Kartikay Khandelwal, Katayoun
+Zand,KathyMatosich,KaushikVeeraraghavan,KellyMichelena,KeqianLi,KunHuang,Kunal
+Chawla,KushalLakhotia,KyleHuang,LailinChen,LakshyaGarg,LavenderA,LeandroSilva,
+LeeBell,LeiZhang,LiangpengGuo,LichengYu,LironMoshkovich,LucaWehrstedt,Madian
+Khabsa, ManavAvalani, ManishBhatt, MariaTsimpoukelli, MartynasMankus, MatanHasson,
+Matthew Lennie, Matthias Reso, Maxim Groshev, Maxim Naumov, Maya Lathi, Meghan Ke-
+neally,MichaelL.Seltzer,MichalValko,MichelleRestrepo,MihirPatel,MikVyatskov,Mikayel
+Samvelyan, Mike Clark, Mike Macey, Mike Wang, Miquel Jubert Hermoso, Mo Metanat, Mo-
+hammadRastegari,MunishBansal,NandhiniSanthanam,NataschaParks,NatashaWhite,Navy-
+ataBawa,NayanSinghal,NickEgebo,NicolasUsunier,NikolayPavlovichLaptev,NingDong,
+Ning Zhang, Norman Cheng, Oleg Chernoguz, Olivia Hart, Omkar Salpekar, Ozlem Kalinli,
+ParkinKent,ParthParekh,PaulSaab,PavanBalaji,PedroRittner,PhilipBontrager,PierreRoux,
+PiotrDollar,PolinaZvyagina,PrashantRatanchandani,PritishYuvraj,QianLiang,RachadAlao,
+Rachel Rodriguez, Rafi Ayub, Raghotham Murthy, Raghu Nayani, Rahul Mitra, Raymond Li,
+Rebekkah Hogan, Robin Battey, Rocky Wang, Rohan Maheswari, Russ Howes, Ruty Rinott,
+Sai Jayesh Bondu, Samyak Datta, Sara Chugh, Sara Hunt, Sargun Dhillon, Sasha Sidorov, Sa-
+tadruPan,SaurabhVerma,SeijiYamamoto,SharadhRamaswamy,ShaunLindsay,ShaunLind-
+say,ShengFeng,ShenghaoLin,ShengxinCindyZha,ShivaShankar,ShuqiangZhang,Shuqiang
+Zhang,SinongWang,SnehaAgarwal,SojiSajuyigbe,SoumithChintala,StephanieMax,Stephen
+Chen, Steve Kehoe, Steve Satterfield, Sudarshan Govindaprasad, Sumit Gupta, Sungmin Cho,
+Sunny Virk, Suraj Subramanian, Sy Choudhury, Sydney Goldman, Tal Remez, Tamar Glaser,
+Tamara Best, Thilo Kohler, Thomas Robinson, Tianhe Li, Tianjun Zhang, Tim Matthews, Tim-
+othy Chou, Tzook Shaked, Varun Vontimitta, Victoria Ajayi, Victoria Montanez, Vijai Mohan,
+Vinay Satish Kumar, Vishal Mangla, V´ıtor Albiero, Vlad Ionescu, Vlad Poenaru, Vlad Tiberiu
+Mihailescu, Vladimir Ivanov, Wei Li, Wenchen Wang, Wenwen Jiang, Wes Bouaziz, Will Con-
+stable, Xiaocheng Tang, Xiaofang Wang, Xiaojian Wu, Xiaolan Wang, Xide Xia, Xilun Wu,
+XinboGao,YanjunChen,YeHu,YeJia,YeQi,YendaLi,YilinZhang,YingZhang,YossiAdi,
+Youngjin Nam, Yu, Wang, Yuchen Hao, Yundi Qian, Yuzi He, Zach Rait, Zachary DeVito, Zef
+Rosnbrick, Zhaoduo Wen, Zhenyu Yang, and Zhiwei Zhao. The llama 3 herd of models, 2024.
+URLhttps://arxiv.org/abs/2407.21783.
+RickDurrett. Randomgraphdynamics,volume20. Cambridgeuniversitypress,2010.
+Ronen Eldan and Yuanzhi Li. Tinystories: How small can language models be and still speak
+coherentenglish?,2023.
+VitalyFeldman. Doeslearningrequirememorization? ashorttaleaboutalongtail. InProceedings
+ofthe52ndAnnualACMSIGACTSymposiumonTheoryofComputing,STOC2020,pp.954–959,
+NewYork,NY,USA,2020.AssociationforComputingMachinery. ISBN9781450369794. doi:
+10.1145/3357713.3384290. URLhttps://doi.org/10.1145/3357713.3384290.
+Yanjun Gao, Chen Sun, and Rebecca J. Passonneau. Automated pyramid summarization evalu-
+ation. In Mohit Bansal and Aline Villavicencio (eds.), Proceedings of the 23rd Conference
+on Computational Natural Language Learning (CoNLL), pp. 404–418, Hong Kong, China,
+November2019.AssociationforComputationalLinguistics. doi: 10.18653/v1/K19-1038. URL
+https://aclanthology.org/K19-1038.
+YunfanGao,YunXiong,XinyuGao,KangxiangJia,JinliuPan,YuxiBi,YiDai,JiaweiSun,Meng
+Wang,andHaofenWang. Retrieval-augmentedgenerationforlargelanguagemodels: Asurvey,
+2024. URLhttps://arxiv.org/abs/2312.10997.
+Team Gemini. Gemini: A family of highly capable multimodal models, 2024. URL https:
+//arxiv.org/abs/2312.11805.
+SiavashGolkar,MichaelKagan,andKyunghyunCho. Continuallearningvianeuralpruning. arXiv
+preprintarXiv:1903.04476,2019.
+Ian J. Goodfellow, Mehdi Mirza, Da Xiao, Aaron Courville, and Yoshua Bengio. An empirical
+investigationofcatastrophicforgettingingradient-basedneuralnetworks, 2015. URLhttps:
+//arxiv.org/abs/1312.6211.
+22StephenTGrossberg. Studiesofmindandbrain: Neuralprinciplesoflearning,perception,devel-
+opment,cognition,andmotorcontrol,volume70. SpringerScience&BusinessMedia,2012.
+AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces,2024.
+URLhttps://openreview.net/forum?id=AL1fq05o7H.
+Albert Gu, Karan Goel, and Christopher Re. Efficiently modeling long sequences with structured
+state spaces. In International Conference on Learning Representations, 2022. URL https:
+//openreview.net/forum?id=uYLFoz1vlAC.
+CaglarGulcehre,TomLePaine,SrivatsanSrinivasan,KseniaKonyushkova,LotteWeerts,Abhishek
+Sharma,AdityaSiddhant,AlexAhern,MiaosenWang,ChenjieGu,WolfgangMacherey,Arnaud
+Doucet,OrhanFirat,andNandodeFreitas.Reinforcedself-training(rest)forlanguagemodeling,
+2023. URLhttps://arxiv.org/abs/2308.08998.
+SuriyaGunasekar,YiZhang,JyotiAneja,CaioCe´sarTeodoroMendes,AllieDelGiorno,Sivakanth
+Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo de Rosa, Olli Saarikivi, Adil Salim, Shital
+Shah, Harkirat Singh Behl, Xin Wang, Se´bastien Bubeck, Ronen Eldan, Adam Tauman Kalai,
+YinTatLee,andYuanzhiLi. Textbooksareallyouneed,2023. URLhttps://arxiv.org/
+abs/2306.11644.
+Tom Gunter, Zirui Wang, Chong Wang, Ruoming Pang, Andy Narayanan, Aonan Zhang, Bowen
+Zhang, Chen Chen, Chung-Cheng Chiu, David Qiu, Deepak Gopinath, Dian Ang Yap, Dong
+Yin, Feng Nan, Floris Weers, Guoli Yin, Haoshuo Huang, Jianyu Wang, Jiarui Lu, John Pee-
+bles, Ke Ye, Mark Lee, Nan Du, Qibin Chen, Quentin Keunebroek, Sam Wiseman, Syd Evans,
+Tao Lei, Vivek Rathod, Xiang Kong, Xianzhi Du, Yanghao Li, Yongqiang Wang, Yuan Gao,
+ZaidAhmed,ZhaoyangXu,ZhiyunLu,AlRashid,AlbinMadappallyJose,AlecDoane,Alfredo
+Bencomo, Allison Vanderby, Andrew Hansen, Ankur Jain, Anupama Mann Anupama, Areeba
+Kamal,BuguWu,CarolinaBrum,CharlieMaalouf,ChinguunErdenebileg,ChrisDulhanty,Do-
+minik Moritz, Doug Kang, Eduardo Jimenez, Evan Ladd, Fangping Shi, Felix Bai, Frank Chu,
+FredHohman,HadasKotek,HannahGillisColeman,JaneLi,JeffreyBigham,JefferyCao,Jeff
+Lai, Jessica Cheung, Jiulong Shan, Joe Zhou, John Li, Jun Qin, Karanjeet Singh, Karla Vega,
+KelvinZou,LauraHeckman,LaurenGardiner,MargitBowler,MariaCordell,MengCao,Nicole
+Hay, Nilesh Shahdadpuri, Otto Godwin, Pranay Dighe, Pushyami Rachapudi, Ramsey Tantawi,
+RomanFrigg,SamDavarnia,SanskrutiShah,SaptarshiGuha,SashaSirovica,ShenMa,Shuang
+Ma, Simon Wang, Sulgi Kim, Suma Jayaram, Vaishaal Shankar, Varsha Paidi, Vivek Kumar,
+Xin Wang, Xin Zheng, Walker Cheng, Yael Shrager, Yang Ye, Yasu Tanaka, Yihao Guo, Yun-
+song Meng, Zhao Tang Luo, Zhi Ouyang, Alp Aygar, Alvin Wan, Andrew Walkingshaw, Andy
+Narayanan, Antonie Lin, Arsalan Farooq, Brent Ramerth, Colorado Reed, Chris Bartels, Chris
+Chaney,DavidRiazati,EricLiangYang,ErinFeldman,GabrielHochstrasser,GuillaumeSeguin,
+Irina Belousova, Joris Pelemans, Karen Yang, Keivan Alizadeh Vahid, Liangliang Cao, Mah-
+yar Najibi, Marco Zuliani, Max Horton, Minsik Cho, Nikhil Bhendawade, Patrick Dong, Piotr
+Maj, Pulkit Agrawal, Qi Shan, Qichen Fu, Regan Poston, Sam Xu, Shuangning Liu, Sushma
+Rao,TashweenaHeeramun,ThomasMerth,UdayRayala,VictorCui,VivekRangarajanSridhar,
+Wencong Zhang, Wenqi Zhang, Wentao Wu, Xingyu Zhou, Xinwen Liu, Yang Zhao, Yin Xia,
+Zhile Ren, and Zhongzheng Ren. Apple intelligence foundation language models, 2024. URL
+https://arxiv.org/abs/2407.21075.
+Kshitij Gupta, Benjamin The´rien, Adam Ibrahim, Mats L. Richter, Quentin Anthony, Eugene
+Belilovsky, Irina Rish, and Timothe´e Lesort. Continual pre-training of large language models:
+Howto(re)warmyourmodel?,2023. URLhttps://arxiv.org/abs/2308.04014.
+Suchin Gururangan, Ana Marasovic´, Swabha Swayamdipta, Kyle Lo, Iz Beltagy, Doug Downey,
+and Noah A. Smith. Don’t stop pretraining: Adapt language models to domains and tasks. In
+Dan Jurafsky, Joyce Chai, Natalie Schluter, and Joel Tetreault (eds.), Proceedings of the 58th
+Annual Meeting of the Association for Computational Linguistics, pp. 8342–8360, Online, July
+2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.acl-main.740. URL
+https://aclanthology.org/2020.acl-main.740.
+YikunHan,ChunjiangLiu,andPengfeiWang.Acomprehensivesurveyonvectordatabase:Storage
+andretrievaltechnique,challenge,2023. URLhttps://arxiv.org/abs/2310.11703.
+23Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Ja-
+cobSteinhardt. Measuringmassivemultitasklanguageunderstanding. InInternationalConfer-
+ence on Learning Representations, 2021. URL https://openreview.net/forum?id=
+d7KBjmI3GmQ.
+RemcovanderHofstad. RandomGraphsandComplexNetworks. CambridgeSeriesinStatistical
+andProbabilisticMathematics.CambridgeUniversityPress,2016.
+Or Honovich, Thomas Scialom, Omer Levy, and Timo Schick. Unnatural instructions: Tun-
+ing language models with (almost) no human labor. In Anna Rogers, Jordan Boyd-Graber,
+and Naoaki Okazaki (eds.), Proceedings of the 61st Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pp. 14409–14428, Toronto, Canada, July
+2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.acl-long.806. URL
+https://aclanthology.org/2023.acl-long.806.
+Jiaxin Huang, Shixiang Gu, Le Hou, Yuexin Wu, Xuezhi Wang, Hongkun Yu, and Jiawei Han.
+Large language models can self-improve. In Houda Bouamor, Juan Pino, and Kalika Bali
+(eds.), Proceedings of the 2023 Conference on Empirical Methods in Natural Language Pro-
+cessing, pp. 1051–1068, Singapore, December 2023. Association for Computational Linguis-
+tics. doi: 10.18653/v1/2023.emnlp-main.67. URLhttps://aclanthology.org/2023.
+emnlp-main.67.
+Adam Ibrahim, Benjamin The´rien, Kshitij Gupta, Mats L. Richter, Quentin Anthony, Timothe´e
+Lesort,EugeneBelilovsky,andIrinaRish. Simpleandscalablestrategiestocontinuallypre-train
+largelanguagemodels,2024. URLhttps://arxiv.org/abs/2403.08763.
+Nikhil Kandpal, Haikang Deng, Adam Roberts, Eric Wallace, and Colin Raffel. Large language
+modelsstruggletolearnlong-tailknowledge.InProceedingsofthe40thInternationalConference
+onMachineLearning,ICML’23.JMLR.org,2023.
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child,
+Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language
+models,2020. URLhttps://arxiv.org/abs/2001.08361.
+RichardMKarp. Thetransitiveclosureofarandomdigraph. RandomStructures&Algorithms,1
+(1):73–93,1990.
+RonaldKemker, MarcMcClure, AngelinaAbitino, TylerL.Hayes, andChristopherKanan. Mea-
+suring catastrophic forgetting in neural networks. In Proceedings of the Thirty-Second AAAI
+Conference on Artificial Intelligence and Thirtieth Innovative Applications of Artificial Intelli-
+gence Conference and Eighth AAAI Symposium on Educational Advances in Artificial Intelli-
+gence,AAAI’18/IAAI’18/EAAI’18.AAAIPress,2018. ISBN978-1-57735-800-8.
+JamesKirkpatrick,RazvanPascanu,NeilRabinowitz,JoelVeness,GuillaumeDesjardins,AndreiA.
+Rusu, Kieran Milan, John Quan, Tiago Ramalho, Agnieszka Grabska-Barwinska, Demis Has-
+sabis, Claudia Clopath, Dharshan Kumaran, and Raia Hadsell. Overcoming catastrophic for-
+getting in neural networks. Proceedings of the National Academy of Sciences, 114(13):3521–
+3526, 2017. doi: 10.1073/pnas.1611835114. URL https://www.pnas.org/doi/abs/
+10.1073/pnas.1611835114.
+Hunter Lang, Monica N Agrawal, Yoon Kim, and David Sontag. Co-training improves prompt-
+based learning for large language models. In Kamalika Chaudhuri, Stefanie Jegelka, Le Song,
+Csaba Szepesvari, Gang Niu, and Sivan Sabato (eds.), Proceedings of the 39th International
+Conference on Machine Learning, volume 162 of Proceedings of Machine Learning Research,
+pp. 11985–12003. PMLR, 17–23 Jul 2022. URL https://proceedings.mlr.press/
+v162/lang22a.html.
+Dong-HyunLee. Pseudo-label: Thesimpleandefficientsemi-supervisedlearningmethodfordeep
+neuralnetworks. ICML2013Workshop: ChallengesinRepresentationLearning,2013.
+PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,NamanGoyal,
+Heinrich Ku¨ttler, Mike Lewis, Wen-tau Yih, Tim Rockta¨schel, Sebastian Riedel, and Douwe
+24Kiela. Retrieval-augmentedgenerationforknowledge-intensivenlptasks. InProceedingsofthe
+34thInternationalConferenceonNeuralInformationProcessingSystems,NIPS’20,RedHook,
+NY,USA,2020.CurranAssociatesInc. ISBN9781713829546.
+AitorLewkowycz,AndersAndreassen,DavidDohan,EthanDyer,HenrykMichalewski,VinayRa-
+masesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, Yuhuai Wu, Behnam
+Neyshabur, GuyGur-Ari, andVedantMisra. Solvingquantitativereasoningproblemswithlan-
+guagemodels,2022. URLhttps://arxiv.org/abs/2206.14858.
+Haoran Li, Qingxiu Dong, Zhengyang Tang, Chaojun Wang, Xingxing Zhang, Haoyang Huang,
+Shaohan Huang, Xiaolong Huang, Zeqiang Huang, Dongdong Zhang, Yuxian Gu, Xin Cheng,
+Xun Wang, Si-Qing Chen, Li Dong, Wei Lu, Zhifang Sui, Benyou Wang, Wai Lam, and Furu
+Wei. Syntheticdata(almost)fromscratch: Generalizedinstructiontuningforlanguagemodels,
+2024. URLhttps://arxiv.org/abs/2402.13064.
+Xuechen Li, Tianyi Zhang, Yann Dubois, Rohan Taori, Ishaan Gulrajani, Carlos Guestrin, Percy
+Liang,andTatsunoriB.Hashimoto. Alpacaeval: Anautomaticevaluatorofinstruction-following
+models. https://github.com/tatsu-lab/alpaca_eval,52023a.
+YuanzhiLi,Se´bastienBubeck,RonenEldan,AllieDelGiorno,SuriyaGunasekar,andYinTatLee.
+Textbooksareallyouneedii: phi-1.5technicalreport,2023b. URLhttps://arxiv.org/
+abs/2309.05463.
+Chin-YewLin. ROUGE:Apackageforautomaticevaluationofsummaries. InTextSummarization
+BranchesOut, pp.74–81, Barcelona, Spain, July2004.AssociationforComputationalLinguis-
+tics. URLhttps://aclanthology.org/W04-1013.
+Hao Liu, Matei Zaharia, and Pieter Abbeel. Ring attention with blockwise transformers for near-
+infinite context. In NeurIPS 2023 Workshop on Instruction Tuning and Instruction Following,
+2023. URLhttps://openreview.net/forum?id=xulyCXgIWH.
+David Lopez-Paz and Marc’Aurelio Ranzato. Gradient episodic memory for continual learning.
+Advancesinneuralinformationprocessingsystems,30:6467–6476,2017.
+Pratyush Maini, Skyler Seto, Richard Bai, David Grangier, Yizhe Zhang, and Navdeep Jaitly.
+Rephrasing the web: A recipe for compute and data-efficient language modeling. In Lun-
+Wei Ku, Andre Martins, and Vivek Srikumar (eds.), Proceedings of the 62nd Annual Meet-
+ing of the Association for Computational Linguistics (Volume 1: Long Papers), pp. 14044–
+14072, Bangkok, Thailand, August 2024. Association for Computational Linguistics. URL
+https://aclanthology.org/2024.acl-long.757.
+MichaelMcCloskeyandNealJ.Cohen. Catastrophicinterferenceinconnectionistnetworks: The
+sequentiallearningproblem. InGordonH.Bower(ed.),PsychologyofLearningandMotivation,
+volume24ofPsychologyofLearningandMotivation,pp.109–165.AcademicPress,1989. doi:
+https://doi.org/10.1016/S0079-7421(08)60536-8. URL https://www.sciencedirect.
+com/science/article/pii/S0079742108605368.
+NickMecklenburg,YiyouLin,XiaoxiaoLi,DanielHolstein,LeonardoNunes,SaraMalvar,Bruno
+Silva, Ranveer Chandra, Vijay Aski, Pavan Kumar Reddy Yannam, Tolga Aktas, and Todd
+Hendry. Injecting new knowledge into large language models via supervised fine-tuning, 2024.
+URLhttps://arxiv.org/abs/2404.00213.
+KevinMeng,DavidBau,AlexJAndonian,andYonatanBelinkov.Locatingandeditingfactualasso-
+ciationsinGPT. InAliceH.Oh,AlekhAgarwal,DanielleBelgrave,andKyunghyunCho(eds.),
+Advances in Neural Information Processing Systems, 2022. URL https://openreview.
+net/forum?id=-h6WAS6eE4.
+KevinMeng,ArnabSenSharma,AlexJAndonian,YonatanBelinkov,andDavidBau.Mass-editing
+memoryinatransformer.InTheEleventhInternationalConferenceonLearningRepresentations,
+2023. URLhttps://openreview.net/forum?id=MkbcAHIYgyS.
+25SewonMin, KalpeshKrishna, XinxiLyu, MikeLewis, Wen tauYih, PangWei Koh, Mohit Iyyer,
+Luke Zettlemoyer, and Hannaneh Hajishirzi. Factscore: Fine-grained atomic evaluation of fac-
+tualprecisioninlongformtextgeneration,2023. URLhttps://arxiv.org/abs/2305.
+14251.
+Eric Mitchell, Charles Lin, Antoine Bosselut, Chelsea Finn, and Christopher D Manning. Fast
+model editing at scale. In International Conference on Learning Representations, 2022. URL
+https://openreview.net/pdf?id=0DcZxeWfOPt.
+Niklas Muennighoff, Alexander M Rush, Boaz Barak, Teven Le Scao, Nouamane Tazi, Aleksan-
+draPiktus, SampoPyysalo, ThomasWolf, andColinRaffel. Scalingdata-constrainedlanguage
+models. In Thirty-seventh Conference on Neural Information Processing Systems, 2023. URL
+https://openreview.net/forum?id=j5BuTrEj35.
+ArvindNeelakantan, TaoXu, RaulPuri, AlecRadford, JesseMichaelHan, JerryTworek, Qiming
+Yuan,NikolasTezak,JongWookKim,ChrisHallacy,JohannesHeidecke,PranavShyam,Boris
+Power,TynaEloundouNekoul,GirishSastry,GretchenKrueger,DavidSchnurr,FelipePetroski
+Such, Kenny Hsu, Madeleine Thompson, Tabarak Khan, Toki Sherbakov, Joanne Jang, Peter
+Welinder, andLilianWeng. Textandcodeembeddingsbycontrastivepre-training, 2022. URL
+https://arxiv.org/abs/2201.10005.
+Ani Nenkova, Rebecca Passonneau, and Kathleen McKeown. The pyramid method: Incorporat-
+ing human content selection variation in summarization evaluation. ACM Trans. Speech Lang.
+Process., 4(2):4–es, may 2007. ISSN 1550-4875. doi: 10.1145/1233912.1233913. URL
+https://doi.org/10.1145/1233912.1233913.
+CuongVNguyen,YingzhenLi,ThangDBui,andRichardETurner. Variationalcontinuallearning.
+arXivpreprintarXiv:1710.10628,2017.
+OpenAI, Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Floren-
+cia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, Red
+Avila, Igor Babuschkin, Suchir Balaji, Valerie Balcom, Paul Baltescu, Haiming Bao, Moham-
+mad Bavarian, Jeff Belgum, Irwan Bello, Jake Berdine, Gabriel Bernadett-Shapiro, Christopher
+Berner, Lenny Bogdonoff, Oleg Boiko, Madelaine Boyd, Anna-Luisa Brakman, Greg Brock-
+man, Tim Brooks, Miles Brundage, Kevin Button, Trevor Cai, Rosie Campbell, Andrew Cann,
+Brittany Carey, Chelsea Carlson, Rory Carmichael, Brooke Chan, Che Chang, Fotis Chantzis,
+DerekChen, SullyChen, RubyChen, JasonChen, MarkChen, BenChess, ChesterCho, Casey
+Chu, Hyung Won Chung, Dave Cummings, Jeremiah Currier, Yunxing Dai, Cory Decareaux,
+ThomasDegry,NoahDeutsch,DamienDeville,ArkaDhar,DavidDohan,SteveDowling,Sheila
+Dunning, Adrien Ecoffet, Atty Eleti, Tyna Eloundou, David Farhi, Liam Fedus, Niko Felix,
+Simo´n Posada Fishman, Juston Forte, Isabella Fulford, Leo Gao, Elie Georges, Christian Gib-
+son, Vik Goel, Tarun Gogineni, Gabriel Goh, Rapha Gontijo-Lopes, Jonathan Gordon, Morgan
+Grafstein, Scott Gray, Ryan Greene, Joshua Gross, Shixiang Shane Gu, Yufei Guo, Chris Hal-
+lacy, Jesse Han, Jeff Harris, Yuchen He, Mike Heaton, Johannes Heidecke, Chris Hesse, Alan
+Hickey, Wade Hickey, Peter Hoeschele, Brandon Houghton, Kenny Hsu, Shengli Hu, Xin Hu,
+Joost Huizinga, Shantanu Jain, Shawn Jain, Joanne Jang, Angela Jiang, Roger Jiang, Haozhun
+Jin, Denny Jin, Shino Jomoto, Billie Jonn, Heewoo Jun, Tomer Kaftan, Łukasz Kaiser, Ali Ka-
+mali,IngmarKanitscheider,NitishShirishKeskar,TabarakKhan,LoganKilpatrick,JongWook
+Kim, Christina Kim, Yongjik Kim, Jan Hendrik Kirchner, Jamie Kiros, Matt Knight, Daniel
+Kokotajlo, Łukasz Kondraciuk, Andrew Kondrich, Aris Konstantinidis, Kyle Kosic, Gretchen
+Krueger, Vishal Kuo, Michael Lampe, Ikai Lan, Teddy Lee, Jan Leike, Jade Leung, Daniel
+Levy, Chak Ming Li, Rachel Lim, Molly Lin, Stephanie Lin, Mateusz Litwin, Theresa Lopez,
+Ryan Lowe, Patricia Lue, Anna Makanju, Kim Malfacini, Sam Manning, Todor Markov, Yaniv
+Markovski,BiancaMartin,KatieMayer,AndrewMayne,BobMcGrew,ScottMayerMcKinney,
+ChristineMcLeavey,PaulMcMillan,JakeMcNeil,DavidMedina,AalokMehta,JacobMenick,
+Luke Metz, Andrey Mishchenko, Pamela Mishkin, Vinnie Monaco, Evan Morikawa, Daniel
+Mossing, TongMu, MiraMurati, OlegMurk, DavidMe´ly, AshvinNair, ReiichiroNakano, Ra-
+jeevNayak,ArvindNeelakantan,RichardNgo,HyeonwooNoh,LongOuyang,CullenO’Keefe,
+Jakub Pachocki, Alex Paino, Joe Palermo, Ashley Pantuliano, Giambattista Parascandolo, Joel
+Parish, Emy Parparita, Alex Passos, Mikhail Pavlov, Andrew Peng, Adam Perelman, Filipe
+de Avila Belbute Peres, Michael Petrov, Henrique Ponde de Oliveira Pinto, Michael, Pokorny,
+26MichellePokrass,VitchyrH.Pong,TollyPowell,AletheaPower,BorisPower,ElizabethProehl,
+Raul Puri, Alec Radford, Jack Rae, Aditya Ramesh, Cameron Raymond, Francis Real, Kendra
+Rimbach, Carl Ross, Bob Rotsted, Henri Roussez, Nick Ryder, Mario Saltarelli, Ted Sanders,
+Shibani Santurkar, Girish Sastry, Heather Schmidt, David Schnurr, John Schulman, Daniel Sel-
+sam,KylaSheppard,TokiSherbakov,JessicaShieh,SarahShoker,PranavShyam,SzymonSidor,
+Eric Sigler, Maddie Simens, Jordan Sitkin, Katarina Slama, Ian Sohl, Benjamin Sokolowsky,
+YangSong,NatalieStaudacher,FelipePetroskiSuch,NatalieSummers,IlyaSutskever,JieTang,
+NikolasTezak,MadeleineB.Thompson,PhilTillet,AminTootoonchian,ElizabethTseng,Pre-
+ston Tuggle, Nick Turley, Jerry Tworek, Juan Felipe Cero´n Uribe, Andrea Vallone, Arun Vi-
+jayvergiya,ChelseaVoss,CarrollWainwright,JustinJayWang,AlvinWang,BenWang,Jonathan
+Ward, Jason Wei, CJ Weinmann, Akila Welihinda, Peter Welinder, Jiayi Weng, Lilian Weng,
+Matt Wiethoff, Dave Willner, Clemens Winter, Samuel Wolrich, Hannah Wong, Lauren Work-
+man, Sherwin Wu, Jeff Wu, Michael Wu, Kai Xiao, Tao Xu, Sarah Yoo, Kevin Yu, Qiming
+Yuan,WojciechZaremba,RowanZellers,ChongZhang,MarvinZhang,ShengjiaZhao,Tianhao
+Zheng, Juntang Zhuang, William Zhuk, and Barret Zoph. Gpt-4 technical report, 2024. URL
+https://arxiv.org/abs/2303.08774.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang,SandhiniAgarwal,KatarinaSlama,AlexRay,JohnSchulman,JacobHilton,FraserKel-
+ton,LukeMiller,MaddieSimens,AmandaAskell,PeterWelinder,PaulFChristiano,JanLeike,
+and Ryan Lowe. Training language models to follow instructions with human feedback. In
+S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh (eds.), Advances in
+Neural Information Processing Systems, volume 35, pp. 27730–27744. Curran Associates, Inc.,
+2022. URL https://proceedings.neurips.cc/paper_files/paper/2022/
+file/b1efde53be364a73914f58805a001731-Paper-Conference.pdf.
+OdedOvadia,MenachemBrief,MoshikMishaeli,andOrenElisha. Fine-tuningorretrieval? com-
+paringknowledgeinjectioninllms,2024. URLhttps://arxiv.org/abs/2312.05934.
+Richard Yuanzhe Pang, Alicia Parrish, Nitish Joshi, Nikita Nangia, Jason Phang, Angelica Chen,
+Vishakh Padmakumar, Johnny Ma, Jana Thompson, He He, and Samuel Bowman. QuALITY:
+Question answering with long input texts, yes! In Marine Carpuat, Marie-Catherine de Marn-
+effe, and Ivan Vladimir Meza Ruiz (eds.), Proceedings of the 2022 Conference of the North
+AmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguageTechnolo-
+gies, pp. 5336–5358, Seattle, United States, July 2022. Association for Computational Linguis-
+tics. doi: 10.18653/v1/2022.naacl-main.391. URLhttps://aclanthology.org/2022.
+naacl-main.391.
+Jupinder Parmar, Sanjev Satheesh, Mostofa Patwary, Mohammad Shoeybi, and Bryan Catanzaro.
+Reuse,don’tretrain:Arecipeforcontinuedpretrainingoflanguagemodels,2024.URLhttps:
+//arxiv.org/abs/2407.07263.
+Baolin Peng, Chunyuan Li, Pengcheng He, Michel Galley, and Jianfeng Gao. Instruction tuning
+withgpt-4,2023. URLhttps://arxiv.org/abs/2304.03277.
+Pinecone.Ragwithpinecone,2024.URLhttps://www.pinecone.io/solutions/rag/.
+Vinay Venkatesh Ramasesh, Aitor Lewkowycz, and Ethan Dyer. Effect of scale on catastrophic
+forgetting in neural networks. In International Conference on Learning Representations, 2022.
+URLhttps://openreview.net/forum?id=GhVS8_yPeEa.
+R. Ratcliff. Connectionist models of recognition memory: Constraints imposed by learning and
+forgettingfunctions. PsychologicalReview,97(2):285–308,1990. doi: 10.1037/0033-295X.97.
+2.285.
+Sylvestre-Alvise Rebuffi, Alexander Kolesnikov, Georg Sperl, and Christoph H Lampert. icarl:
+Incremental classifier and representation learning. In Proceedings of the IEEE conference on
+ComputerVisionandPatternRecognition,pp.2001–2010,2017.
+AnthonyRobins. Catastrophicforgetting,rehearsalandpseudorehearsal. ConnectionScience,7(2):
+123–146,1995.
+27BaptisteRozie`re,JonasGehring,FabianGloeckle,StenSootla,ItaiGat,XiaoqingEllenTan,Yossi
+Adi, Jingyu Liu, Romain Sauvestre, Tal Remez, Je´re´my Rapin, Artyom Kozhevnikov, Ivan Ev-
+timov, Joanna Bitton, Manish Bhatt, Cristian Canton Ferrer, Aaron Grattafiori, Wenhan Xiong,
+Alexandre De´fossez, Jade Copet, Faisal Azhar, Hugo Touvron, Louis Martin, Nicolas Usunier,
+ThomasScialom, andGabrielSynnaeve. Codellama: Openfoundationmodelsforcode, 2024.
+URLhttps://arxiv.org/abs/2308.12950.
+AndreiARusu,NeilCRabinowitz,GuillaumeDesjardins,HubertSoyer,JamesKirkpatrick,Koray
+Kavukcuoglu, Razvan Pascanu, and Raia Hadsell. Progressive neural networks. arXiv preprint
+arXiv:1606.04671,2016.
+JeffreyC.SchlimmerandDouglasFisher. Acasestudyofincrementalconceptinduction. InPro-
+ceedingsoftheFifthAAAINationalConferenceonArtificialIntelligence,AAAI’86,pp.496–501.
+AAAIPress,1986.
+Raphael Schumann and Ines Rehbein. Active learning via membership query synthesis for semi-
+supervisedsentenceclassification. InMohitBansalandAlineVillavicencio(eds.), Proceedings
+of the 23rd Conference on Computational Natural Language Learning (CoNLL), pp. 472–481,
+HongKong,China,November2019.AssociationforComputationalLinguistics. doi: 10.18653/
+v1/K19-1044. URLhttps://aclanthology.org/K19-1044.
+H.Scudder. Probabilityoferrorofsomeadaptivepattern-recognitionmachines. IEEETransactions
+onInformationTheory,11(3):363–371,1965. doi: 10.1109/TIT.1965.1053799.
+Claude Elwood Shannon. Prediction and entropy of printed english. Bell System Technical
+Journal, 30:50–64, January 1951. URL http://languagelog.ldc.upenn.edu/myl/
+Shannon1950.pdf.
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+MingchuanZhang,Y.K.Li,Y.Wu,andDayaGuo. Deepseekmath: Pushingthelimitsofmathe-
+maticalreasoninginopenlanguagemodels,2024. URLhttps://arxiv.org/abs/2402.
+03300.
+Hanul Shin, Jung Kwon Lee, Jaehong Kim, and Jiwon Kim. Continual learning with deep gener-
+ativereplay. InI.Guyon,U.VonLuxburg,S.Bengio,H.Wallach,R.Fergus,S.Vishwanathan,
+and R. Garnett (eds.), Advances in Neural Information Processing Systems, volume 30. Cur-
+ranAssociates,Inc.,2017.URLhttps://proceedings.neurips.cc/paper_files/
+paper/2017/file/0efbe98067c6c73dba1250d2beaa81f9-Paper.pdf.
+Charlie Snell, Dan Klein, and Ruiqi Zhong. Learning by distilling context, 2022. URL https:
+//arxiv.org/abs/2209.15189.
+G. C. Stine. Skepticism, relevant alternatives, and deductive closure. Philosophical Studies: An
+International Journal for Philosophy in the Analytic Tradition, 29(4):249–261, 1976. ISSN
+00318116,15730883. URLhttp://www.jstor.org/stable/4319027.
+Yu Sun, Xinhao Li, Karan Dalal, Jiarui Xu, Arjun Vikram, Genghan Zhang, Yann Dubois, Xinlei
+Chen, Xiaolong Wang, Sanmi Koyejo, Tatsunori Hashimoto, and Carlos Guestrin. Learning to
+(learn at test time): Rnns with expressive hidden states, 2024. URL https://arxiv.org/
+abs/2407.04620.
+Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy
+Liang, and Tatsunori B. Hashimoto. Stanford alpaca: An instruction-following llama model.
+https://github.com/tatsu-lab/stanford_alpaca,2023.
+YiTay,MostafaDehghani,DaraBahri,andDonaldMetzler. Efficienttransformers:Asurvey,2022.
+URLhttps://arxiv.org/abs/2009.06732.
+TogetherAI. Redpajama: anopendatasetfortraininglargelanguagemodels,2023. URLhttps:
+//github.com/togethercomputer/RedPajama-Data.
+LewisTunstall,EdwardBeeching,NathanLambert,NazneenRajani,ShengyiHuang,KashifRasul,
+AlvaroBartolome,AlexanderM.Rush,andThomasWolf.TheAlignmentHandbook,2023.URL
+https://github.com/huggingface/alignment-handbook.
+28PabloVillalobos,AnsonHo,JaimeSevilla,TamayBesiroglu,LennartHeim,andMariusHobbhahn.
+Willwerunoutofdata? limitsofllmscalingbasedonhuman-generateddata,2024.
+Pauli Virtanen, Ralf Gommers, Travis E. Oliphant, Matt Haberland, Tyler Reddy, David Courna-
+peau, Evgeni Burovski, Pearu Peterson, Warren Weckesser, Jonathan Bright, Ste´fan J. van der
+Walt, Matthew Brett, Joshua Wilson, K. Jarrod Millman, Nikolay Mayorov, Andrew R. J. Nel-
+son, Eric Jones, Robert Kern, Eric Larson, C J Carey, ˙Ilhan Polat, Yu Feng, Eric W. Moore,
+JakeVanderPlas,DenisLaxalde,JosefPerktold,RobertCimrman,IanHenriksen,E.A.Quintero,
+Charles R. Harris, Anne M. Archibald, Antoˆnio H. Ribeiro, Fabian Pedregosa, Paul van Mul-
+bregt,andSciPy1.0Contributors. SciPy1.0: FundamentalAlgorithmsforScientificComputing
+inPython. NatureMethods,17:261–272,2020. doi: 10.1038/s41592-019-0686-2.
+AlexWang,RichardYuanzhePang,AngelicaChen,JasonPhang,andSamuelR.Bowman.SQuAL-
+ITY:Buildingalong-documentsummarizationdatasetthehardway. InYoavGoldberg,Zornitsa
+Kozareva, and Yue Zhang (eds.), Proceedings of the 2022 Conferenceon Empirical Methods in
+Natural Language Processing, pp. 1139–1156, Abu Dhabi, United Arab Emirates, December
+2022.AssociationforComputationalLinguistics. doi: 10.18653/v1/2022.emnlp-main.75. URL
+https://aclanthology.org/2022.emnlp-main.75.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H. Chi, Sharan Narang, Aakanksha
+Chowdhery,andDennyZhou. Self-consistencyimproveschainofthoughtreasoninginlanguage
+models. In The Eleventh International Conference on Learning Representations, 2023a. URL
+https://openreview.net/forum?id=1PL1NIMMrw.
+YizhongWang,YeganehKordi,SwaroopMishra,AlisaLiu,NoahA.Smith,DanielKhashabi,and
+Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated instructions.
+InAnnaRogers,JordanBoyd-Graber,andNaoakiOkazaki(eds.),Proceedingsofthe61stAnnual
+MeetingoftheAssociationforComputationalLinguistics(Volume1: LongPapers),pp.13484–
+13508,Toronto,Canada,July2023b.AssociationforComputationalLinguistics. doi: 10.18653/
+v1/2023.acl-long.754. URLhttps://aclanthology.org/2023.acl-long.754.
+Alex Warstadt, Aaron Mueller, Leshem Choshen, Ethan Wilcox, Chengxu Zhuang, Juan Ciro,
+Rafael Mosquera, Bhargavi Paranjabe, Adina Williams, Tal Linzen, and Ryan Cotterell (eds.).
+Proceedings of the BabyLM Challenge at the 27th Conference on Computational Natural Lan-
+guage Learning, Singapore, December 2023. Association for Computational Linguistics. URL
+https://aclanthology.org/2023.conll-babylm.0.
+Jason Wei, Maarten Bosma, Vincent Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du,
+AndrewM.Dai,andQuocVLe. Finetunedlanguagemodelsarezero-shotlearners. InInterna-
+tional Conference on Learning Representations, 2022. URL https://openreview.net/
+forum?id=gEZrGCozdqR.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi,
+Quoc V. Le, and Denny Zhou. Chain-of-thought prompting elicits reasoning in large language
+models. InProceedingsofthe36thInternationalConferenceonNeuralInformationProcessing
+Systems,NIPS’22,RedHook,NY,USA,2024.CurranAssociatesInc. ISBN9781713871088.
+Tongtong Wu, Linhao Luo, Yuan-Fang Li, Shirui Pan, Thuy-Trang Vu, and Gholamreza Haffari.
+Continuallearningforlargelanguagemodels: Asurvey,2024. URLhttps://arxiv.org/
+abs/2402.01364.
+Qizhe Xie, Minh-Thang Luong, Eduard Hovy, and Quoc V. Le. Self-training with noisy student
+improvesimagenetclassification.In2020IEEE/CVFConferenceonComputerVisionandPattern
+Recognition(CVPR),pp.10684–10695,2020. doi: 10.1109/CVPR42600.2020.01070.
+I.ZekiYalniz, Herve´ Je´gou, KanChen, ManoharPaluri, andDhruvMahajan. Billion-scalesemi-
+supervisedlearningforimageclassification,2019. URLhttps://arxiv.org/abs/1905.
+00546.
+Zitong Yang, MICHAL LUKASIK, Vaishnavh Nagarajan, Zonglin Li, Ankit Rawat, Manzil Za-
+heer,AdityaKMenon,andSanjivKumar. Resmem: Learnwhatyoucanandmemorizetherest.
+In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (eds.), Advances in
+29Neural Information Processing Systems, volume 36, pp. 60768–60790. Curran Associates, Inc.,
+2023. URL https://proceedings.neurips.cc/paper_files/paper/2023/
+file/bf0857cb9a41c73639f028a80301cdf0-Paper-Conference.pdf.
+DongYuan,EtiRastogi,GautamNaik,SreePrasannaRajagopal,SagarGoyal,FenZhao,Bharath
+Chintagunta, and Jeff Ward. A continued pretrained llm approach for automatic medical note
+generation,2024a. URLhttps://arxiv.org/abs/2403.09057.
+Weizhe Yuan, Richard Yuanzhe Pang, Kyunghyun Cho, Xian Li, Sainbayar Sukhbaatar, Jing Xu,
+and Jason Weston. Self-rewarding language models, 2024b. URL https://arxiv.org/
+abs/2401.10020.
+FriedemannZenke,BenPoole,andSuryaGanguli.Continuallearningthroughsynapticintelligence.
+InInternationalConferenceonMachineLearning,pp.3987–3995.PMLR,2017.
+Dan Zhang, Sining Zhoubian, Yisong Yue, Yuxiao Dong, and Jie Tang. Rest-mcts*: Llm self-
+training via process reward guided tree search, 2024a. URL https://arxiv.org/abs/
+2406.03816.
+Tianyi Zhang*, Varsha Kishore*, Felix Wu*, Kilian Q. Weinberger, and Yoav Artzi. Bertscore:
+Evaluatingtextgenerationwithbert. InInternationalConferenceonLearningRepresentations,
+2020. URLhttps://openreview.net/forum?id=SkeHuCVFDr.
+Tianyi Zhang, Faisal Ladhak, Esin Durmus, Percy Liang, Kathleen McKeown, and Tatsunori B.
+Hashimoto. Benchmarkinglargelanguagemodelsfornewssummarization. Transactionsofthe
+Association for Computational Linguistics, 12:39–57, 2024b. doi: 10.1162/tacl a 00632. URL
+https://aclanthology.org/2024.tacl-1.3.
+Yanli Zhao, Andrew Gu, Rohan Varma, Liang Luo, Chien-Chin Huang, Min Xu, Less Wright,
+HamidShojanazeri, MyleOtt, SamShleifer, AlbanDesmaison, CanBalioglu, PritamDamania,
+BernardNguyen,GeetaChauhan,YuchenHao,AjitMathews,andShenLi. Pytorchfsdp: Expe-
+riencesonscalingfullyshardeddataparallel. Proc.VLDBEndow.,16(12):3848–3860,aug2023.
+ISSN2150-8097. doi: 10.14778/3611540.3611569. URLhttps://doi.org/10.14778/
+3611540.3611569.
+Zexuan Zhong, Zhengxuan Wu, Christopher Manning, Christopher Potts, and Danqi Chen.
+MQuAKE:Assessingknowledgeeditinginlanguagemodelsviamulti-hopquestions. InHouda
+Bouamor, Juan Pino, and Kalika Bali (eds.), Proceedings of the 2023 Conference on Empiri-
+cal Methods in Natural Language Processing, pp. 15686–15702, Singapore, December 2023.
+Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.971. URL
+https://aclanthology.org/2023.emnlp-main.971.
+Chen Zhu, Ankit Singh Rawat, Manzil Zaheer, Srinadh Bhojanapalli, Daliang Li, Felix Yu, and
+SanjivKumar. Modifyingmemoriesintransformermodels,2020.
+30A CODEBASE
+Weprovidethecodebaseforreproducingallresultsdiscussedinthepaperbelow:
+https://github.com/ZitongYang/Synthetic_Continued_Pretraining.git
+B SYNTHETIC DATA PROMPTS
+Wegeneratetwosyntheticcorporainthispaper: EntiGraph(AppendixB.1)andtheRephrasebase-
+line(AppendixB.2). Asdiscussedin§2.1,oursyntheticaugmentationprocedureisappliedtoeach
+documentD inthecollectionofsourcedocumentsD . WewillfocusonasingledocumentD
+source
+fortheremainderofthissection.
+B.1 ENTIGRAPHPROMPTS
+TheEntiGraphprocedureisdescribedindetailin§2.2. Wewillrecapthethreestepsbelow.
+Step 1: Entity extraction. The first step is to extract the salient entities from the document D
+usingtheentity extractionoperation(Equation(2)).Thecompleteentity extraction
+promptisasfollows:
+As a knowledge analyzer, your task is to dissect and understand a
+lecture script provided by the user. You are required to perform the
+following steps:
+1. Summarize the Lecture Script: Provide a concise summary of the
+lecture, capturing the main points, topics, and themes discussed.
+2. Extract Entities: Identify and list all significant "nouns" or
+entities mentioned within the script. These entities should
+include, but are not limited to:
+* People: Any lecturers, historical figures, or individuals
+mentioned.
+* Places: Specific locations or institutions referenced.
+* Objects: Any concrete objects or tools discussed within
+the context of the lecture.
+* Concepts: Key academic concepts, theories, or themes that are
+central to the lecture’s discussion.
+Ensure that your summary is brief yet comprehensive, and the list
+of entities is detailed and accurate. Structure your response in a
+JSON format to organize the information effectively.
+Here is the format you should use for your response:
+{
+"summary": "<A concise summary of the lecture script>",
+"entities": ["entity1", "entity2", ...]
+}
+Step 2: single entity description. The second step is to generate text to describe one specific
+entityusingtherelation analysispromptinEquation(3). Thefullrelation analysis
+promptisasfollows:
+31As an examiner, you are tasked with creating reading comprehension
+questions for students based on a provided article and a specified
+entity referenced within it. Your role involves crafting questions
+and corresponding answers that fulfill the following criteria:
+1. **Focus on the Entity**: Ensure all questions consistently
+center around the specified entity from the article.
+2. **Encourage Deep Analysis**: Develop thought-provoking, open-
+ended questions that challenge students to think critically and
+analytically. Questions should:
+- Prompt students to reflect deeply, questioning the assumptions
+within the article.
+- Require students to evaluate evidence and consider alternative
+perspectives.
+- Encourage complex reasoning about the entity and its
+implications within the article’s context.
+3. **Comprehensive Answers**: For each question, provide a detailed
+solution that:
+- Explicitly connects back to the specified entity and its role
+or representation in the article.
+- Includes concrete references to specific paragraphs or
+sections of the article to support the answer.
+Try to write as many questions as possible. Your response should be
+formatted to organize the questions and answers systematically.
+Here is the structure you should use:
+### Questions and answers about <entity> in context of <title>
+Question: <Question1 focusing on the entity>
+Answer: <Detailed answer with references to the article>
+Question: <Question2 focusing on the entity>
+Answer: <Detailed answer with references to the article>
+...
+Step 3: relation analysis. The last step is to generate diverse descriptions of relations among
+twoormoreentities. Inourexperiments, foreachdocumentD, weenumerateallentitypairsand
+generateadescriptionforeach. Thepromptforgeneratingadescriptionrelatingapairofentitiesis
+asfollows:
+You will act as a knowledge analyzer tasked with dissecting an
+article provided by the user. Your role involves two main
+objectives:
+1. Rephrasing Content: The user will identify two specific entities
+mentioned in the article. You are required to rephrase the
+content of the article twice:
+* Once, emphasizing the first entity.
+* Again, emphasizing the second entity.
+2. Analyzing Interactions: Discuss how the two specified entities
+interact within the context of the article.
+3. Generating qeustions and answers: crafting questions and
+corresponding answers that fulfill the following criteria:
+- **Focus on the two Concepts/Terms**: Ensure all questions
+consistently center around the two concepts provided by the
+user.
+- **Encourage Deep Analysis**: Develop thought-provoking, open-
+ended questions that challenge students to think critically
+and analytically understand how the interaction between the
+two entities shape the article.
+32Your responses should provide clear segregation between the
+rephrased content and the interaction analysis. Ensure each section
+of the output include sufficient context, ideally referencing the
+article’s title to maintain clarity about the discussion’s focus.
+Here is the format you should follow for your response:
+### Discussion of <title> in relation to <entity1>
+<Rephrased content focusing on the first entity>
+### Discussion of <title> in relation to <entity2>
+<Rephrased content focusing on the second entity>
+### Discussion of Interaction between <entity1> and <entity2>
+in context of <title>
+<Discussion on how the two entities interact within the article>
+### Questions and answers about <entity1> and <entity2> in context
+of <title>
+Question: <Question1 focusing on the two entities>
+Answer: <Detailed answer with references to the article>
+Question: <Question2 focusing on the two entities>
+Answer: <Detailed answer with references to the article>
+Wealsogeneratesyntheticdatainvolvingthreeentities,usingthepromptbelow:
+You will act as a knowledge analyzer tasked with dissecting an
+article provided by the user. Your role involves three main
+objectives:
+1. Rephrasing Content: The user will identify three specific
+entities mentioned in the article. You are required to rephrase
+the content of the article three times:
+* Once, emphasizing the first entity.
+* Again, emphasizing the second entity.
+* Lastly, emphasizing the third entity.
+2. Analyzing Interactions: Discuss how these three specified
+entities interact within the context of the article.
+3. Asking Questions: Generate some questions that involves all
+three entities and their interactions. Ensure your questions
+satisfies the following criteria:
+* Focus on the entities: Ensure all questions consistently
+center around the three entities specified.
+* Encourage Deep Analysis: Develop thought-provoking, open-
+ended questions that challenge students to think critically
+and analytically about the entities. Questions should:
+- Prompt students to reflect deeply on the meaning and
+implications of all three concepts.
+- Encourage complex reasoning about the concept’s broader
+implications in the context of the article.
+Your responses should provide clear segregation between the
+rephrased content and the interaction analysis. Ensure each section
+of the output include sufficient context, ideally referencing the
+article’s title to maintain clarity about the discussion’s focus.
+Here is the format you should follow for your response:
+### Discussion of <title> in relation to <entity1>
+<Rephrased content focusing on the first entity>
+### Discussion of <title> in relation to <entity2>
+<Rephrased content focusing on the second entity>
+33### Discussion of <title> in relation to <entity3>
+<Rephrased content focusing on the third entity>
+### Discussion of Interaction between <entity1>, <entity2> and
+<entity3> in context of <title>
+<Discussion on how the three entities interact within the article>
+### Question involving <entity1>, <entity2> and <entity3> in
+context of <title>
+<Question1 that involves all three entities and their interactions>
+<Answer to the Question1>
+<Question2 that involves all three entities and their interactions>
+<Answer to the Question2>
+...
+B.2 REPHRASEPROMPTS
+Fortherephrasecorpus, weadaptthepromptfromMainietal.(2024)tooursettingofbooksand
+articles. Weprovidefourrephrasestylesbelow:
+Easyrephrase:
+You are an assistant to help read a article and then rephrase it in
+simpler terms. The user will provide you with an article with
+title, year, content. You need to generate a paraphrase of the same
+article using a very small vocabulary and extremely simple
+sentences that a toddler will understand. Remember to keep the
+meaning and every content of the article intact, including the
+title, year, etc.
+Mediumrephrase:
+You are an assistant to help read a article and then rephrase it in
+different terms. The user will provide you with an article with
+title, year, content. You need to generate a paraphrase of the same
+article using diverse and high quality English language as in
+sentences on Wikipedia. Remember to keep the meaning and every
+content of the article intact, including the title, year,
+etc.
+Hardrephrase:
+You are an assistant to help read a article and then rephrase it in
+more sophisticated terms. The user will provide you with an article
+with title, year, content. You need to generate a paraphrase of the
+same article using very terse and abstruse language that only an
+erudite scholar will understand. Remember to keep the meaning and
+every content of the article intact, including the title, year,
+etc.
+QArephrase:
+You are an assistant to help read a article and then rephrase it in
+a conversational format. The user will provide you with an article
+with title, year, content. You need to generate a paraphrase of the
+34same article in question and answer format with multiple tags of
+"Question: ..." followed by "Answer: ...". Remember to keep the
+meaning and every content of the article intact, including the
+title, year, etc.
+C DETAILS ON THE QUALITY DATASET
+We provide additional details on the QuALITY dataset below. For each book, we execute entity
+extraction(Step1),singleentitydescription(Step2,Eq.(4)),andthenanalyzeallpair-wiserelations
+betweenentitiesandasubsetofalltripletrelations(Step3,Eq.(4)). Weprovidesummarystatistics
+fortheRawandEntiGraphcorporainFigure6.
+30 40 30
+25 35 25
+30
+20 20
+25
+15 20 15
+10 15 10
+10
+5 5 5
+02 3 4 5 6 7 8 00 20 40 60 80 100 0 0 1000 2000 3000 4000 5000
+Token count (K) Entity count Token count (K)
+(a) Rawarticletokens (b) Extractedentities (c) EntiGraphcorpustokens
+Figure6:Histogramsoverthe265QuALITYarticlesandbooks.(a)Thetokencountofrawarticles.
+(b)Thenumberofextractedentities. (c)ThetokencountofEntiGraphsyntheticdata(generatedfor
+eachbook).
+D ADDITIONAL EVALUATION DETAILS OF MAIN EXPERIMENTS
+D.1 QUALITYQAQUESTIONSET
+Inthissection,weprovidemoredetailsofevaluationontheQuALITYQAtestqueries.Throughout
+theclosed-bookQAexperiments,weuseafixed5-shotpromptbelow:
+## Example 1
+### Question
+In the context of "Les Mis´erables", written by Victor Hugo in 1862,
+what is the main setting of the novel? There is only one correct
+choice.
+### Choices
+A. London
+B. Madrid
+C. Paris
+D. Rome
+### Thought Process and Answer
+Thought process: "Les Mis´erables" is primarily set in Paris, making
+C the correct choice. London, Madrid, and Rome are significant
+cities in other literary works but not in Victor Hugo’s "Les
+Mis´erables". There is only one correct choice.
+Answer: C.
+## Example 2
+### Question
+In the context of "Brave New World", written by Aldous Huxley in
+35
+ycneuqerF ycneuqerF ycneuqerF1932, what substance is widely used in the society to control
+citizens’ happiness? There is only one correct choice.
+### Choices
+A. Gold
+B. Soma
+C. Silver
+D. Iron
+### Thought Process and Answer
+Thought process: In Aldous Huxley’s "Brave New World," Soma is used
+as a means to maintain social control by ensuring citizens’
+happiness, making B the correct choice. Gold, Silver, and Iron are
+not the substances used for this purpose in the book.
+Answer: B.
+## Example 3
+### Question
+In the context of "Romeo and Juliet", written by William
+Shakespeare in the early 1590s, what are the names of the two
+feuding families? There is only one correct choice.
+Choices:
+A. Montague and Capulet
+B. Bennet and Darcy
+C. Linton and Earnshaw
+D. Bloom and Dedalus
+### Thought Process and Answer
+Thought process: In William Shakespeare’s "Romeo and Juliet," the
+two feuding families are the Montagues and the Capulets, making A
+the correct choice. The Bennets and Darcys are in "Pride and
+Prejudice", the Lintons and Earnshaws in "Wuthering Heights", and
+Bloom and Dedalus in "Ulysses".
+Answer: A.
+## Example 4
+### Question
+In the context of "1984", written by George Orwell in 1949, what is
+the name of the totalitarian leader? There is only one correct
+choice.
+### Choices
+A. Big Brother
+B. O’Brien
+C. Winston Smith
+D. Emmanuel Goldstein
+### Thought Process and Answer
+Thought process: In George Orwell’s "1984," the totalitarian leader
+is known as Big Brother, making A the correct choice. O’Brien is a
+character in the novel, Winston Smith is the protagonist, and
+Emmanuel Goldstein is a rebel leader.
+Answer: A.
+## Example 5
+### Question
+In the context of "Moby-Dick", written by Herman Melville in 1851,
+what is the name of the ship’s captain obsessed with hunting the
+titular whale? There is only one correct choice.
+### Choices
+A. Captain Hook
+B. Captain Nemo
+C. Captain Flint
+D. Captain Ahab
+### Thought Process and Answer
+Thought process: In Herman Melville’s "Moby-Dick," the ship’s
+captain obsessed with hunting the whale is Captain Ahab, making D
+36the correct choice. Captain Nemo is in "Twenty Thousand Leagues
+Under the Sea", Captain Flint in "Treasure Island", and Captain
+Hook in "Peter Pan".
+Answer: D.
+## Example 6
+Iftheoutputofthemodelcorrectlyfollowstheformatofthefew-shotprompt,itslasttwocharacters
+shouldbe“A.”, “B.”, “C.”, or“D.”. However, themodelsometimescannotsuccessfullyfollow
+thefew-shotpromptingformat,particularlyforthecontinuallypretrainedmodel. Asaresult,inall
+ourevaluations,wesampletheresponse64times,andonlyselecttheonesthatcanbeparsedinthe
+correctformat. Outofthese64attempts, werandomlyselectamongthevalidanswerstogivethe
+final answer. Note that this is different from majority voting in self-consistency prompting (Wang
+etal.,2023a).
+D.2 CLOSED-BOOKSUMMARIZATION
+For summarization evaluation with EntiGraph Instruct, Raw Instruct, and Rephrase Instruct, we
+applythefollowingthreepromptstoobtainthreesummariesofincreasinglength. Weprovidethree
+➤ Short prompt: Summarize the article {article title} by {author
+name} for me.
+Give a short summary of ‘‘Cosmic Yo-Yo’’ by Ross Rocklynne.
+➤ Medium prompt: Write a three-paragraph article about {article
+title} by {author name}.
+Write a three-paragraph article about ‘‘Cosmic Yo-Yo’’ by
+Ross Rocklynne.
+➤ Long prompt: Write an extremely long and detailed article
+regarding the book {article title} by {author name}.
+Write an extremely long and detailed article regarding the
+book ‘‘Cosmic Yo-Yo’’ by Ross Rocklynne.
+Table5: SummarizationpromptforEntiGraphInstruct,RawInstruct,andReprhaseInstruct.
+examples of summarization outputs below. For each of the three examples, we will first present
+the human summary for this article to provide context for the example, and then present the short
+summaryfromthreesummarizers.
+Example1. Thefirstexampleis“CosmicYo-Yo”byRossRocklynne.
+Human summary: Bob Parker, the President of Interplanetary Hauling & Moving Co.,
+sellsasteroidstowealthypeopleonearth. Clientsaskforasteroidswithsizeparametersand
+specifications,andBobfindstheminspaceandhaulsthemtoearth. Hiscompanyisalmost
+bankruptbecausearivalcompany,Saylor&Saylor,stolehisideaandnowoffersthesame
+services. BobreceivesmailfromMr. AndrewS.Burnsidewitharequestforanasteroidthat
+hewouldliketouseinanupcomingwedding.
+BobandhispartnerQueazysetouttofindtheperfectasteroidforMr. Burnside, although
+theyknowit’salongshot. Fairlyquickly,theyfindonethatlooksperfect. Themenlandon
+theasteroid,andBobdeployshisatomic-whirlspectroscopetotestit. Suddenly,abeautiful
+womaninterruptshimanddemandsthattheyleavetheasteroid.Shepullsoutherspasticizer
+gunbeforetellingthemthattheycanhaveitinamonthaftershe’sgone. Bobexplainsthat
+theyaredesperate,butthegirlretortsthatherfateisworsethandeathifsheleaves.
+37Suddenly,theSaylorbrothers’shipappears,andBobtellsthegirlthattheyhavetofightthis
+enemytogether. WallyandBillySaylor, alongwiththreeothermen, jumpoutoftheship.
+BobtellsthemthatMr. Burnsidehasorderedthisasteroid,andtheSaylorbrotherssaythat
+theyreceivedthesameorder. Bobquicklygrabsthegirl’sspasticizerwhileQueazythrows
+his body at Billy. However, Wally manages to shoot the gun out of Bob’s hand and attack
+him. Bobisknockedunconsciousinthescuffle.
+When Bob wakes up, he is completely alone, floating in space. He panics because he has
+very little oxygen left. Finally, he hears Queazy’s voice explaining that the girl used her
+ship’stechnologytofindthemboth.ThemysterygirlintroducesherselfasStarreLowenthal,
+thegranddaughterofMr. Burnside. Sheconcedesthatthisentiremissionwasfake. Shetold
+her grandfather that she would only marry her fiance Mac if he could get this particular
+asteroid, and then she made plans to conquer and protect the asteroid so it could not be
+suppliedforthewedding.
+BobisconfidentthattheycanreachtheSaylorbrothersbeforetheybringtheasteroidback
+toearth,buthisplandoesnothingtoprotectStarrefrommarryingamanshedoesn’tlove.
+SheagreestohelpBobandQueazy. Withinfivedays,BobrealizesheisinlovewithStarre.
+Starrecompareshersmallshiptoayo-yo,andBobgetsanidea-theywilluseStarre’sship
+likeayo-yotoretrievetheasteroidfromtheSaylorbrothers. Oncetheteamcatchesupto
+the Saylor brothers, Bob flings Starre’s ship at the asteroid several times, and Wally calls
+themtotellthemthattheymightdieasaresultofthedamagetheirshiphassustained. Bob
+makes it clear that they have no intention of stopping, and the Saylor brothers release the
+asteroid.
+EntiGraphInstructwithshortprompt: CosmicYo-YoisasciencefictionstorybyRoss
+RocklynneaboutBobParkerandQueazy,twointerplanetaryhaulerswhoarehiredtodeliver
+anasteroidtoEarthforawealthyclient’sbackyardwedding.However,theyfacecompetition
+fromtheirrivals,theSaylorbrothers,whoalsowanttodelivertheasteroid.Thestoryfollows
+theirracetodelivertheasteroidbeforethedeadline,usingayo-yo-likedevicetomaneuver
+theasteroidandoutsmarttheirrivals. Thestoryisfilledwithaction,adventure,andatouch
+ofromance.
+RawInstructwithshortprompt: CosmicYo-YobyRocklynne,Rossisasciencefiction
+novel that follows the story of a young woman named Susan who discovers a mysterious
+devicethatcantransportherthroughtimeandspace.Sheusesthedevicetotraveltodifferent
+planetsandmeetdifferentalienspecies,butsoonrealizesthatheractionshaveconsequences
+andshemustfindawaytoreturnhome.Thenovelexploresthemesofidentity,responsibility,
+andtheconsequencesofouractions.
+RephraseInstructwithshortprompt: CosmicYo-Yoisasciencefictionnovelwrittenby
+RossRocklynnein1954. Thestoryfollowstheadventuresofagroupofastronautswhoare
+sentonamissiontoexploreanewplanet. However,theysoondiscoverthattheplanetisnot
+ashospitableastheythoughtandmustfightfortheirsurvivalagainstthehostileenvironment
+and the indigenous creatures. The novel explores themes of exploration, survival, and the
+unknown.
+Example2. Thesecondexampleis“BeachScene”byMarshallKing. WecanseethatEntiGraph
+correctlygivesasummaryofthestorywhileRephraseInstructandRawInstructmistakesthebook
+asapainting.
+Human summary: Purnie, an animal, is going to see the ocean on his fifth birthday. He
+hasheardstoriesaboutthisplace,andexperiencingitfirsthandissurrealforhim. Purnieis
+carefulnottodisturbtheanimalsheseesalongthewaybecausehehasfrozentime,and
+38everything must resume normally when he unfreezes it. He knows that time-stopping is
+forbiddenforanimalshisage,buthechoosestobelievethathisfamilywillbeproudofhis
+bravery.
+Finally, heseestheoceaninfrontofhim, andheresumestime. Hedoesahead-standand
+feelsweakanddizzy. Thesefeelingsarearesultofthetime-stop,andheknowsit. Purnie
+approachessomehumansonthebeach. AmannamedForbesisinthemiddleofexplaining
+tohiscaptain,Benson,thathehasfound17planetstoclaimashisown. Forbesishellbent
+onraisinghisFORBESflagassoonaspossible. Heiseagertostakehisclaimtotheland
+andsaysthathismissionismuchbiggerthanrealestatealone. Bensonretortsthatyes,his
+missionisbiggerthanjustrealestatebecausehispaperworksaysthatForbeswillownallof
+theinhabitantsoftheplanetsheclaimsaswellastheland.
+ThecrewmembersuseaspecialmachineandfindradiationemanatingfromPurnie. Forbes
+demands that they put the animal in a box. Benson protests and reminds Forbes that it’s
+against Universal Law, but Forbes insists. Purnie experiences his first-ever impulse to run
+away with fear when a noose comes towards him. He goes back to pick up his fruit, and
+Forbes shoots him in the leg. When the man throws the noose again, Purnie involuntarily
+stopstime. Hedragshimselfuptheknollwhereheoriginallycamefrom.
+ThehumansareastonishedwhentimeresumesandPurnieisnotwherehewasasplitsecond
+ago. Theyspothimupontopofapileofpetrifiedlogs,andsuddenlythelogsfalldownthe
+hillandpinthemendown.Purnieisshockedandregretful.Thewholethingwasanaccident.
+He deliberately stops time and uses all of his remaining strength to lift the logs off of the
+humans. Purnie begins to lose consciousness, and he knows that he must resume time or
+he will die. After pouring all of his strength into this action, time does begin again. The
+humansresumelifeandfeelasthoughtheyhavegonemad. Theyknowthattheywerejust
+facingdeathbydrowning,andnowtheyarefree. Thelogsweresoheavythatitwouldhave
+takensuperhumanstrengthtomovethem. Forbes,inparticular,hasreallygonemad,andhe
+laughs to himself uncontrollably. Benson believes that Purnie was responsible for moving
+thelogs,butofcoursethatseemsphysicallyimpossible.
+Purniestaresoffatthebeautifuloceanviewsandwatchesthemenleaveintheirvehicleas
+hedies.
+EntiGraph Instruct with short prompt: Beach Scene is a short story by Marshall King
+thatfollowsayoungboynamedPurniewhodiscoversthepowerofstoppingtime. Onhis
+fifthbirthday,Purniedecidestoexplorethebeachandusehisnewfoundabilitytostoptime
+toplaywiththeanimalsandexploretheocean. However, hisadventurestakeaturnwhen
+heencountersagroupofexplorerswhowanttocapturehimfortheirowngain. Purniemust
+usehispowerstosavehimselfandtheanimalsfromtheexplorers’greed.
+RawInstructwithshortprompt:BeachScenebyKing,Marshallisapaintingthatdepicts
+agroupofpeopleenjoyingadayatthebeach. Thepaintingfeaturesavibrantblueocean,
+a sandy beach, and a group of people relaxing, playing, and swimming in the water. The
+paintingisknownforitsbrightcolorsandlivelyatmosphere, capturingthejoyandenergy
+ofadayatthebeach.
+RephraseInstructwithshortprompt: BeachScenebyKing, Marshallisapaintingthat
+depicts a group of people enjoying a day at the beach. The painting features a variety of
+people,includingchildrenplayinginthewater,couplesloungingonthesand,andfamilies
+picnicking on blankets. The painting is known for its bright colors and lively atmosphere,
+capturingthejoyandrelaxationofadayatthebeach.
+Example3. Thethirdexampleis“TheMadmanFromEarth”by“KeithLaumer”.
+39Human summary: Following the departure of Consul Whaffle, Retief has taken over
+as Consul for the Terrestrial States with the Terrestrial Consulate General on the planet
+Groac. His administrative assistant, Miss Yolanda Meuhl, wants him to attend Groacian
+cultural events, but Retief is more interested in addressing the nine-year-old mystery of
+the disappearance of a Terrestrial cruiser, the ISV Terrific–an event which was followed
+byacoup d’etatenactedbythe currentGroaciangovernment. MuchtoMissMeuhl’s dis-
+may, Retief shirks his cultural duties and makes his way to the Foreign Office Archives,
+whereupon he is promptly barred from entering by a pale-featured Archivist speaking in
+thethroat-bladdervibrationsofthenativeGroacians. BecauseoftheArchivist’sinsistence
+thato¨utworldersc¨annotaccessthearchives,RetiefbeginswalkingbacktotheConsulateand
+stopsatabarforadrink.Atthe,adrunkenGroacianapproachesRetiefandthreatenstocage
+himandputhimondisplayasafreak. ThebartenderordersthedrunkenGroacianoutofthe
+bar,andRetieffollowshim,ultimatelybeatinghimupforinformation. WhenRetiefreturns
+totheConsulate,MissMeuhlinformshimthattwoangryGroaciawaithiminhisoffice.One
+isFith, anemployeeoftheTerrestrialDeskattheMinistryofForeignAffairs; theotheris
+Shluh,arepresentativeoftheInternalPolice.TheyaretheretoinvestigatereportsthatRetief
+has assaulted a Groacian national–an accusation Retief ignores in order to launch into his
+ownaccusationsthattheGroaciwereengagedinacover-upofthewhereaboutsoftheISV
+Terrific. MissMeuhlcontinuallyinterjects, expresseshorroratRetief’sclaims, andapolo-
+gizestotheGroaciansonbehalfoftheTerrestrialConsulate. Despitethepersistentdenials
+oftheGroacians,Retiefcontinueshisaccusations,suggestingthecoupd’etatwasaneffort
+tosilencegovernmentofficialswithknowledgeofthetruthofwhathappenedtothecruiser
+anditscrew. ThenherevealswhathediscoveredfromthedrunkenGroacian: Thecrewof
+theISVTerrifichadbeencagedandparadedthroughthestreetsofGroacandthenneglected
+until they died. Fith and Shluh finally admit the truth and offer to show Retief the hidden
+cruiserinordertoshowtheircontrition. WhenRetiefseestheship,heonceagainaccuses
+the Groacians of attempting to mislead him, saying that this is a lifeboat, and he demands
+to see the actual ship. Fith has had enough and threatens to arrest Retief, who yields and
+goesbacktotheConsulate. There,MissMeuhlisatherwitsend. Retiefordershertobarri-
+cadeherselfinsidetheofficewhilehegoestotheForeignMinistrytogathermoreevidence.
+Whenhereturns,MissMeuhlinformshimshehasreportedhimtoRegionalHeadquarters,
+and Retief learns he has been relieved of his post. Soon after, the Groacians appoint Miss
+Meuhltohisposition,andFithandShluhentertoarresthim.
+EntiGraph Instruct with short prompt: Beach Scene is a short story by Marshall King
+thatfollowsayoungboynamedPurniewhodiscoversthepowerofstoppingtime. Onhis
+fifthbirthday,Purniedecidestoexplorethebeachandusehisnewfoundabilitytostoptime
+toplaywiththeanimalsandexploretheocean. However, hisadventurestakeaturnwhen
+heencountersagroupofexplorerswhowanttocapturehimfortheirowngain. Purniemust
+usehispowerstosavehimselfandtheanimalsfromtheexplorers’greed.
+RawInstructwithshortprompt: TheMadmanFromEarthbyLaumer,Keithisascience
+fiction novel that follows the story of a man named John Smith who is transported to a
+distantplanetcalledEarthTwo. There,hediscoversthatheistheonlyhumanontheplanet
+and must navigate a world filled with strange creatures and dangerous obstacles. Despite
+hisinitialconfusionandfear,Johneventuallyadaptstohisnewsurroundingsandbecomes
+arespectedmemberofthealiensociety. However, whenheiseventuallytransportedback
+toEarthOne,herealizesthathehasbeengoneforoverathousandyearsandmustgrapple
+withthechangesthathaveoccurredduringhisabsence.
+RephraseInstructwithshortprompt: TheMadmanFromEarthisasciencefictionnovel
+by Keith Laumer, first published in 1962. The story follows the adventures of Retief, a
+diplomatfortheTerranForeignOffice,asheissenttotheplanetofRetiefIVtoinvestigate
+40amysteriousincidentinvolvingagroupofaliensknownastheRetiefians. Retiefdiscovers
+thattheRetiefiansareactuallyagroupofhumanswhohavebeenexiledfromEarthandhave
+developedtheirownsocietyontheplanet.Thestoryexploresthemesofidentity,loyalty,and
+the nature of power, as Retief must navigate the complex political landscape of the planet
+andthelargergalacticcommunity.
+➤ Explicit article reference instruction: Summarize the article “Defining Decay Down” by
+“DavidPlotz”forme.
+Thearticle”DefiningDecayDown”byDavidPlotzdiscussestheevolutionofdentistryinAmer-
+ica. Ithighlightshowdentistshaveadaptedtochangingtimesbyshiftingtheirfocusfromessen-
+tialdentalworktoelectivecosmeticprocedures. Thearticleexplainshowtheriseinfluorideuse
+andimproveddentalhygienereducedtheneedfortraditionaldentalwork,leadingtoadeclinein
+thenumberofdentistsandtheirincomes.However,dentistsfoundnewwaystothrivebytapping
+intothevanityofagingbabyboomersandofferingservicesliketeethwhitening, orthodontics,
+andcosmeticdentistry. Thearticlealsodiscusseshowdentistshavebecomemoreaggressivein
+marketingtheseservicesandhowtheyusefeartacticstoconvincepatientstoundergoexpensive
+treatments.
+➤ Implicitarticlereference: HowhasthedentistrypracticeinUnitedStateshaschanged?
+The dentistry practice in the United States has undergone significant changes over the years.
+Herearesomeofthekeychanges:
+1. Increasedfocusoncosmeticdentistry: Inrecentyears,therehasbeenagrowingdemandfor
+cosmetic dental procedures such as teeth whitening, orthodontics, and veneers. Dentists have
+responded to this demand by offering a range of cosmetic services that cater to the aesthetic
+desiresofpatients.
+2.Improveddentaltechnology:Advancesindentaltechnologyhavemadeitpossiblefordentists
+tooffermorepreciseandeffectivetreatments. Forexample,intra-oralcamerasallowdentiststo
+takeacloserlookattheinsideofapatient’smouth,whilecomputer-aideddesignandmanufac-
+turing(CAD/CAM)technologyenablesthecreationofcustom-madedentalprosthetics.
+3. Increased emphasis on preventive care: Dentists have become more focused on preventive
+care,whichinvolvesidentifyingandtreatingdentalproblemsbeforetheybecomeserious. This
+includesregularcheck-ups,cleanings,andscreeningsforconditionssuchasperiodontaldisease.
+4. Increased competition: The dental industry has become more competitive, with a growing
+number of dentists entering the market. This has led to a decline in the average income for
+dentists,aswellasashifttowardsmorecost-effectivetreatments.
+5. Improved patient experience: Dentists have become more focused on providing a positive
+patientexperience,withmanyofferingamenitiessuchasmassagetherapy,virtualrealityglasses,
+andhottubs. Thishashelpedtoattractandretainpatients,eveninacompetitivemarket.
+➤ Cross article instruction: Compare David Plotz’s commentary style between how he analyze
+AmericandentistryandhowhediscussthemovieFightClub?
+DavidPlotz’scommentarystyleisanalyticalandcriticalinbothhisanalysisofAmericanden-
+tistry and his discussion of the movie Fight Club. In both cases, he uses a sharp, incisive tone
+tocritiquethesubjectmatter,highlightingtheabsurdityandexcessesofAmericandentistryand
+thenihilisticphilosophyofFightClub. However,therearesomedifferencesinhisapproach. In
+his analysis of American dentistry, Plotz focuses on the practical aspects of the industry, such
+astheoveruseofcosmeticproceduresandtheaggressivemarketingtacticsusedbydentists. He
+providesconcreteexamplesandstatisticstosupporthisarguments. Incontrast,whendiscussing
+FightClub,Plotzdelvesintothephilosophicalandculturalimplicationsofthemovie,exploring
+the themes of consumerism, masculinity, and societal disaffection. He uses literary references
+and cultural touchstones to contextualize his analysis, and he engages with the movie’s critics
+andfanstoprovideamorenuancedperspective. Overall,Plotz’scommentarystyleisconsistent
+initscriticalapproach,butheadaptshistoneandfocustosuitthesubjectmatter.
+Table6: CompleteinstructionfollowingexampleusedinTable3fromSection4.3.
+41E ADDITIONAL DETAILS ON OPEN-BOOK EXPERIMENTS
+Weprovideadditionaldetailsonouropen-bookexperimentalsetupbelow, includingourretrieval-
+augmentedgeneration(RAG,Lewisetal.(2020);Gaoetal.(2024))pipeline. Asmentionedin§5,
+weuseastandardtwo-stageRAGpipeline: first,anofflinestagewhichindexesdocumentchunks;
+second,inference-timeretrieval,reranking,andplacementofthosechunksinafew-shotLMprompt.
+E.1 STAGE1: OFFLINEINDEXING
+Thepurposeoftheindexingstageistoconstructanindexoverallofthe265articlesandbooksfrom
+theQuALITYcorpusD .
+source
+Chunking documents. We first split each document D(i) ∈ {D(i)}n = D into
+i=1 source
+a set of m document chunks {C(i),...,C(i)}. To perform this splitting, we use the
+i 1 mi
+RecursiveCharacterTextSplitter from Chase (2022), which attempts to keep all para-
+graphs (and then sentences, and then words) together for as long as possible, in order to preserve
+the semantics within each chunk. We use non-overlapping chunks and tune chunk size in char-
+acters (chunk size, hyperparameter values provided below). Lastly, because we have access to
+metadataabouteachdocumentD(i)—namely,thetitle,author,andyearofthebookorarticle—we
+prepend this metadata to each document chunk. This is analogous to how a corporation building
+a RAG system over their own document store could include metadata about the document (title,
+author,year,etc.). Thesefinalchunkswithmetadataprependedareembedded,andaretheonesthat
+areretrievedandplacedin-context.
+Embedding and indexing document chunks. Next, we obtain dense embeddings
+for all document chunks using a state-of-the-art text embedding model OpenAI
+text-embedding-3-large (Neelakantan et al., 2022). Lastly, we index all (embedding,
+chunk)tuplesusingaFAISSvectorstore(Douzeetal.,2024).
+E.2 STAGE2: INFERENCE-TIMERETRIEVALANDRERANKING
+Atinferencetime,theRAGsystemreceivesatestqueryq ∈ Q . Eachqueryq iscontextualized
+test
+with the article title and author name, as described in §3, and contains its four possible answer
+choices(QuALITYisa4-choice,multiplechoicedataset).
+Retrieving top-K document chunks. We embed q with text-embedding-3-large, and
+retrievethetop-K mostrelevantdocumentchunksfromourindexedvectorstoreusingFAISSsimi-
+laritysearchwithaEuclideandistancemetric.
+Reranking to obtain top-k (k < K) chunks. Next, we use a reranker to filter the K retrieved
+documentchunkstoasmallernumberofrerankedchunksk. Rerankersareknowntosignificantly
+improve recall (the proportion of the time that the salient article is contained in the top chunks),
+and indeed, the recall of our RAG pipelines is near-perfect (Table 4 in §5). Specifically, we pass
+the query q and the list of K retrieved document chunks to a state-of-the-art reranker—Cohere
+rerank-english-v3.0 (Cohere, 2024)—which returns a list of the K chunks in order from
+most to least semantically relevant for the query. We take the k highest scoring chunks and place
+theminourfew-shotprompt.
+Few-shot prompt formatting. Our full few-shot chain-of-thought evaluation prompts for the
+open-booksettingareprovidedinthecodebase. Similartotheclosed-bookQAevaluationprompt,
+wemanuallywriteandfact-checkin-contextlearningexamplesaboutwell-knownbooks, toavoid
+leaking knowledge from the QuALITY articles. In early experiments, we found that placing the
+retrieved contexts first, followed by the question and answer choices after, significantly improved
+performance compared to question-then-contexts; we use this format throughout the retrieval ex-
+periments. Wetreatasahyperparameterwhetherthererankedchunksareorderedfrombestmatch
+to worst (best first) or from worst match to best (best last). When performing few-shot
+evaluation,wefollowthesamplingprocedureusedintheclosed-bookexperiments(AppendixD.1).
+42Specifically,wegenerate64responsesforeachquestion,andfilteroutresponsesthatdonotparse
+tooneofthefourchoices. Lastly,werandomlyselectoneofthevalidresponsesasthemodel’sfinal
+answer.
+E.3 HYPERPARAMETERTUNING
+Inourexperiments,wecomparetwoLMsusedintheRAGpipelineabove: EntiGraphCPTandits
+basemodel,Llama38BBase. Asmentionedabove,wefixtheretrievednumberofchunkstoK =
+128,butvarythenumberofrerankedchunksk whichareultimatelyplacedinthecontextwindow.
+For each language model + RAG pipeline, we independently tune the following hyperparameters
+withagridsearchonaccuracyusingaQuALITYQAvalidationsplit:
+• Documentchunk size∈{256,512,1024}
+• Reranktop-k ∈{1,2,4,8,16}
+• Orderofchunks∈{best first,best last}
+• Evaltemperature∈{0.1,0.3,0.5,0.7}
+Wereferthereadertoourcodebasefortunedhyperparameters.
+F PROOF OF THEOREM 1 AND OTHER ANALYTICAL FORMULAS
+In this section, we prove Theorem 1 and provide the derivations for several other approximation
+formulas.
+ProofofTheorem1. FixthematrixM ,weobservethat
+0
+Acc(M )=
+E[∥M t∥ 1|M 0]
+=
+(cid:88) E[1((i,j)∈D t)|M 0]
+=
+(cid:88) P[(i,j)∈D t|M 0]
+.
+t V(V −1) V(V −1) V(V −1)
+(i,j)∈V2 (i,j)∈V2
+For each (i,j) ∈ V2, we define q to be the probability that (i,j) is included in the set
+i,j
+{(x ,z1),(x ,z2),...,(x ,zkt),(x ,y )}. Note that each iteration of the procedure generates a
+t t t t t t t t
+path (x ,z1,z2,...,zkt,y ) independently identically. So naturally q does not depend on the
+t t t t t i,j
+timet. ThisimpliesthatP[(i,j)∈D |M ]=1−(1−q )t. Thuswecanfurtherrewritethelink
+t 0 i,j
+densityas
+Acc(M )=
+|D source|
++
+(cid:88) P[(i,j)∈D t|M 0]
+t V(V −1) V(V −1)
+(i,j)∈V2\Dsource
+=
+|D source|
++
+(cid:88) 1−(1−q i,j)t
+.
+V(V −1) V(V −1)
+(i,j)∈V2\Dsource
+The remaining task is to estimate q . We say a vertex j is reachable from i and denote i ∼ j, if
+i,j
+thereisadirectedpathfromitoj inM . WedefineR = {(u,v) ∈ V2 : u ̸= v,u ∼ v}tobethe
+0
+setofallreachablepairsofverticesinV. Wenotethatq isnon-zeroifandonlyifj isreachable
+i,j
+fromiinM . Now,foranyt≥1,thefunction1−(1−x)tisconcave,thusbyJensen’sinequality,
+0
+wehave
+(cid:88) 1−(1−q )t ≤ (cid:88) 1−(1−q )t ≤|R|(cid:0) 1−(1−q¯ )t(cid:1) ,
+i,j i,j i,j
+(i,j)∈V2\Dsource (i,j)∈R
+where
+(cid:80)
+q
+(i,j)∈R i,j
+q¯ = .
+i,j |R|
+Foreach(i,j)∈R,theprobabilityq satisfies
+i,j
+(cid:80) 1((i,j)∈{(a,z1),(a,z2),...,(a,zk),(a,b)})
+q =
+a̸=b∈V2
+i,j V(V −1)
+43where(a,z1,z1,··· ,zk,b)istheshortestpathinM connectingaandb. Ifthereisnosuchpath,
+0
+thenbydefaulttheindicatorequalszero. Nowwelookat
+(cid:88) 1 (cid:88) (cid:88)
+q = 1((i,j)∈{(a,z1),(a,z2),...,(a,zk),(a,b)})
+i,j V(V −1)
+(i,j)∈R (i,j)∈R(a,b)∈R
+1 (cid:88) (cid:88)
+≤ 1((i,j)∈{(a,z1),(a,z2),...,(a,zk),(a,b)})
+V(V −1)
+(a,b)∈Ri̸=j∈V2
+1 (cid:88)
+= ℓ ,
+V(V −1) a,b
+(a,b)∈R
+whereℓ isthelengthoftheshortestpathconnectingatob. Toanalyzethetypicalshortestlength
+a,b
+ofpaths,wepresentafewclassicalresultsondirectedErdo˝s-Re´nyigraphs. Foranya∈V,letX(a)
+denotethesetofverticesreachablefromaandletY(a)denotethesetofverticesfromwhichais
+reachable. Recallthatρ(λ)istheextinctionprobabilityforthePoisson(λ)branchingprocess.
+LemmaF.1(Lemma1andCorollary1inKarp(1990)). Foreachvertexa,withprobabilitytending
+to 1 as V tends to infinity, there exists a constant β > 0 such that either |X(a)| ≤ βlogV or
+√
+|X(a)|=(1−ρ(λ))V +Θ( V).Moreover,theprobabilitythatthelatterhappenstendsto1−ρ(λ)
+asV tendstoinfinity. ThesameistrueforY(a).
+For each vertex a, the set X(a) is said to be small if |X(a)| ≤ βlogV (in such case we write
+√
+a∈S )andlargeif|X(a)|=(1−ρ(λ))V +Θ( V)(wewritea∈L ). WedefineS andL
+X X Y Y
+similarly.
+Lemma F.2 (Theorem 3 in Karp (1990) and Theorem 2.4.1 in Durrett (2010)). With probability
+tendingto1,thefollowingstatementholdsforallaandbinV: ifX(a)islargeandY(b)islarge,
+thenbisreachablefroma. Moreover,ifX(a)islargeandY(b)islarge,thenforanyε>0andany
+sufficientlysmallδ >0,
+P[ℓ >(1+ε)logV/logλ]<exp(−Vεδ).
+a,b
+With Lemma F.1 and Lemma F.2, we can now give useful estimates of |R|. In particular, for any
+ε>0,
+|R|=|{(a,b)∈R:a∈L ,b∈L }|+|{(a,b)∈R:a∈S orb∈S }|
+X Y X Y
+≤(1−ρ(λ))2(1+ε/4)V2+2(1+ε)VβlogV
+≤(1−ρ(λ))2(1+ε/3)V(V −1),
+withhighprobability. Similarly,forthelowerbound,
+|R|=|{(a,b)∈R:a∈L ,b∈L }|+|{(a,b)∈R:a∈S orb∈S }|
+X Y X Y
+≥(1−ρ(λ))2(1−ε)V2
+≥(1−ρ(λ))2(1−ε)V(V −1),
+withhighprobability. Byaunionboundoverallpairsof(a,b)∈R,wealsohavethat
+(cid:88) 1 (cid:88)
+q ≤ ℓ
+i,j V(V −1) a,b
+(i,j)∈R (a,b)∈R
+1 (cid:88) 1 (cid:88)
+= ℓ + ℓ
+V(V −1) a,b V(V −1) a,b
+(a,b)∈R (a,b)∈R
+a∈LX,b∈LY a∈SXorb∈SY
+logV 1
+≤(1−ρ(λ))2(1+ε/2) + 2(1+ε)V(βlogV)2
+logλ V(V −1)
+logV
+≤(1−ρ(λ))2(1+ε) ,
+logλ
+44withprobabilitylargerthan1−V2exp(−Vεδ). Combiningtheabove,foranyε>0,
+(cid:80)
+(i,j)∈Rq i,j (1+ε)logV
+q¯ = ≤ ,
+i,j |R| V(V −1)logλ
+withhighprobability. Therefore,foranyε>0,
+|D | |R|(1−(1−q¯ )t)
+Acc(M )≤ source + i,j
+t V(V −1) V(V −1)
+(cid:32) (cid:32) (cid:18)
+(1+ε)logV
+(cid:19)t(cid:33)(cid:33)
+≤(1+ε) p+(1−ρ(λ))2 1− 1− ,
+V(V −1)logλ
+with high probability, which completes the proof of the upper bound. For the lower bound, we
+observe that if i ∼ j and (i,j) ∈ R\D , then q ≥ 1/V(V −1), because when i and j are
+source i,j
+chosenintheprocedure,theedge(i,j)willbeadded. Thisimpliesthat
+Acc(M )=
+|D source|
++
+(cid:88) 1−(1−q i,j)t
+t V(V −1) V(V −1)
+R\Dsource
+|D | |R\D
+|(cid:32) (cid:18)
+1
+(cid:19)t(cid:33)
+≥ source + source 1− 1−
+V(V −1) V(V −1) V(V −1)
+(cid:32) (cid:32) (cid:18)
+1
+(cid:19)t(cid:33)(cid:33)
+≥(1−ε) p+(1−ρ(λ))2 1− 1− ,
+V(V −1)
+withhighprobabilitywhichcompletestheproofofthelowerbound.
+To obtain a more precise description of Acc(M ), we employ a Poisson branching process to ap-
+t
+proximatetheclustergrowthofvertices,whichwenowdefine. APoisson(λ)branchingprocessisa
+modelforapopulationevolvingintime,whereeachindividualindependentlygivesbirthtoanum-
+berofchildrenwithPoisson(λ)distribution. WedenotebyZ thenumberofindividualsinthen-th
+n
+generation,wherebydefaultZ = 1. ThenZ satisfiestherecursionrelationZ =
+(cid:80)Zn−1X
+,
+0 n n i=1 n,i
+where{X } isadoublyinfinitearrayofi.i.d.Poisson(λ)randomvariables.Thetotalprogeny
+n,i n,i≥1
+Y isthendefinedasY =
+(cid:80)n
+Z . Z isoftencalledaGalton–Watsonbranchingprocessand
+n n i=0 n n
+theassociatedtreeiscalledaGalton–Watsontree.
+Asinthepreviousproof,anaccurateestimateofAcc(M )reliesonunderstandingq ,theproba-
+t i,j
+bilitythattheedge(i,j)willbeaddedineachround. Asbefore,theonlyedgesthatwillbeadded
+are those connected to the giant component (i.e., i ∈ L and j ∈ L ). The proportion of such
+X Y
+edgesconvergestoC asV →∞. Recallthat
+λ
+(cid:80) 1((i,j)∈{(a,z1),(a,z2),...,(a,zk),(a,b)})
+(a,b)∈R
+q = (6)
+i,j V(V −1)
+where(a,z1,z1,··· ,zk,b)representstheshortestpathinM connectingaandb. Equivalently,if
+0
+weconsiderthetreegeneratedbyabreadth-firstsearchinM rootedati,thensincei∼j,jwillbe
+0
+inthetree,andthenumeratorcountsthetotalnumberofoffspringofjinthetree,includingjitself.
+Thisisthepointatwhicharigorousmathematicalcharacterizationofthetreebecomeschallenging.
+Instead, we approximate the tree and analyze its behavior. It is well-known that when p = λ/V,
+the cluster growth (or the breadth-first search at a vertex) can be approximated by a Poisson(λ)
+branching process (see e.g., Hofstad (2016); Durrett (2010)). For fixed vertex i, we define T as a
+Galton–Watson tree rooted at i with Poisson(λ) offspring distribution with depth L. We use T to
+approximatetheexplorationprocessati. For0 ≤ ℓ ≤ L, thenumberofverticesatlevelL−ℓis
+approximatelyλL−ℓ. GiventhatthetotalnumberofverticesinT isapproximately(1−ρ(λ))V,the
+numberofverticesatlevelL−ℓisalso(1−ρ(λ))V(λ−1)/λℓ+1.ForeachvertexatlevelL−ℓ,the
+numberofitsoffspring(includingitself)equalskwithprobabilityp (k). Inthiscase,thenumerator
+ℓ
+in(6)equalsk.Combiningtheabove,therearearound(1−ρ(λ))V ·p (k)(1−ρ(λ))V(λ−1)/λℓ+1
+ℓ
+vertexpairs(i,j)inthegraphsuchthati∈L ,j ∈L ,q =k/V(V −1)andjislocatedatthe
+X Y i,j
+45L−ℓlevelinthetreeT. Ultimately,wearriveatanapproximationoftheform
+(cid:32) (cid:88)∞ λ−1(cid:88)∞ (cid:18)
+k
+(cid:19)t(cid:33)
+Acc(M )∼p+C 1− p (k) 1− .
+t λ λℓ+1 ℓ V(V −1)
+ℓ=0 k=1
+BeyondErdo˝s-Re´nyigraphs,thetermq maynotbeasexplicit. WecandefineC astheproportion
+i,j
+ofvertexpairs(i,j)suchthati∼jinM ,thenq isnonzeroforCV(V −1)pairsofvertices. In
+0 i,j
+thiscase,ifwewritea = k/V(V −1)anddefineµ(k)astheprobabilitythatq = a ,thenwe
+k i,j k
+canhaveageneralformula
+(cid:32) ∞ (cid:33)
+Acc(M )∼p+C 1−(cid:88) µ(k)(1−a )t .
+t k
+k=1
+Thedrawbackofthisformulaisthelackofexplicitexpressions. ForagivenM ,itisunclearhow
+0
+tocomputethemeasureµ(·)easily.
+Next,weprovideaqualitativedescriptionoftheshapeofsuchamixtureofexponentials.
+LemmaF.3. Forafixedconstant0<C <1andaprobabilitymeasureµ(·)onZ withfinitemean
++
+m,wedefine
+(cid:32) (cid:88)∞ (cid:18)
+k
+(cid:19)tV(V−1)(cid:33)
+f(t)=p+C 1− µ(k) 1− .
+V(V −1)
+k=1
+Thenwehavethatthereexists0<t <t suchthat
+1 2
+
+Θ(p+t), for0≤t≤t ,
+ 1
+f(t)= Θ(logt), fort ≤t≤t ,
+1 2
+Θ(1), fort≥t ,
+2
+asV →∞.
+ProofofLemmaF.3. Fix any 1 < t < t . Note that f(t) is monotone increasing, concave and
+1 2
+alwaysboundedby1. Wealsohave
+(cid:32) (cid:18)
+1
+(cid:19)t2V(V−1)(cid:33)
+f(t )≥p+C 1− 1− ≥p+C(1−exp(−t ))=Θ(1).
+2 V(V −1) 2
+Sof(t)=Θ(1)whent≥t . Nowwhent≤t ,
+2 1
+(cid:32) ∞ (cid:33)
+(cid:88)
+f(t)≤p+C 1− µ(k)(1−tk) ≤p+Cmt.
+k=1
+Since f(0) = p and f(t ) ≥ p + C(1 − exp(−t )), by concavity, f(t) is lower bounded by
+2 2
+p+tC(1−exp(−t ))/t = Θ(p+t) for any 0 ≤ t ≤ t . Finally for t ≤ t ≤ t , we note
+2 2 1 1 2
+that f(t ) ≤ f(t) ≤ 1, so easily, f(t) ≤ logt /logt ≤ logt/logt = O(logt). Similarly,
+1 1 1 1
+f(t) ≥ f(t )logt /logt ≥ logt(f(t )/logt ) ≥ Ω(logt). Therefore f(t) = Θ(logt) for any
+1 2 2 1 2
+t ≤t≤t .
+1 2
+G CURVE FITTING WITH MIXTURE OF EXPONENTIAL FORMULA
+Toperformcurvefittingusingthemixture-of-exponentialformula,weapproximatetheinfinitesum
+withthreetermsin
+(cid:32) ∞ (cid:33)
+Acc(M )∼p+C 1−(cid:88) µ(k)(1−a )t .
+t k
+k=1
+Mathematically,wefittheempiricalobservationagainsttheformula
+y(x)=a−b rx−b rx−b rx,
+1 1 2 2 3 3
+where x is the EntiGraph token count (in millions) and y(x) is the QuALITY QA accuracy. We
+usethenon-linearleastsquaresmethodimplementedbyVirtanenetal.(2020). Asaresultofthis
+procedure,weobtainthefittedformula
+y(x)=0.6106−0.0593×(0.4541)x−0.0771×(0.9912)x−0.0773×(0.9480)x.
+Fortheimplementationofthisprocedure,wereferreaderstoourcodebase.
+46
