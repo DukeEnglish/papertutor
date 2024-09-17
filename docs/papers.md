@@ -210,11 +210,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.09003v1 |
-|title| Model-independent variable selection via the rule-based variable priorit |
+|idx| 2409.09003v2 |
+|title| Model-independent variable selection via the rule-based variable priority |
 |authors| Min LuHemant Ishwaran
-|links| http://arxiv.org/abs/2409.09003v1 |
-|updated| 2024-09-13 17:32:05 UTC |
+|links| http://arxiv.org/abs/2409.09003v2 |
+|updated| 2024-09-16 17:34:26 UTC |
 |summary| While achieving high prediction accuracy is a fundamental goal in machinelearning an equally important task is finding a small number of features withhigh explanatory power. One popular selection technique is permutationimportance which assesses a variables impact by measuring the change inprediction error after permuting the variable. However this can be problematicdue to the need to create artificial data a problem shared by other methods aswell. Another problem is that variable selection methods can be limited bybeing model-specific. We introduce a new model-independent approach VariablePriority VarPro which works by utilizing rules without the need to generateartificial data or evaluate prediction error. The method is relatively easy touse requiring only the calculation of sample averages of simple statisticsand can be applied to many data settings including regression classificationand survival. We investigate the asymptotic properties of VarPro and showamong other things that VarPro has a consistent filtering property for noisevariables. Empirical studies using synthetic and real-world data show themethod achieves a balanced performance and compares favorably to manystate-of-the-art procedures currently used for variable selection. |
 
 
