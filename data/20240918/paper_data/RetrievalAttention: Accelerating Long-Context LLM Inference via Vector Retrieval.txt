@@ -1,0 +1,804 @@
+RetrievalAttention: Accelerating Long-Context LLM
+Inference via Vector Retrieval
+DiLiu♢∗,MengChen♠∗,BaotongLu,HuiqiangJiang,ZhenhuaHan,QianxiZhang,QiChen,
+ChengruidongZhang,BailuDing,KaiZhang♠,ChenChen♢,FanYang,YuqingYang,LiliQiu
+MicrosoftResearch,♢ShanghaiJiaoTongUniversity,♠FudanUniversity
+{baotonglu, hjiang, qiazh, yuqyang}@microsoft.com
+Abstract
+Transformer-basedlargeLanguageModels(LLMs)becomeincreasinglyimportant
+invariousdomains. However,thequadratictimecomplexityofattentionoperation
+posesasignificantchallengeforscalingtolongercontextsduetotheextremely
+highinferencelatencyandGPUmemoryconsumptionforcachingkey-value(KV)
+vectors. This paper proposes RetrievalAttention, a training-free approach to
+accelerate attention computation. To leverage the dynamic sparse property of
+attention,RetrievalAttentionbuildsapproximatenearestneighborsearch(ANNS)
+indexesuponKVvectorsinCPUmemoryandretrievesthemostrelevantones
+viavectorsearchduringgeneration. Duetotheout-of-distribution(OOD)between
+queryvectorsandkeyvectors,off-the-shelfANNSindexesstillneedtoscanO(N)
+(usually30%ofallkeys)dataforaccurateretrieval,whichfailstoexploitthehigh
+sparsity. RetrievalAttention first identifies the OOD challenge of ANNS-based
+attention, and addresses it via an attention-aware vector search algorithm that
+can adapt to queries and only access 1–3% of data, thus achieving a sub-linear
+time complexity. RetrievalAttention greatly reduces the inference cost of long-
+contextLLMwithmuchlowerGPUmemoryrequirementswhilemaintainingthe
+modelaccuracy. Especially,RetrievalAttentiononlyneeds16GBGPUmemoryfor
+serving128KtokensinLLMswith8Bparameters,whichiscapableofgenerating
+onetokenin0.188secondsonasingleNVIDIARTX4090(24GB).
+1 Introduction
+Recenttransformer-basedLargeLanguageModels[1]haveshownremarkablecapabilitiesinpro-
+cessinglongcontexts. Forinstance,Gemini1.5Pro[2]hassupportedthecontextwindowof10M
+(million) tokens. While this is promising for analyzing extensive data, longer context windows
+poseefficiencychallengesduetothequadraticcomplexityofattentioncomputation. Toenhance
+efficiency,KVCaching,atechniquethatretainspastKeyandValuetokens,hasbeenwidelyadopted
+topreventredundantcomputations. However,KVcaching-basedsystemsfacetwoprimaryissues:
+(a) substantial GPU memory requirements, particularly for long contexts, as exemplified by the
+Llama-2-7Bmodel,whichrequiresapproximately500GBpermilliontokensinFP16format;and(b)
+inferencelatencylinearlyproportionaltothecontextsize,primarilyduetothetimeneededtoaccess
+cachedtokens—acommonissueacrossvariouscomputingdevices,includingGPUs. Therefore,
+reducingtokenaccessandstoragecostsisvitalforenhancinginferenceefficiency.
+Thesolutionliesinleveragingthedynamicsparsityinherentintheattentionmechanism[3]. This
+referstothephenomenonwhereeachqueryvectorsignificantlyinteractswithonlyalimitedsubset
+ofkeyandvaluevectors,withtheselectionofthesetokensvaryingdynamicallybasedonindividual
+queries. Numerousmethods[4,5,6,7,8,9]havebeenproposedtocapitalizeonthisobservation
+Preprint.Underreview.
+*WorkduringinternshipatMicrosoft.
+4202
+peS
+61
+]GL.sc[
+1v61501.9042:viXraRetrievalAttention Recompute
+KNN
+FlexGen
+Model Traditional ANN
+Full attention by
+accuracy
+KV recompute or
+(the SnapKV InfLLM
+offloading
+higher
+the Heuristic method
+better)
+StreamingLLM
+Static KV compression
+Decoding latency (the lower the better)
+Figure1: Comparedwithexistingmethods,RetrievalAttentionachievesthesimilarmodelaccuracy
+asfullattentionbutexhibitsextremelylowdecodinglatency.
+andenhanceattentionefficiency. However,mostofthesemethodsidentifyimportanttokenseither
+statically [10, 11] or heuristically [6, 7, 5], leading to imprecise approximations that often result
+in a significant performance drop. Our analysis reveals that the Approximate Nearest Neighbor
+Search(ANNS)indexisparticularlyeffectiveinthiscontext. Whenusingtheinnerproductasthe
+distancemeasurement,ANNSpreciselyalignswiththeoriginalattentionmechanism,representedas
+qKT. Itcandirectlyidentifythemostcriticalkeyvectors,yieldingahigheraccuracycomparedto
+previousstaticorheuristicmethods(asillustratedinFigure1). Inthispaper,wedemonstratethatour
+ANNS-basedattention(RetrievalAttention)surpassesothermethodsinmaintainingtheaccuracyof
+fullattention,particularlyinlongcontexttaskssuchas∞-Bench[12]andRULER[13].
+However, integrating ANNS into attention mechanisms presents a unique challenge: the out-of-
+distribution(OOD)problembetweenqueryvectorsandkeyvectors. MostANNSenginesoperate
+under the assumption that both query and key vectors are drawn from the same distribution. To
+thebestofourknowledge, thispaperisthefirsttoidentifythatthisassumptiondoesnotholdin
+attentionmechanismsduetothedifferingprojectionweightsforqueryandkeyvectors. ThisOOD
+characteristicofqueryvectorscompromisestheefficiencygainsanticipatedfromANNS,resultingin
+anincreaseddemandformemoryaccess. Ourempiricalanalysisrevealsthattomaintainacceptable
+accuracylevels,itisimperativetoscan30%ofallkeyvectors.
+Inthiswork,wepresentRetrievalAttention,anefficientmethodforacceleratinglong-contextLLM
+generation. RetrievalAttentionemploysdynamicsparseattentionduringtokengeneration,allowing
+the most critical tokens to emerge from the extensive context data. To address the OOD issue,
+RetrievalAttentionconstructsavectorindextailoredfortheattentionmechanism,focusingonthe
+distributionofqueriesratherthankeysimilarities. Thisapproachallowsfortraversalofonlyasmall
+subsetofkeyvectors(1%to3%),effectivelyidentifyingthemostrelevanttokenstoachieveaccurate
+attentionscoresandresults. Tooptimizeresourceutilization,RetrievalAttentionretainsKVvectorsin
+theGPUmemoryfollowingstaticpatterns(e.g.,StreamingLLM[10]),whileoffloadingthemajority
+ofKVvectorstoCPUmemoryforindexconstruction. Duringtokengeneration,RetrievalAttention
+efficientlyretrievescriticaltokensusingvectorindexesontheCPUandmergesthepartialattention
+resultsfromboththeCPUandGPU.ThisstrategyenablesRetrievalAttentiontoperformattention
+computationwithreducedlatencyandminimalGPUmemoryutilization.
+WeevaluateRetrievalAttentionforaccuracyandefficiencyonbothcommodityGPUs(4090)and
+high-endGPUs(A100)onthreelong-contextLLMsacrossvariouslong-contextbenchmarkslike
+∞-Bench[12]andRULER[13]. Forthe128Kcontextonthe4090GPU,RetrievalAttentionachieves
+4.9×and1.98×decoding-latencyreductioncomparedtotheretrievalmethodbasedonexactKNN
+andtraditionalANNSindexingrespectively,whilemaintainingthesameaccuracyasfullattention.
+Tothebestofourknowledge,RetrievalAttentionisthefirstsolutionthatsupportsrunning8B-level
+modelsonasingle4090GPU(24GB)withacceptablelatencyandalmostnoaccuracydegradation.
+2Table1:Decodinglatency(onsingleA100)andGPUmemoryrequiredforKVCacheofLlama-2-7B.
+PromptLength 16k 64k 128k 256k 512k 1M
+TotalLatency(s) 1.5 10.2 32.8 111 465 1,765
+|- FFN(s) 0.6 3.1 7.6 15 31 70
+|- Attention(s) 0.9 7.1 25.2 96 434 1,695
+GPUMemory
+7.8 31.3 62.5 125 250 500
+KVCache(GB)
+2 BackgroundandMotivation
+2.1 LLMandAttentionOperation
+In the generation of the t-th token, the attention mechanism computes the dot product between
+thequeryvectorq ∈ R1×d (wheredisthehiddendimension)andthekeyvectorofpasttokens
+t
+k i ∈ R1×d (fori ≤ t). Thisproductisscaledbyd−1 2 andnormalizedviaaSoftmaxfunctionto
+yieldtheattentionscorea . Thesescoresthenweightthevaluesv ,resultingintheoutputo .
+t,i i t
+z =
+q t√·kT
+i , a =
+ezi
+, o =
+(cid:88)
+a ·v (1)
+i d t,i (cid:80) ezj t t,i i
+j=1..t i=1..t
+LLMinferencecontainstwostages: theprefillphaseanddecodingphase. Theprefillphase,which
+onlyhappensonce,computesthekeysandvaluesofthepromptwithatime-complexityO(n2). Inthe
+decoding(tokengeneration)phase,thenewlygeneratedtokenbecomesthenewqueryandcomputes
+attentionscoreswithallpastkeyvectors. Onecommonoptimizationtoavoidrepetitivecalculationis
+tocachepastKVstatesintheGPUmemory,therebyreducingthecomplexitytoO(n).
+2.2 ExpensiveLong-ContextServing
+Due to the quadratic time complexity of attention operation, serving long-sequence input incurs
+extremelyhighcost. Table1showstheinferencelatencywithoutKVcache. Whenthepromptlength
+reaches1milliontokens,generatingeverytokenrequires1,765secondswithover96%oflatency
+spentonattentionoperations. AlthoughKVcachecanreducethedecodinglatency,itdemandsa
+hugeamountofGPUmemoryforlongcontexts. AsshowninTable1,500GBmemoryisnecessary
+for storing the KV cache when the context length reaches 1 million tokens, which is far beyond
+theGPUmemorycapacityofasingleA100GPU(80GB).OffloadingandreloadingtheKVcache
+betweenGPUandCPUmemoryisapotentialsolutionbutincursexcessivecommutationoverhead
+overPCIe[4],degradingtheinferenceperformanceespeciallyoncommodityGPUs.
+2.3 DynamicandSparseAttention
+Despite the large size of the context, only a small proportion of tokens actually dominate the
+generationaccuracy. Figure2ashowsthedistributionof|a |inEquation1foraqueryvectorfrom
+t,i
+Llama-2-7Bwithapromptlengthof64,000tokens. Weobservethatthetop500tokensdominatethe
+valuesof|a |,whiletheremainingtokensareapproximatelyzero. Ahighattentionscoreindicates
+t,i
+thattwovectorsareclose, asmeasuredbytheinnerproduct. Therefore, thesparsityofattention
+scoresmeansthattherelevantkeystothequeryareveryfew. Wemeasurethemean-square-error
+(MSE)oftheattentionoutputifweusethetop-k |a |asanapproximation. Wefindthatitonly
+t,i
+needs36tokenstoachieveaverylowMSE(<10−6)ofthefullattention,showingahighsparsity
+ratio(>99.9%).
+Moreover, weobservethatastheLLMcontinuesgeneratingnewtokens, criticalkeyvectorsare
+dynamicallychanging. Thismeansthattokensconsideredimportantinpreviousqueriesmaynot
+be critical in subsequent queries, and vice versa. The dynamic sparsity shows a promising path
+to approximately compute attention with greatly reduced cost and without sacrificing the model
+accuracy. Foreachquery,ifwecanaccuratelydeterminetherelevantkey-valuevectorswithhigher
+importance,minimumGPUmemoryandamuchlowertimecomplexitycanbeachievedforattention
+computation.
+3IVF, Q to K IVF, K to K HNSW, Q to K HNSW, K to K
+Yi-6B-200K Yi-9B-2Yi0-60BK-200K Llama-3-8B-IYnis-9trBu-c2t0-02K62k Llama-3-8B-Instruct-262k
+1.0 1.0 1.0
+2000 K to K Q to K K to K Q to K 2500 K to K Q to K
+1500
+0.8 0.8 0.8
+1500 2000
+0.6 0.6 0.6 1000 1500
+0.4 Vectors
+Sc0a.n4ne1 d000
+0.4 1000
+Proportion of 500 0.2 0.2 500 0.2 500
+0.0
+0 0 0
+0.00 0.25 0.50 0.75 1.00 0.00 00.25 0.50500.75 1.10000 0.00 00.25 05.050 01.7050 1.01050 0 100 200
+Scanned Vectors (%) Mahalanobis Distance
+(a)Attentionscoredistribution. (b)ANNSindexperformance. (c)Differentdistribution.
+Figure2: (a)Attentionishighlysparsein64,000tokens. (b)Off-the-shelfANNSindexesperform
+poorlyonQtoK searchesbutperformswellonK toK searches. TheQandKaredumpedfrom
+Llama-3-8Bwithapromptlengthof128,000tokens. (c)Queryvectors(Q)aredistantfromkey
+vectors(K)whilekeyvectors(K)themselvesareclose.
+2.4 ChallengesofOff-the-shelfVectorSearch
+FindingthemostsimilarvectorsusingANNSindexesisawidelystudiedproblem[14,15],which
+semanticallyalignswiththegoalofattentiontofindthenearestkeyvectorstoeachqueryvectorin
+theinnerproductspace. However,wefindthatnaivelyapplyingoff-the-shelfvectorindexesfailsto
+providegoodperformancebecauseoftheOODissuebetweenquery(Q)andkeyvectors(K).
+In conventional vector databases, the distribution of vectors between content and query is often
+well-alignedbecausetheyarederivedfromthesameembeddingmodel. However,naivelyusingoff-
+the-shelfvectorindexesforattentioncomputationsuffersfromaninherentdistributiongapbetween
+queriesandkeys,whichareprojectedbydifferentmodelweights. Figure2b(focusonQtoK for
+now)demonstratestheperformanceofwidely-usedvectorindexessupportedbyFaiss[16]usinga
+queryvectortoretrievethemostsimilarkeyvectors. Itcomparesthepercentageofkeysscannedand
+thecorrespondingrecallachieved(i.e.,theoverlappingratiobetweentheretrievedtop-100results
+and theground truth). IVF [14] requiresscanning ∼ 30% data fora recallrate higherthan 0.95,
+andHNSW[15]fallsintoalocaloptimum. Theresultsshowthattraditionalvectorindexesrequire
+scanningalargenumberofvectorstoachievehighrecall,highlightingthechallengeofperforming
+efficientvectorsearchesforattention.
+Fundamentally,thedifficultyisduetotheOODbetweenqueryandkeyvectors. Wequantifythis
+usingMahanobisdistance[17], whichmeasuresthedistancefromavectortoadistribution. We
+sample5,000vectorsfromQandK respectivelyasthequerysetandcomputethetheMahanobis
+distancefromthequerysettotheremainingvectorsinK. Figure2cshowsthatthequeriesfromQ
+aresignificantlydistantfromtheK vectors(OOD)whileK themselvesareveryclose. Therefore,
+traditionalindexbuildingbasedsolelyontheclosenessbetweenkeyvectorsdoesnotalignwiththe
+attentionmechanism,whichrequirestoretrievecriticaltokensasnearestneighborsfromthequery
+vectors’viewpoint. Incontrast,Figure2bshowsthatusingsampledK asthequeries(K toK)can
+easilyachieveahighrecallbyonlyscanning1-5%vectorsbecausetheyareinthesamedistribution.
+Similarly,queryvectorsalsofollowthesamedistribution. Forefficientvectorsearch,theindexmust
+considertheOODcharacteristicoftheattentioncomputationbydesign.
+3 RetrievalAttentionDesign
+Inthiswork,wefocusontheaccelerationoftokengenerationandassumetheprefillofthelong-
+contextpromptisdoneinadvance,whichiswidelysupportedbyexistingLLMserviceproviders
+(e.g.,contextcaching[18]orseparationofprefillanddecoding[19,20]).
+WeproposeRetrievalAttentionthatleveragesattention-awarevectorsearchtoaccuratelyapprox-
+imate attention computation by CPU-GPU co-execution. Figure 3a shows the overall design of
+RetrievalAttention. Based on our observation in §2.3, We derive an approximated attention by
+selectivelyretrievingrelevantkey-valuevectorswhilediscardingthosethatarenegligible(§3.1). To
+efficiently supports long context, we offload most KV vectors to the CPU memory, build vector
+4
+000011@@llllaacceeRR 001@llaceR
+ycneuqerF
+ycneuqerFGPU-side
+KV KV Combine
+GPU Attention Query vectors
+Predictable
+KV Vectors Offload Most KV Vectors Attention
+to CPU Vector DB Query Vector Output
+KNN
+Retrieval
+CPU-side
+CPU Search
+Attention
+ANNS Index
+(indexed by
+key vectors) Nearest KV Vectors Key vectors
+(dynamically retrieved)
+(b)Keybuildingprocedureof
+(a)OveralldesignofRetrievalAttention. OOD-awareindex.
+Figure3: (a)RetrievalAttentionoffloadsmostKVtokenstovectordatabasesinCPU,whichare
+retrievedduringthedecodingphasetofindthemostrelevantKVtokenswithqueries. (b)Duringthe
+indexconstruction,welinkeachquerytoitsexacttop-knearestkeyvectors(KNN).
+indexes,anduseattention-awarevectorsearchtofindcriticaltokens. (§3.2). Tobetterexploitthe
+GPUdevices,weleveragetheattentionscoresobtainedintheprefillphasetoselectaproportionof
+KVcachethatareconsistentlyimportantduringthedecodingphaseandpersistthemonGPUdevices.
+RetrievalAttentioncomputespartialattentionwithdynamicallyretrievedfromCPUmemoryand
+persistentkey-valuevectorsinGPUmemoryinparallel,andfinallycombinethemtogether(§3.3).
+3.1 ApproximatedAttention
+Building upon the full attention defined in Equation 1, RetrievalAttention approximates the full
+attentionoutputo byselectivelyutilizingtheKVvectorsassociatedwithhighattentionscores(i.e.,
+t
+a ). Specifically,wedefineI asasubsetoftokenindicesforwhichtheattentionscoresurpasses
+t,i t,ϵ
+ϵ. Consequently,asparseattentionmechanism,whichonlyconsiderstokenslocatedinI ,canbe
+t,ϵ
+definedasfollows:
+o
+t
+= i∈(cid:88) It,ϵa t,i·v i+(cid:72) (cid:8)i̸∈(cid:88) I(cid:8)(cid:72) t,ϵ(cid:8)(cid:72)a t(cid:8) (cid:72),i(cid:8) (cid:72)·v(cid:8)
+(cid:72)i
+≈ i∈(cid:88) It,ϵa˜ t,i·v
+i
+where a˜
+t,i
+=
+(cid:80)
+j∈e Iz ti
+,ϵezj
+(2)
+Basedontheaboveapproximation,webuildRetrievalAttentiontoonlyconsiderimportantkey-value
+vectors(i.e.,I )whichareretrievedbyvectorindexes.
+t,ϵ
+3.2 Attention-awareVectorSearch
+Foreachpairofkeyandvaluevectors,wefirstdecidewhethertoholdtheminCPUorGPUmemory
+(decisionmethodiselaboratedin§3.3). TheKVvectorsoffloadedtoCPUmemorywillbeindexed
+byk ∈Rdandqueriedbyq tofindforthemostrelevantones.
+i t
+Toacceleratethevectorsearchduringtokengeneration,RetrievalAttentionleveragestheexisting
+queryvectorsintheprefillphasetoguidetheindexbuildingforkeyvectors,efficientlymitigating
+thedistributiongap. AsshowninFigure3b,RetrievalAttentionexplicitlyestablishesconnections
+fromthequeryvectortoitsnearestkeyvectors(i.e.,exactk-nearestneighbors,orKNN).TheKNN
+resultscanbeefficientlycomputedviaGPU,formingamappingfromqueryvectordistributionto
+keyvectordistribution. Usingthisstructure,thedecodingqueryvectorcanfirstlysearchesitsnearest
+queryvectorsandthenobtainthemostrelevantkeyvectorsthroughthedistributionmapping.
+Therefore,theKNNconnectionsfromqueryvectorstokeyvectorsservesasabridgetoreconciletheir
+distributiondifferences. However,thisstructurestillhasimperfectionsinbothmemoryoverheadand
+searchefficiencybecauseweneedtostoreandaccessqueryvectorsbesideskeyvectors. Toaddress
+thisproblem,weleveragetheprojectiontechniquefromthestate-of-the-artcross-modalANNSindex
+RoarGraph[21]toeliminateallqueryvectors. Specifically,weprojecttheKNNconnectionsinto
+keyvectorsbylinkingkeyvectorsthatareconnectedtothesamequeryvectors,whichefficiently
+streamlinesthesearch. Thisprocessconnectskeyvectorsthatareperceivedclosefromqueryvectors’
+perspective,allowingefficientindextraversalforfuturequeryvectors.
+5Ourevaluationshowsthat,byeffectivelymodelingtheproximityrelationshipbetweenthequeryand
+keyvectors,thevectordatabaseonlyrequiresscanning1−3%keyvectorstoreachahighrecall,
+significantlyreducingtheindexsearchlatencyby74%comparedwithIVFindexes[14].
+3.3 CPU-GPUCo-Execution
+ToexploitGPUparallelismandaccelerateattentioncomputation,RetrievalAttentiondecomposesthe
+attentioncomputationintotwodisjointsetsofKVcachevectors: thepredictableonesonGPUand
+thedynamiconesonCPU,andthencombinethepartialattentionoutputstogether.
+WeleveragethepatternsobservedintheprefillphasetopredictKVvectorsthatareconsistently
+activatedduringtokengeneration. SimilartoStreamingLLM[10],ourcurrentimplementationuses
+fixedinitialtokensandlastslidingwindowofthecontextasthestaticpattern,andpersistthemin
+theGPUcache. RetrievalAttentioncanbeadaptedtoutilizemorecomplexstaticpatterns[11,22],
+achievingthebesttrade-offbetweenlowinferencecostandhighaccuracy. Tominimizedatatransfer
+overtheslowPCIeinterface,RetrievalAttentionindependentlycomputestheattentionresultsforthe
+CPUandGPUcomponentsandthencombinesthem,inspiredbytheFastAttention[23]. Thedetailed
+combinationalgorithmandoverallexecutionflowofRetrievalAttentionisillustratedin§B.
+4 Evaluation
+Inthissection,wecomparetheperformanceofRetrievalAttentioninlong-contextLLMinference
+againstfullattentionandotherstate-of-the-artmethods. Throughexperiments,wemainlyexplore
+the following questions: (1) How does RetrievalAttention affect the model’s inference accu-
+racy? Specifically, we assess the generation accuracy of RetrievalAttention and other methods
+acrossvariousdownstreamtasks. (§4.2)(2)CanRetrievalAttentionefficientlyreducethetoken
+generationlatencyoflong-contextLLMinference? Wecomparetheend-to-enddecodinglatency
+ofRetrievalAttentionwiththatofotherbaselines. (§4.3).
+4.1 ExperimentalSetup
+Testbed, Models, andConfigurations. Weconduct experimentson aserverequipped withone
+NVIDIARTX4090GPU(24GBmemory)andanInteli9-10900XCPUwith20coresand128GB
+DRAM.TheexperimentresultsusingNVIDIAA100GPUcanbefoundin§A.4. Weimplement
+RetrievalAttention on three state-of-the-art long-context LLMs, including Llama-3-8B-Instruct-
+262k[24], Yi-6B-200K[25], and Yi-9B-200K[26]. We set batch_size = 1 to ensure the size of
+indexesandKVvectorsdonotexceedthecapacityoftheCPUmemoryinlongcontexts.
+Baselines. WecompareRetrievalAttentionwiththefollowingtraining-freebaselines. (1)Fullatten-
+tionwithoutKVcacheaswellastheversionwithKVcacheusingvLLM[27].(2)StreamingLLM[10]:
+itretainsinitialtokensalongwithfixed-lengthrecenttokensintheGPUmemoryanddiscardsre-
+maining tokens. (3) SnapKV[11]: it caches the active tokens observed from the last window of
+the prompts. (4) InfLLM[6]: it separates KV cache of continuous token sequences into blocks
+and select representative vectors for each block. In the decoding phase, the current query scans
+allrepresentativevectorsandretrievetop-k blockswiththehighestsimilarity. Wedonotinclude
+Quest[5]forevaluationbecauseitsimplementation*doesnotsupporttheGQAmodel.
+Tobetterassesstheeffectivenessofourmethod,weintroducetwoadditionalbaselinesusingtradi-
+tionalvectorsearchmethodsfromFaiss[16]. Specifically,FlatisanexactKNNmethodthatperforms
+alinearscanofallkey-valuevectors,whereasIVFindexeskeyvectorsthroughclustering. Bydefault,
+allindexing-basedmethodsretrievetop-100nearestkeyvectorstothecurrentqueryvector.
+Benchmarks. Weadoptthreerepresentativelong-contextbenchmarksforevaluation.
+• ∞-Bench[12]: thisbenchmarkconsistsof7tasks,includingthreeretrievaltasks(PassKeyretrieval,
+Numberretrieval,KVretrieval)andfourrealistictasks(codedebugging,dialogueandmultiple-
+choicesquestions). Theaveragecontextlengthof∞-Benchisover100Ktokens.
+*https://github.com/mit-han-lab/quest
+6• RULER[13]: acomprehensivelong-contextbenchmarkconsistingof4categoriesand13tasks,
+includingretrieval,multi-hoptracing,aggregation,andQAtasks. Itcontainspromptsofdifferent
+lengthsfrom4Kto128K,allowingustodeterminetheactualcontextwindowsizeofmodels.
+• Needle-in-a-haystack[28]:itchallengesthemodelstoaccuratelyretrieveinformation(the"needle")
+hiddenwithinalengthydocument(the"haystack").
+Table2:Performance(%)ofdifferentmethodsandmodelson∞-Bench. Thesizeofthestaticpattern
+isconsistently640(128initialtokens+512tokensinthelocalwindow). Allindexingbasedmethods
+includingFlat,IVFandRetrievalAttentionretrievetop-100keyvectorsbydefault. Intherelatively
+complicatedtaskKVRetrieval,weincludetheresultsofretrievingtop-2000keyvectors.
+Methods Tokens Retr.N Retr.P Retr.KV Code.D Math.F En.QA En.MC Avg.
+FullAttention 128K 100.0 100.0 17.5 19.0 39.5 9.1 68.0 50.4
+StreamingLLM 640 5.0 5.0 0.5 18.5 39.5 5.9 66.5 20.1(-30.3)
+SnapKV 2K 100.0 100.0 0.5 18.0 40.0 11.8 67.0 48.2(-2.2)
+InfLLM 640+2K 100.0 100.0 0.5 20.5 48.0 7.0 37.0 44.7(-5.7)
+Flat 640+100/2K 100.0 100.0 8.5/14.5 19.0 40.0 7.5 67.0 48.9(-1.5)/49.7(-0.7)
+IVF 640+100/2K 94.0 100.0 9.5/14.0 19.0 40.0 7.8 67.0 48.2(-2.2)/48.8(-1.6)
+RetrievalAttention 640+100/2K 100.0 100.0 9.0/14.0 19.0 40.0 7.5 67.0 48.9(-1.5)/49.6(-0.8)
+FullAttention 128K 100.0 100.0 30.5 25.5 36.5 9.8 67.0 52.8
+StreamingLLM 640 5.0 5.0 0.5 23.5 30.5 6.3 69.5 20.0(-32.8)
+SnapKV 2K 63.0 100.0 0.5 23.0 33.0 10.3 68.5 42.6(-10.2)
+InfLLM 640+2K 100.0 100.0 0.5 20.5 43.0 9.4 44.0 45.3(-7.5)
+Flat 640+100/2K 100.0 100.0 21.0/30.0 23.0 35.0 10.8 68.5 51.2(-1.6)/52.5(-0.3)
+IVF 640+100/2K 99.0 100.0 19.5/29.5 23.0 35.0 10.7 69.0 50.9(-1.9)/52.3(-0.5)
+RetrievalAttention 640+100/2K 99.5 100.0 20.0/30.0 23.0 35.0 9.5 68.5 50.8(-2.0)/52.2(-0.6)
+FullAttention 128K 98.0 100.0 3.5 31.0 11.0 19.2 55.5 45.5
+StreamingLLM 640 5.0 5.0 0.5 29.5 8.0 11.2 54.0 16.2(-29.3)
+SnapKV 2K 39.0 100.0 0.0 30.5 8.5 17.1 55.0 35.7(-9.8)
+InfLLM 640+2K 99.0 100.0 0.5 27.5 18.0 12.7 40.5 42.6(-2.9)
+Flat 640+100/2K 98.5 100.0 2.5/3.0 30.5 16.0 17.7 54.5 45.7(+0.2)/45.7(+0.2)
+IVF 640+100/2K 98.0 100.0 2.5/3.5 29.5 16.0 17.5 54.5 45.4(-0.1)/45.6(+0.1)
+RetrievalAttention 640+100/2K 95.0 99.0 3.0/3.0 30.0 16.0 17.6 54.5 45.0(-0.5)/45.0(-0.5)
+4.2 AccuracyonLongContextTasks
+∞-Bench. As shown in Table 2, RetrievalAttention achieves comparable accuracy to the full
+attention,benefitingfromitsefficientdynamicretrievalofimportanttokens. Staticmethods,suchas
+StreamingLLMandSnapKV,lackthiscapabilityandthereforeachievesub-optimalaccuracy. During
+tokengeneration,thecriticaltokenschangedynamicallyaccordingtothecurrentquery,invalidating
+thepreviously captured static patterns. AlthoughInfLLMsupportsdynamicretrievalofrelevant
+blocks,itachievesnearlyzeroaccuracyincomplextasks(i.e.,KVretrieval)duetolowaccuracy
+of representative vectors. Since RetrievalAttention can accurately identify the most relevant key
+vectors, it achieves the best accuracy in KV retrieval. Moreover, by retrieving more tokens (i.e.,
+top-2000showninthecolumnofRetr.KV)inKVretrieval,RetrievalAttentionachievesnearlythe
+sameaccuracyasfullattention,whichdemonstratingtheeffectivenessofourmethodincomplexand
+dynamictasks.
+ItisworthnotingthatFlatandIVFneedtoscan100%and30%ofthepastkeyvectorstoachievethe
+sametaskaccuracyasRetrievalAttention. Incontrast,RetrievalAttentiononlyrequiresscan1−3%
+vectors,resultinginmuchlowerdecodinglatency.
+RULER.Table3demonstratesthatmodelsutilizingRetrievalAttentionachievesnearlythesame
+taskaccuracyasfullattentionindifferentcontextlengths. Incontrast,othertraining-freemethods
+experienceannoticeablereductioninaccuracy,particularlyforlongercontextsizeslike128K,as
+theyfailtocapturedynamicallychangedimportanttokens.
+Needle-in-a-haystack. AsshowninFigure4,RetrievalAttentioncaneffectivelyfocusoninformation
+atvariouspositionsacrossdifferentcontextwindows,rangingfrom4Kto128K.Incontrast,methods
+likeStreamingLLMencounterdifficultieswhencriticalinformationliesbeyondtherangeofthestatic
+patterns,whoseresultsareshownin§A.2.
+7
+B8-3-amalL
+B9-iY
+B6-iY4.3 LatencyEvaluation
+Asthecontextlengthincreases, thedecodinglatencyoffullattentionsignificantlyincreasesdue
+to its quadratic time comlexity. Enabling the KV cache (vLLM) incurs out-of-memory (OOM)
+issuesduetolimitedGPUmemory. ThelatencyofStreamingLLM,SnapKV,andInfLLMremains
+relativelystablebecauseofconstanttokensinvolvedintheattentioncomputationbuttheysuffer
+significantaccuracydegradationasdemonstratedin§4.2. Duetoefficientattention-awarevector
+search,RetrievalAttentionachieves4.9×and1.98×latencyreductioncomparedtoFlatandIVFfor
+the128Kcontext. ThedetailedlatencybreakdowncanbeseenintheTable6of§A.3.
+Table3: Performance(%)ofdifferentmethodsandmodelsonRULER.
+Methods Act.Tokens Claimed Effective 4K 8K 16K 32K 64K 128K Avg.
+FullAttention 128K 262K 32K 93.13 90.49 89.27 85.11 82.51 78.74 86.54
+StreamingLLM 640 - <4K 28.74 16.49 15.46 13.34 11.30 9.45 15.80(-70.75)
+SnapKV 2K - 4K 91.51 80.70 75.53 70.84 65.44 58.68 73.78(-12.76)
+InfLLM 640+2K - 4K 85.20 52.86 38.29 32.44 27.94 25.71 43.74(-42.81)
+Flat 640+100 - 16K 92.71 87.93 87.01 84.97 80.99 74.34 84.66(-1.89)
+IVF 640+100 - 16K 92.73 87.86 87.22 84.74 78.46 68.21 83.20(-3.34)
+RetrievalAttention 640+100 - 16K 92.64 88.46 86.80 84.78 80.50 74.70 84.70(-1.85)
+FullAttention 128K 200K 8K 91.02 86.62 82.85 73.17 67.08 60.51 76.87
+StreamingLLM 640 - <4K 27.96 16.03 14.89 9.48 10.95 12.05 15.23(-61.65)
+SnapKV 2K - 4K 90.39 75.59 64.48 48.70 39.28 32.97 58.57(-18.30)
+InfLLM 640+2K - <4K 82.66 50.36 36.17 28.20 22.65 20.94 40.16(-36.71)
+Flat 640+100 - 8K 91.09 87.71 84.42 74.58 66.16 59.50 77.24(+0.37)
+IVF 640+100 - 8K 91.03 91.04 83.85 72.19 65.13 58.04 76.29(-0.58)
+RetrievalAttention 640+100 - 8K 90.78 86.32 82.95 73.73 65.67 59.15 76.43(-0.44)
+FullAttention 128K 200K <4K 84.52 77.77 69.12 61.64 58.36 55.77 67.86
+StreamingLLM 640 - <4K 24.77 12.88 11.21 7.33 8.76 9.86 12.47(-55.40)
+SnapKV 2K - <4K 80.94 59.55 45.36 36.11 33.43 29.53 47.49(-20.38)
+InfLLM 640+2K - <4K 76.42 44.38 34.11 27.11 25.28 25.33 38.77(-29.09)
+Flat 640+100 - <4K 83.69 77.26 67.28 60.58 57.27 50.63 66.12(-1.75)
+IVF 640+100 - <4K 83.25 76.90 67.00 58.94 55.99 50.31 63.33(-2.53)
+RetrievalAttention 640+100 - <4K 83.01 76.56 67.49 59.46 57.20 51.44 65.86(-2.00)
+5 RelatedWorks
+To accelerate the long-context LLM inference, some works [29, 30, 10, 31, 32, 11] attempt to
+compressthesizeoftheKVcachebyleveragingthesparsityofattention. However,thesemethods
+oftensufferfromsignificantmodelaccuracydropsduetothedynamicnatureofattentionsparsity.
+Methods 4K 8K 16K 32K 64K 128K
+Full(withoutcache) 0.527 1.167 2.672 6.214 15.263 43.927
+vLLM OOM OOM OOM OOM OOM OOM
+StreamingLLM 0.029 0.030 0.029 0.030 0.030 0.029
+SnapKV 0.029 0.028 0.028 0.029 0.029 0.028
+InfLLM 0.058 0.063 0.063 0.065 0.067 0.069
+Flat 0.140 0.178 0.226 0.328 0.522 0.922
+IVF 0.128 0.140 0.162 0.201 0.253 0.373
+RetrievalAttention 0.137 0.144 0.156 0.162 0.169 0.188
+Figure 4: Performance of RetrievalAt- Table 4: Per-token generation latency (s) as context
+tentioninNeedle-in-a-haystack. lengthvariesfrom4Kto128KonLlama-3-8B.
+FlexGen[4]andLamina[33]offloadtheKVcachetoCPUmemory,buttheystrugglewithslow
+andcostlyfull-attentioncomputation. ByidentifyingthedynamicnatureofimportantKVvectors
+fordifferentqueries,recentworkchoosestoretainalloftheKVcacheanddynamicallyattendto
+differentpartsofKVvectorsbasedonthecurrentquery.Quest[5]partitionstheKVcacheintoblocks
+andselectsarepresentativekeyvectorforeachblock. Foragivenquery,itscansallrepresentative
+keyvectorsandattendstop-kblockswiththehighestattentionscores. InfLLM[6]adoptsasimilar
+strategyasQuestbutoffloadsmostKVcacheblockstotheCPUmemorytosupportlongercontexts.
+Duetoblock-basedorganizationandretrieval,theaccuracyofrepresentativevectorssignificantly
+impactstheeffectivenessofthosemethodsforobtainingimportanttokens. SparQ[7],InfiniGen[8],
+andLoKi[9]approximatethemostrelevanttop-kkeyscorrespondingtoagivenquerybyreducingthe
+8
+B8-3-amalL
+B9-iY
+B6-iYheaddimension. RetrievalAttentioninsteadorganizestheKVcacheusingANNSindexes,allowing
+theretrievalofimportanttokenswithhighrecallsandlowcost. TheconcurrentworkMagicPiG[34]
+employslocality-sensitive-hashing(LSH)toretrievecriticalKVvectors. However,itfailstoaddress
+theout-of-distributionissuebetweenqueryandkeyvectors,necessitatingretrievingalargeportionof
+KVcachetomaintainthemodelaccuracy.
+6 Conclusion
+WeproposeRetrievalAttention,amethodthatoffloadsmostKVvectorstoCPUmemoryandlever-
+ages vector search for dynamic sparse attention to minimize inference cost. RetrievalAttention
+identifies the different distributions of the query and key vectors and employs a attention-aware
+approachtoefficientlyfindcriticaltokensformodelgeneration. Experimentalresultsdemonstrate
+RetrievalAttentioneffectivelyachieves4.9×and1.98×decodingspeedupthanexactKNNandtradi-
+tionalANNSmethods,onasingleRTX4090GPUforacontextof128ktokens. RetrievalAttention
+isthefirstsystemthatsupportsrunning8B-levelLLMswith128Ktokensonasingle4090(24GB)
+GPUwithanacceptablelatencycostandwithoutcompromisingmodelaccuracy.
+References
+[1] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.Gomez,
+LukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. InIsabelleGuyon,Ulrikevon
+Luxburg,SamyBengio,HannaM.Wallach,RobFergus,S.V.N.Vishwanathan,andRoman
+Garnett,editors,AdvancesinNeuralInformationProcessingSystems30: AnnualConference
+onNeuralInformationProcessingSystems2017,December4-9,2017,LongBeach,CA,USA,
+pages5998–6008,2017.
+[2] GeminiTeam. Gemini1.5: Unlockingmultimodalunderstandingacrossmillionsoftokensof
+context,2024.
+[3] Yichuan Deng, Zhao Song, and Chiwun Yang. Attention is naturally sparse with gaussian
+distributedinput,2024.
+[4] YingSheng,LianminZheng,BinhangYuan,ZhuohanLi,MaxRyabinin,BeidiChen,Percy
+Liang,ChristopherRé,IonStoica,andCeZhang.Flexgen:high-throughputgenerativeinference
+oflargelanguagemodelswithasinglegpu.InProceedingsofthe40thInternationalConference
+onMachineLearning,ICML’23.JMLR.org,2023.
+[5] JiamingTang,YilongZhao,KanZhu,GuangxuanXiao,BarisKasikci,andSongHan. QUEST:
+Query-aware sparsity for efficient long-context LLM inference. In Forty-first International
+ConferenceonMachineLearning,2024.
+[6] ChaojunXiao,PengleZhang,XuHan,GuangxuanXiao,YankaiLin,ZhengyanZhang,Zhiyuan
+Liu,SongHan,andMaosongSun. Infllm: Unveilingtheintrinsiccapacityofllmsforunder-
+standingextremelylongsequenceswithtraining-freememory. ArXivpreprint,abs/2402.04617,
+2024.
+[7] LukaRibar,IvanChelombiev,LukeHudlass-Galley,CharlieBlake,CarloLuschi,andDouglas
+Orr. Sparqattention: Bandwidth-efficientllminference. InForty-firstInternationalConference
+onMachineLearning,2024.
+[8] WonbeomLee,JungiLee,JunghwanSeo,andJaewoongSim. InfiniGen: Efficientgenerative
+inferenceoflargelanguagemodelswithdynamicKVcachemanagement. In18thUSENIX
+Symposium on Operating Systems Design and Implementation (OSDI 24), pages 155–172,
+SantaClara,CA,2024.USENIXAssociation.
+[9] Prajwal Singhania, Siddharth Singh, Shwai He, Soheil Feizi, and Abhinav Bhatele. Loki:
+Low-rankkeysforefficientsparseattention. ArXivpreprint,abs/2406.02542,2024.
+[10] GuangxuanXiao,YuandongTian,BeidiChen,SongHan,andMikeLewis. Efficientstreaming
+languagemodelswithattentionsinks. InTheTwelfthInternationalConferenceonLearning
+Representations,2024.
+9[11] Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, Hanchen Ye,
+TianleCai,PatrickLewis,andDemingChen. Snapkv: Llmknowswhatyouarelookingfor
+beforegeneration. ArXivpreprint,abs/2404.14469,2024.
+[12] XinrongZhang,YingfaChen,ShengdingHu,ZihangXu,JunhaoChen,MooHao,XuHan,
+ZhenThai,ShuoWang,ZhiyuanLiu,andMaosongSun. ∞Bench: Extendinglongcontext
+evaluationbeyond100Ktokens. InLun-WeiKu,AndreMartins,andVivekSrikumar,editors,
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics
+(Volume 1: Long Papers), pages 15262–15277, Bangkok, Thailand, 2024. Association for
+ComputationalLinguistics.
+[13] Cheng-PingHsieh,SimengSun,SamuelKriman,ShantanuAcharya,DimaRekesh,FeiJia,and
+BorisGinsburg. Ruler: What’stherealcontextsizeofyourlong-contextlanguagemodels?
+ArXivpreprint,abs/2404.06654,2024.
+[14] SivicandZisserman. Videogoogle: Atextretrievalapproachtoobjectmatchinginvideos. In
+ProceedingsninthIEEEinternationalconferenceoncomputervision,pages1470–1477.IEEE,
+2003.
+[15] YuAMalkovandDmitryAYashunin. Efficientandrobustapproximatenearestneighborsearch
+using hierarchical navigable small world graphs. IEEE transactions on pattern analysis and
+machineintelligence,42(4):824–836,2018.
+[16] Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy, Pierre-
+EmmanuelMazaré,MariaLomeli,LucasHosseini,andHervéJégou. Thefaisslibrary. 2024.
+[17] PrasantaChandraMahalanobis. Onthegeneralizeddistanceinstatistics. Sankhya¯: TheIndian
+JournalofStatistics,SeriesA(2008-),80:S1–S7,2018.
+[18] Google Cloud. Context caching overview. https://cloud.google.com/vertex-ai/
+generative-ai/docs/context-cache/context-cache-overview, 2024. Accessed:
+2024-07-01.
+[19] PratyushPatel,EshaChoukse,ChaojieZhang,AashakaShah,ÍñigoGoiri,SaeedMaleki,and
+RicardoBianchini. Splitwise: Efficientgenerativellminferenceusingphasesplitting. In2024
+ACM/IEEE 51st Annual International Symposium on Computer Architecture (ISCA), pages
+118–132.IEEE,2024.
+[20] Ruoyu Qin, Zheming Li, Weiran He, Mingxing Zhang, Yongwei Wu, Weimin Zheng, and
+XinranXu. Mooncake: Kimi’skvcache-centricarchitectureforllmserving. ArXivpreprint,
+abs/2407.00079,2024.
+[21] MengChen,KaiZhang,ZhenyingHe,YinanJing,andX.SeanWang. Roargraph: Aprojected
+bipartitegraphforefficientcross-modalapproximatenearestneighborsearch. Proc.VLDB
+Endow.,17(11):2735–2749,aug2024.
+[22] Huiqiang Jiang, Yucheng Li, Chengruidong Zhang, Qianhui Wu, Xufang Luo, Surin Ahn,
+ZhenhuaHan,AmirHAbdi,DongshengLi,Chin-YewLin,etal. Minference1.0: Accelerating
+pre-fillingforlong-contextllmsviadynamicsparseattention. ArXivpreprint,abs/2407.02490,
+2024.
+[23] TriDao,DanielY.Fu,StefanoErmon,AtriRudra,andChristopherRé. FlashAttention: Fast
+andmemory-efficientexactattentionwithIO-awareness. InAdvancesinNeuralInformation
+ProcessingSystems,2022.
+[24] Gradient AI. Llama-3-8b-instruct-262k. https://huggingface.co/gradientai/
+Llama-3-8B-Instruct-262k,2024. Accessed: 2024-07-01.
+[25] 01-ai.Yi-6b-200k.https://huggingface.co/01-ai/Yi-6B-200K,2024.Accessed:2024-
+07-01.
+[26] 01-ai.Yi-9b-200k.https://huggingface.co/01-ai/Yi-9B-200K,2024.Accessed:2024-
+07-01.
+10[27] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu,
+Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large
+language model serving with pagedattention. In Proceedings of the ACM SIGOPS 29th
+SymposiumonOperatingSystemsPrinciples,2023.
+[28] Greg Kamradt. Needle in a haystack - pressure testing llms. https://github.com/
+gkamradt/LLMTest_NeedleInAHaystack,2023. Accessed: 2024-08-12.
+[29] ZhenyuZhang,YingSheng,TianyiZhou,TianlongChen,LianminZheng,RuisiCai,ZhaoSong,
+YuandongTian,ChristopherRé,ClarkW.Barrett,ZhangyangWang,andBeidiChen. H2O:
+heavy-hitteroracleforefficientgenerativeinferenceoflargelanguagemodels. InAdvances
+in Neural Information Processing Systems 36: Annual Conference on Neural Information
+Processing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023,
+2023.
+[30] ZichangLiu,AdityaDesai,FangshuoLiao,WeitaoWang,VictorXie,ZhaozhuoXu,Anastasios
+Kyrillidis, and Anshumali Shrivastava. Scissorhands: Exploiting the persistence of impor-
+tancehypothesisforllmkvcachecompressionattesttime. AdvancesinNeuralInformation
+ProcessingSystems,36,2024.
+[31] Chi Han, Qifan Wang, Hao Peng, Wenhan Xiong, Yu Chen, Heng Ji, and Sinong Wang.
+LM-infinite: Zero-shot extreme length generalization for large language models. In Kevin
+Duh,HelenaGomez,andStevenBethard,editors,Proceedingsofthe2024Conferenceofthe
+NorthAmericanChapteroftheAssociationforComputationalLinguistics: HumanLanguage
+Technologies(Volume1: LongPapers),pages3991–4008,MexicoCity,Mexico,2024.Associ-
+ationforComputationalLinguistics.
+[32] SuyuGe,YunanZhang,LiyuanLiu,MinjiaZhang,JiaweiHan,andJianfengGao. Modeltells
+youwhattodiscard: AdaptiveKVcachecompressionforLLMs. InTheTwelfthInternational
+ConferenceonLearningRepresentations,2024.
+[33] ShaoyuanChen,YutongLin,MingxingZhang,andYongweiWu. Efficientandeconomiclarge
+languagemodelinferencewithattentionoffloading. ArXivpreprint,abs/2405.01814,2024.
+[34] Zhuoming Chen. Magicpig: sparse inference engine for llm. https://github.com/
+Infini-AI-Lab/MagicPiG/,2024. Accessed: 2024-08-01.
+[35] JoshuaAinslie,JamesLee-Thorp,MichieldeJong,YuryZemlyanskiy,FedericoLebron,and
+SumitSanghai. Gqa: Traininggeneralizedmulti-querytransformermodelsfrommulti-head
+checkpoints. InThe2023ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,
+2023.
+[36] RewonChild,ScottGray,AlecRadford,andIlyaSutskever. Generatinglongsequenceswith
+sparsetransformers. ArXivpreprint,abs/1904.10509,2019.
+[37] IzBeltagy,MatthewEPeters,andArmanCohan. Longformer: Thelong-documenttransformer.
+ArXivpreprint,abs/2004.05150,2020.
+[38] Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti,
+SantiagoOntañón,PhilipPham,AnirudhRavula,QifanWang,LiYang,andAmrAhmed. Big
+bird: Transformersforlongersequences. InHugoLarochelle,Marc’AurelioRanzato,Raia
+Hadsell,Maria-FlorinaBalcan,andHsuan-TienLin,editors,AdvancesinNeuralInformation
+ProcessingSystems33: AnnualConferenceonNeuralInformationProcessingSystems2020,
+NeurIPS2020,December6-12,2020,virtual,2020.
+[39] JoshuaAinslie,SantiagoOntanon,ChrisAlberti,VaclavCvicek,ZacharyFisher,PhilipPham,
+AnirudhRavula,SumitSanghai,QifanWang,andLiYang. ETC:Encodinglongandstructured
+inputsintransformers.InProceedingsofthe2020ConferenceonEmpiricalMethodsinNatural
+LanguageProcessing(EMNLP),pages268–284,Online,2020.AssociationforComputational
+Linguistics.
+[40] NikitaKitaev,LukaszKaiser,andAnselmLevskaya. Reformer: Theefficienttransformer. In
+8thInternationalConferenceonLearningRepresentations,ICLR2020,AddisAbaba,Ethiopia,
+April26-30,2020.OpenReview.net,2020.
+11[41] AmandaBertsch,UriAlon,GrahamNeubig,andMatthewGormley. Unlimiformer:Long-range
+transformerswithunlimitedlengthinput. AdvancesinNeuralInformationProcessingSystems,
+36,2024.
+[42] YuzhenMao,MartinEster,andKeLi. Iceformer: Acceleratedinferencewithlong-sequence
+transformersonCPUs. InTheTwelfthInternationalConferenceonLearningRepresentations,
+2024.
+[43] YinminZhong,ShengyuLiu,JundaChen,JianboHu,YiboZhu,XuanzheLiu,XinJin,and
+Hao Zhang. DistServe: Disaggregating prefill and decoding for goodput-optimized large
+language model serving. In 18th USENIX Symposium on Operating Systems Design and
+Implementation(OSDI24),pages193–210,SantaClara,CA,2024.USENIXAssociation.
+[44] SamAdeJacobs,MasahiroTanaka,ChengmingZhang,MinjiaZhang,LeonSong,Samyam
+Rajbhandari,andYuxiongHe. Deepspeedulysses: Systemoptimizationsforenablingtraining
+ofextremelongsequencetransformermodels. ArXivpreprint,abs/2309.14509,2023.
+[45] Hao Liu, Matei Zaharia, and Pieter Abbeel. Ringattention with blockwise transformers for
+near-infinite context. In The Twelfth International Conference on Learning Representations,
+2024.
+A AdditionalExperimentalDetailsandResults
+A.1 ModelArchitecture
+Table5comparesthearchitecturedifferencesof
+thethreemodelsusedinourexperimental Table5: ArchitectureoverviewofLLMs.
+evaluation. Allmodelssupportsthegroupedquery
+Model TotalLayer QueryHead KVHead
+attention(GQA),inwhichmultiplequeryheads
+Yi-6B 32 32 4
+shareoneKVhead. Amongthem,theYi-9B
+Yi-9B 48 32 4
+modelhasmoretransformerlayers,whilethe Llama-3-8B 32 32 8
+Llama-3-8BmodelhasmoreKVheads.
+A.2 AdditionalResultsonNeedle-in-a-haystack
+Figure5showstheresultsofothermethodsonNeedle-in-a-haystackbenchmark. StreamingLLMcan
+onlyfindthecorrectanswerwhentheneedle’spositioniswithinthestaticpattern. InfLLMmaintains
+highperformancewithshortercontextlengths. However,asthelengthincreases,itsperformance
+showsasignificantdecline. AlthoughSnapKV,Flat,andIVFperformwellonthisbenchmark,we
+haveanalyzedtheirdisadvantagesinaccuracyandlatencyinthepreviousevaluation.
+Table6: Latencybreakdownofretrievalattention-basedalgorithmonLlama-3-8B.
+Methods Retrieval Attention Others Total
+Flat 0.798 0.083 0.041 0.922
+IVF 0.250 0.084 0.039 0.373
+RetrievalAttention 0.064 0.081 0.043 0.188
+A.3 LatencyBreakdown
+Table6presentsthebreakdownofend-to-endlatencyfordifferentretrievalattention-basedalgorithms
+onasingleRTX4090serverunderthe128Kcontextlength. SinceRetrievalAttentioneffectively
+addressestheissueofout-of-distribution,itonlyrequires34.0%ofthetimeforvectorsearch. Incon-
+trast,FlatandIVFspends86.6%and67.0%oftime,respectively. ThisisbecauseRetrievalAttention
+scanslessdata,avoidingmemorybandwidthcontentionwhenmultipleheadsareperformingparallel
+retrievalintheCPUside. Thisadvantagebecomesmorepronouncedwithlongercontextlengths.
+12(a)FullAttention (b)StreamingLLM
+(c)SnapKV (d)InfLLM
+(e)FLAT (f)IVF
+Figure5: PerformanceofdifferentalgorithmsandmodelsonNeedle-in-a-haystack. Thesizeofthe
+staticpatternisconsistently640(128initialtokens+512tokensinthelocalwindow).
+A.4 DecodingLatencyonA100
+We test the generality of RetrievalAttention by measuring its performance on a server with one
+A100(80GB)andoneAMDEPYCCPUwith24cores. Weshowthetoken-generationlatencyof
+differentmethodsonthreemodelsinTable7. SincetheKVcacheoffullattentionisdisabled,all
+prompttokensneedtoberecalculatedduringthedecoding,incurringaveryhighdecodinglatency.
+ByenablingtheKVcachewiththePageAttentionoptimizationinvLLM,thedecodinglatencyis
+significantlyreduced. However,vLLMsuffersfromOOMissuewiththeincreaseofcontextlength,
+whichweelaboratefurtherlater. OtherKVcachedroppingorblockretrievalmethodsincluding
+StreamingLLM,SnapKV,andInfLLMachievefasterdecodingspeed,butthisisattheexpenseofa
+significantdropinmodelaccuracy. Incontrast,RetrievalAttentiondoesnotcompromisegeneration
+accuracywhileachievingmuchlowerdecodinglatencythanIVFandFlatbecauseoftheefficient
+mitigationofout-of-distributionproblem.
+Wealsoevaluatehowthedecodinglatencychangeswhenthecontextlengthvariesfrom100Kto
+1Mtokens onLlama-3-8Bmodel andtheresults canbefound inTable8. To makesurethere is
+enoughCPUmemorytoholdtheKVcacheandindexesespeciallyinthe1Mcontextscenario,we
+useapowerfulmachineequippedwithanAMDEPYC7V12CPUwith48coresand1.72TBof
+memory. Themachineisalsoequippedwiththesame80GBA100GPU.Thedecodinglatencyof
+fullattentionwithKVstatere-computationincreasesquadraticallywiththecontextsize. Withthe
+KVcacheenabledinthetheGPUmemory,vLLMstartstriggeringOOMissuewhenthecontextsize
+islargerthan200K.StaticKVdroppingmethodssuchasStreamingLLMhavenolatencyincrease
+duetotheconstantKVcacheinvolvedforattentioncomputation. DifferentfromFlatandIVFwhose
+latencynumbersaresensitivetocontextsize,RetrievalAttentiononlyhasaminorlatencyincrease
+(8%)whenthecontextsizeincreases10×from100Kto1M.
+13Table 7: Per-token generation latency (s) of Table 8: Per-token generation latency (s) as
+128Kcontext-lengthonA100. contextlengthvariesfrom100Kto1M.
+Methods Yi-6B Yi-9B Llama-3-8B Methods 100K 200K 500K 1M
+Full(withoutcache) 31.61 47.51 33.38 Full(withoutcache) 25.47 83.03 457 1740
+vLLM 0.030 0.044 0.033 vLLM 0.029 0.046 OOM OOM
+StreamingLLM 0.032 0.047 0.031 StreamingLLM 0.034 0.035 0.032 0.035
+SnapKV 0.033 0.05 0.033 SnapKV 0.035 0.035 0.034 0.034
+InfLLM 0.069 0.11 0.068 InfLLM 0.082 0.079 0.082 0.084
+Flat 0.541 0.802 0.564 Flat 0.489 0.871 1.92 3.69
+IVF 0.309 0.468 0.345 IVF 0.308 0.476 1.032 1.889
+RetrievalAttention 0.150 0.227 0.155 RetrievalAttention 0.159 0.167 0.170 0.172
+B RetrievalAttentionAlgorithm
+B.1 FormulaofCombiningAttentionResultsfromtheCPUandGPUSide
+RetrievalAttentionpartitionstheKVvectorsforattentionintotwodisjointsets: predictableoneson
+GPU(denotedasW)anddynamicallyretrievedonesonCPU(denotedasΩ).
+I =W ∪Ω (3)
+t,ϵ
+AttentionoperationisappliedtothetwosetsofKVvectorsseparatelyonCPUandGPU,generating
+twopartialattentionoutputs(denotedaso ando ,respectively). Toguaranteetheapproximated
+W Ω
+attentionoutputequalstotheattentioncomputationonI ,RetrievalAttentionusesasimilarideaof
+t,ϵ
+FlashAttention[23]tocombineo ando inthefollowingequations:
+W Ω
+o =Attn(q ,K[W,:],V[W,:])
+W t
+=
+(cid:80) i∈Wezi−z˜1 ·v
+i
+(cid:80) ezi−z˜1
+i∈W
+o =Attn(q ,K[Ω,:],V[Ω,:])
+Ω t
+=
+(cid:80) i∈Ωezi−z˜2 ·v
+i
+(cid:80) ezi−z˜2
+i∈Ω
+o =γ ·o +γ ·o (4)
+t 1 W 2 Ω
+wherez˜ = max z andz˜ = max z arethelocalmaximumdotproductsinsetW andΩ
+1 i∈W i 2 i∈Ω i
+respectively. Andγ andγ arere-scalingfactorstoguaranteetheattentionoutputisthesameasthat
+1 2
+onI ,whicharedefinedasfollows:
+t,ϵ
+ez˜1−z˜·(cid:80) ezi−z˜1
+γ = i∈W
+1 (cid:80) ezi−z˜
+i∈It,ϵ
+(5)
+ez˜2−z˜·(cid:80) ezi−z˜2
+γ = i∈Ω
+2 (cid:80) ezi−z˜
+i∈It,ϵ
+B.2 OverallExecutionFlow
+Algorithm 1 summarizes the above design of RetrievalAttention and elaborate the procedure in
+an algorithm. At the beginning of each token generation, RetrievalAttention predicts active KV
+vectorsandmovethemtoGPUmemory,andcomputepartialattentionusingtheFlashAttention[23]
+kernel(1-6). InparallelwithGPUcomputation,RetrievalAttentionleveragesthespeciallydesigned
+vectordatabasetofindthemostrelevantKVvectorstocomputeattentiononCPU(7-8). Finally,
+RetrievalAttention combines the partial attention outputs on GPU and CPU using 4 and gets the
+approximatedattentionoutput(9).
+14Algorithm1:RetrievalAttention
+Input: Queryvectorq ∈R1×d
+t
+Data: KVCacheinGPUK ,V ∈R|W|×d
+W W
+Data: CPU-basedVectorDatabaseH
+Output: Attentionoutputo ∈R1×d
+t
+// Find the predictable KV vectors
+1 W′ ←−PredictActiveTokens(...);
+2
+for{i|i∈H∪W′}do
+3 H.remove(i); W.insert(i);// move to GPU
+4 for{i|i∈/ W′∧i∈H} do
+5 W.remove(i); H.insert(i);// move to CPU
+// Attention on GPU
+6 o W ←−FlashAttention(q t,K W,V W)
+// Attention on CPU
+// Search in vector database to retrieve most relevant KV vectors
+7 Ω←−VectorSearch(q t);
+8 o Ω ←−AttentionCPU(Ω);// Combine partial attention outputs
+9 o t =γ 1·o W +γ 2·o Ω;// Equation 4,5
+C Implementation
+RetrievalAttentionbuildsoneindividualvectorindexfortheKVcacheinoneattentionhead. Re-
+trievalAttentiondidseveraloptimizationstooptimizethepromptprefill,acceleratethevectorsearch,
+andreducetheCPUmemoryusage.
+OptimizationforthePrefillPhase. Duringtheprefillphase,thefullattentioncomputationofthe
+longcontextisrequiredforgeneratingtheoutputvectorforthenextleveloftheLLM.Simultaneously,
+wemovetheKVvectorstotheCPUsidefortheANNSindexbuilding. Toacceleratetheoverall
+prefillprocess,weoverlapthecachemovementtotheCPUwiththefullattentioncomputationonthe
+GPUinapipelinemanner. TominimizepeakGPUmemoryusageduringtheprefillphase,attention
+computationisperformedsequentiallyacrossmultipleattentionheads. Thisapproachonlyslightly
+impactstheattentioncomputationspeed,aslongerpromptscanfullyleverageGPUparallelismwith
+FlashAttention.
+Multi-headParallelismontheCPUside. Tospeedupthedynamicsparseattentioncomputation
+ontheCPU,weexploitthemulti-threadparallelisminvectordatabasesbyleveragingthemulti-core
+abilityofmodernCPUarchitecture. Specifically,sincethecomputationofdifferentattentionheads
+is independent, we launch multiple threads for parallel searching across different vector indexes
+toreducetheoveralllatencyontheCPUside. Forgroupedqueryattention(GQA)[35],although
+multiplequeryheadscouldsharethesamekey-valuevectors,weobservethatthequeryvectorsfrom
+differentqueryheadsinthesamegroupexhibitdifferentvectordistributions. Therefore,webuild
+onevectorindexforeachqueryheadtoleveragethespecificquerydistributionofeachhead.
+MinimizetheCPUMemoryUsage. ToreduceCPUmemoryconsumption, theindexesinthe
+sameattentiongroupshareonecopyofKVvectorsbyonlystoringthepointerstoKVvectorsin
+eachindex. Inthefuture,weplantoutilizescalarquantizationtofurthercompresstheKVvectors,
+implementing an 8-bit representation in place of the original FP32 format. This compression is
+promisingtoreducememoryusagewhilepreservingcomputationalefficiency. Importantly,ourinitial
+resultsdemonstratethatthisquantizationapproachdoesnotcompromisetheaccuracyofthemodel
+outcomes,maintainingperformanceequivalenttothefull-precisionrepresentation.
+D AdditionalRelatedWork
+Sparse Transformers. Since the quadratic complexity of attention has become the bottleneck
+of LLM efficiency for long context applications, numerous works have studied to design sparse
+15transformerstoreducethecomputationalandmemorycomplexityoftheself-attentionmechanism.
+Someworksrestricttheattentioncomputationtopredefinedpatternsincludingslidingwindows[36],
+dilatedwindows[37],ormixtureofdifferentpatterns[38,39]. Someapproachesusecluster-based
+sparsitybasedonhashvalue[40]orKNNalgorithms[41,42]. Allthesesolutionsrequirepre-training
+amodelfromscratch, whichdonotworkforourtargettoout-of-boxusageofLLMs. Although
+someapproaches[6,7]exploitthedynamicsparsenatureofLLMs,theyoftenusesomeestimation
+using low-rank hidden states or post-statistical approaches, which incurs high overhead but with
+low accuracy. Moreover, all these approaches have to maintain full KV vectors on GPU with
+onlyacceleratedinferencebyreducedmemorymovement,whichdoesnotsolvethechallengeof
+commodityGPUswithlimitedGPUmemory.
+Additionally,someapproachesacceleratetheinferencebyemployingdynamicallysparseattention
+patterns [22], separating the prefill and decoding stages [43, 20], and utilizing sequence paral-
+lelism[44,45]. Thesemethodsareorthogonaltooursandcanbeinconjunctionwithourapproach.
+16
