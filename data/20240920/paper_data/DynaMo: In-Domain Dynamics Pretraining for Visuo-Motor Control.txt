@@ -1,0 +1,923 @@
+DynaMo: In-Domain Dynamics Pretraining
+for Visuo-Motor Control
+ZichenJeffCui∗ HengkaiPan AadhithyaIyer SiddhantHaldar LerrelPinto
+NewYorkUniversity
+Abstract
+Imitationlearninghasproventobeapowerfultoolfortrainingcomplexvisuo-
+motorpolicies. However, currentmethodsoftenrequirehundredstothousands
+ofexpertdemonstrationstohandlehigh-dimensionalvisualobservations. Akey
+reasonforthispoordataefficiencyisthatvisualrepresentationsarepredominantly
+either pretrained on out-of-domain data or trained directly through a behavior
+cloning objective. In this work, we present DynaMo, a new in-domain, self-
+supervised method for learning visual representations. Given a set of expert
+demonstrations,wejointlylearnalatentinversedynamicsmodelandaforward
+dynamicsmodeloverasequenceofimageembeddings,predictingthenextframe
+inlatentspace,withoutaugmentations,contrastivesampling,oraccesstoground
+truthactions. Importantly,DynaModoesnotrequireanyout-of-domaindatasuch
+asInternetdatasetsorcross-embodieddatasets. Onasuiteofsixsimulatedandreal
+environments,weshowthatrepresentationslearnedwithDynaMosignificantly
+improvedownstreamimitationlearningperformanceoverpriorself-supervised
+learning objectives, and pretrained representations. Gains from using DynaMo
+holdacrosspolicyclassessuchasBehaviorTransformer,DiffusionPolicy,MLP,
+andnearestneighbors. Finally,weablateoverkeycomponentsofDynaMoand
+measure its impact on downstream policy performance. Robot videos are best
+viewedathttps://dynamo-ssl.github.io.
+1 Introduction
+Learning visuo-motor policies from human demonstrations is an exciting approach for training
+difficultcontroltasksintherealworld[1–5]. However,akeychallengeinsuchalearningparadigm
+istoefficientlylearnapolicywithfewerexpertdemonstrations. Toaddressthis,priorworkshave
+focusedonlearningbettervisualrepresentations,oftenbypretrainingonlargeInternet-scalevideo
+datasets[6–11]. However,asshowninDasarietal.[12],theseout-of-domainrepresentationsmaynot
+transfertodownstreamtaskswithverydifferentembodimentsandviewpointsfromthepretraining
+dataset.
+AnalternativetousingInternet-pretrainedmodelsistotrainthevisualrepresentations‘in-domain’
+onthedemonstrationdatacollectedtosolvethetask[13,4]. However,in-domaindatasetsaremuch
+smallerthanInternet-scaledata. Thishasresultedintheuseofdomain-specificaugmentations[13]
+toinducerepresentationalinvarianceswithself-supervisionortocollectlargeramountsofdemon-
+strations[2,14]. Therelianceofexistingmethodsonlargedatasetsmightsuggestthatin-domain
+self-supervisedpretrainingisineffectiveforvisuo-motorcontrol,andwemightbebetterwithsimply
+trainingend-to-end. Inthiswork,wearguethecontrary–in-domainself-supervisioncanbeeffective
+withabettertrainingobjectivethatextractsmoreinformationfromsmalldatasets.
+∗Correspondingauthor.Email:jeff.cui@nyu.edu
+4202
+peS
+81
+]OR.sc[
+1v29121.9042:viXraObservations Embeddings Environments
+s
+t
+s t
+o t s t+1
+Policy
+sg ⋮
+ℒ
+s
+o t+1 t+1 DynaMo s t+h
+⋮ ⋮
+o s
+t+h t+h
+(a) Representation learning (b) Policy on pretrained representations
+Take the tea bottle out of the fridge Put the yogurt bottle in the fridge door
+Put the ketchup bottle inside the fridge Lift the teabag off the table
+(c) Real-world task rollouts
+Figure 1: (a) We present DynaMo, a new self-supervised method for learning visual representations for
+visuomotorcontrol.DynaMoexploitsthecausalstructureindemonstrationsbyjointlylearningtheencoderwith
+inverseandforwarddynamicsmodels.DynaMorequiresnoaugmentations,contrastivesampling,oraccessto
+groundtruthactions.Thisenablesdownstreampolicylearningusinglimitedin-domaindataacrosssimulatedand
+real-worldroboticstasks.Foreachenvironment,wepretrainthevisualrepresentationin-domainwithDynaMo
+andlearnapolicyonthepretrainedembeddings. (b)Weprovidereal-worldrolloutsofpolicieslearnedwith
+DynaMorepresentationonourmulti-taskxArmKitchenandAllegroManipulationenvironments.
+Prevalentapproachesforusingself-supervisionindownstreamcontroloftenmakeabag-of-frames
+assumption,usingcontrastivemethods[15,16]ormaskedautoencoding[11,8]onindividualframes
+forself-supervision.Mostoftheseapproachesignorearichsupervisionsignal:action-basedcausality.
+Future observations are dependent on past observations, and unobserved latent actions. Can we
+obtainagoodvisualrepresentationforcontrolbysimplylearningthedynamics? Infact,thisidea
+is well-established in neuroscience: animals are thought to possess internal models of the motor
+apparatusandtheenvironmentthatfacilitatemotorcontrolandplanning[17–24].
+In this work, we present Dynamics Pretraining for Visuo-Motor Control (DynaMo), a new self-
+supervised method for pretraining visual representations for visuomotor control from limited in-
+domaindata. DynaMojointlylearnstheencoderwithinverseandforwarddynamicsmodels,without
+accesstogroundtruthactions[25,26].
+TodemonstratetheeffectivenessofDynaMo,weevaluateourrepresentationonfoursimulationsuites
+-FrankaKitchen[27],BlockPushing[28],Push-T[3],andLIBERO[29],aswellaseightrobotic
+manipulationtasksontworeal-worldenvironments. Ourmainfindingsaresummarizedbelow:
+1. DynaMo exhibits an overall 39% improvement in downstream policy performance over prior
+state-of-the-artpretrainedandself-supervisedrepresentations,especiallyontheharderclosed-loop
+controltasksinBlockPushingandPush-T(Table1),andonrealrobotexperiments(Table2).
+2. DynaMoiscompatiblewithvariouspolicyclasses,canbeusedtofine-tunepretrainedweights,
+and works in the low-data regime with limited demonstrations on a real-world Allegro hand
+(Tables4,5,and2respectively).
+3. Throughanablationanalysis,westudytheimpactofeachcomponentinDynaMoondownstream
+policyperformance(§4.6).
+2
+Encoder Inverse
+ForwardAllofourdatasets,andtrainingandevaluationcodewillbemadepubliclyavailable. Videosofour
+trainedpoliciescanbeseenhere: https://dynamo-ssl.github.io.
+2 Background
+2.1 Visualimitationlearning
+Ourworkfollowsthegeneralframeworkforvisualimitationlearning. Givendemonstrationdata
+D = {(o ,a )} ,whereo arerawvisualobservationsanda arethecorrespondingground-truth
+t t t t t
+actions, we first employ a visual encoder f : o → s to map the raw visual inputs to lower-
+θ t t
+dimensionalembeddingss . Wethenlearnapolicyπ(a |s )topredicttheappropriateactions. For
+t t t
+rollouts,wemodeltheenvironmentasaMarkovDecisionProcess(MDP),whereeachsubsequent
+observationo dependsonthepreviousobservation-actionpair(o ,a ). Weassumetheaction-
+t+1 t t
+conditionedtransitiondistributionp(o |o ,a )tobeunimodalforourmanipulationtasks.
+t+1 t t
+2.2 Visualpretrainingforpolicylearning
+Ourgoalistopretrainthevisualencoderf usingadatasetofsequentialrawvisualobservations
+θ
+D ={o } tosupportdownstreampolicylearning. Duringpretraining,wedonotassumeaccessto
+t t
+theground-truthactions{a } .
+t t
+Priorworkhasshownthatpretrainingencodersonlargeout-of-domaindatasetscanimprovedown-
+streampolicyperformance[6–11]. However,suchpretrainingmaynottransferwelltotaskswith
+differentrobotembodiments[12].
+Alternatively,wecandirectlypretraintheencoderin-domainusingself-supervisedmethods. One
+approachiscontrastivelearningwithdataaugmentationpriors,randomlyaugmentinganimagetwice
+andpushingtheirembeddingscloser. Anotherapproachisdenoisingmethods,predictingtheoriginal
+imagefromanoise-degradedsample(e.g. bymasking[11,8,30]). Athirdapproachiscontrastive
+learningwithtemporalproximityassupervision,pushingtemporallycloseframestohavesimilar
+embeddings[31,32].
+3 DynaMo
+Limitationsofpriorself-supervisedtechniques: Priorself-supervisedtechniquescanlearnto
+fixateonvisuallysalientfeaturesandignorefine-grainedfeaturesimportantforcontrol. Weillustrate
+thislimitationusingtheBlockPushingenvironmentfromFlorenceetal.[28]. Inthistask,thegoalis
+topushablockintoatargetsquare. Whiletherobotarmoccupiesmuchoftherawpixelspace,the
+blocksarecentraltothetaskdespitebeingsmallerinthevisualfield. Figure2visualizesarandom
+framefromthedemonstrationdataandits20nearestneighborsintheembeddingspacelearnedby
+severalself-supervisedtechniques.
+Weobservethatpriorself-supervisedmethods(detailsin§4.2)focusonthevisuallydominantrobot,
+matchingthewholerobotarmextremelyaccurately. However,theyfailtocapturetheblockpositions,
+whichareimportanttothetaskdespitebeingmuchlesssalientvisually.
+Canwelearnavisualencoderthatextractstask-specificfeaturesbetter? Weknowthatthedemon-
+strationsaresequential: eachobservationisdependentonthepreviousobservation,andanaction
+(unobservedinthissetting). Priorself-supervisedmethodsignorethissequentialstructure. Con-
+trastiveaugmentations[16,33]andautoencodingobjectives[30,8,11]assumethatthedemonstration
+videoisabagofframes, discardingtemporalinformationaltogether. Temporalcontrast[32,31]
+usestemporalproximitybutdiscardsthesequentialinformationintheobservations: thecontrastive
+objectivesareusuallysymmetricintime,disregardingpast/futureorder.
+Instead of a contrastive or denoising objective, we propose a dynamics prediction objective that
+explicitlyexploitsthesequentialstructureofdemonstrationobservations.
+OverviewofDynaMo: Thekeyinsightofourmethodisthatwecanlearnagoodvisualrepre-
+sentationforcontrolbymodelingthedynamicsondemonstrationobservations,withoutrequiring
+augmentations,contrastivesampling,oraccesstothegroundtruthactions. Givenasequenceofraw
+3y
+x
+y
+x
+Figure2:EmbeddingnearestneighbormatchesforDynaMo,BYOL,MoCo,andTCNontheBlockPushing
+environment.(Top)Thenearestneighbormatchesvisualizedinpixelspace.(Bottom)Matchesvisualizedina
+top-downview.WeseethattheDynaMorepresentationcapturestask-relevantfeatures(endeffector,block,and
+targetlocationsinthiscase),whereaspriorworkfixatesonthelargerobotarm.
+ot ot+1 ot+2 ot+h concat concat concat concat
+Observation …
+Observations … embeddings st st+1 st+2 st+h
+Transition …
+Encoder latents
+(individual frames) zt zt+1 zt+h−1
+Forward dynamics
+Observation … (causally masked)
+embeddings
+st st+1 st+2 st+h
+Inverse dynamics Forward …
+(causally masked) predictions st̂+1 st̂+2 st̂+h
+Target …
+Tra ln as ti et ni to sn … embeddings s t* +1 s t* +2 s t* +h
+zt zt+1 zt+h−1
+Forward dynamics
+ℒdyn prediction loss
+Figure3:ArchitectureofDynaMo.DynaMojointlylearnsanimageencoder,aninversedynamicsmodel,anda
+forwarddynamicsmodelwithaforwarddynamicspredictionloss.
+visualobservations(o ,...,o ),wejointlytraintheencoderf :o →s ,alatentinversedynamics
+1 T θ t t
+modelq(z |s ),andaforwarddynamicsmodelp(sˆ |s ,z ). Wemodel
+t:t+h−1 t:t+h t+1:t+h t:t+h−1 t:t+h−1
+the actions as unobserved latents, and train all models end-to-end with a consistency loss on the
+forwarddynamicsprediction. Forourexperiments,weuseaResNet18[34]encoder,andcausally
+maskedtransformerencoders[35]fortheinverseandforwarddynamicsmodels. Thearchitectureis
+illustratedinFigure3.
+3.1 Dynamicsasavisualself-supervisedlearningobjective
+First,wesampleanobservationsequenceo oflengthhandcomputeitsrepresentations =
+t:t+h t:t+h
+f (o ). Forconvenience,wewillwrites ass ,ands ass below. Atanygiven
+θ t:t+h t:t+h :h t+1:t+h 1:h
+step,thedistributionofpossibleactionscanbemultimodal[5]. Therefore,theforwarddynamics
+transitionp(s |s )canalsohavemultiplemodes. Toaddressthis,wefirstmodeltheinverse
+1:h :h−1
+dynamicsq(z |s ),wherez isthelatenttransitionbetweenframes. Weassumez tobewell-
+:h−1 :h t t
+determinedandunimodalgivenconsecutiveframes{s ,s }. Wehavez ∈Rm,s∈Rd,m≪d
+t t+1
+suchthatthelatentcannottriviallymemorizethenextframeembedding. Finally,weconcatenate
+(s ,z )andpredicttheone-stepforwarddynamicsp(sˆ |s ,z ).
+t t 1:h :h−1 :h−1
+4We compute a dynamics loss L (sˆ,s∗) on the one-step forward predictions sˆ , where
+dyn t+1:t+h
+s∗ are the target next-frame embeddings; and a covariance regularization loss L from
+t+1:t+h cov
+Bardesetal.[36]onaminibatchofobservationembeddingsS:
+⟨sˆ,s∗⟩
+L (sˆ,s∗)=1− t t
+dyn t t ∥sˆ∥ ·∥s∗∥
+t 2 t 2
+L (S)=
+1(cid:88)
+[Cov(S)]2 (1)
+cov d i,j
+i̸=j
+L=L +λL
+dyn cov
+Forenvironmentswithmultipleviews,wecomputealossovereachviewseparatelyandtakethe
+mean. Wechooseλ=0.04followingBardesetal.[36]forthetotallossL. Wefindthatcovariance
+regularizationslightlyimprovesdownstreamtaskperformance.
+Naively,thisobjectiveadmitsaconstantembeddingsolution. Topreventrepresentationcollapse,
+forL (sˆ,s∗),wefollowSimSiam[37]andsetthetargetembeddings∗ :=sg(s ),wheresgisthe
+dyn t t
+stopgradientoperator. Alternatively,ourobjectiveisalsocompatiblewithatargetfromamomentum
+encoderf θ¯[33,16],s∗
+t
+:=s¯
+t
+=f θ¯(o t),whereθ¯isanexponentialmovingaverageofθ.
+Wetrainallthreemodelsend-to-endwiththeobjectiveinEq.1,andusetheencoderfordownstream
+controltasks.
+4 Experiments
+Weevaluateourdynamics-pretrainedvisualrepresentationonasuiteofsimulatedandrealbench-
+marks.WecompareDynaMorepresentationswithpretrainedrepresentationsforvisionandcontrol,as
+wellasotherself-supervisedlearningmethods. Ourexperimentsaredesignedtoanswerthefollowing
+questions: (a) Does DynaMo improve downstream policy performance? (b) Do representations
+trainedwithDynaMoworkonrealrobotictasks? (c)IsDynaMocompatiblewithdifferentpolicy
+classes? (d)Canpretrainedweightsbefine-tunedindomainwithDynaMo? (e)Howimportantis
+eachcomponentinDynaMo?
+4.1 Environmentsanddatasets
+WeevaluateDynaMoonfoursimulatedbenchmarksandtworealrobotenvironments(depictedin
+Figure4). WeprovideabriefdescriptionbelowwithmoredetailsincludedinAppendixA.
+(a) FrankaKitchen[27]: TheFrankaKitchenenvironmentconsistsofsevensimulatedkitchen
+appliancemanipulationtaskswitha9-dimensionalactionspaceFrankaarmandgripper.
+Thedatasethas566demonstrationtrajectories,eachcompletingthreeorfourtasks. The
+observationspaceisRGBimagesofsize(224,224)fromafixedviewpoint. Weevaluate
+for100rolloutsandreportthemeannumberofcompletedtasks(maximum4).
+(b) BlockPushing[28]: ThesimulatedBlockPushingenvironmenthastwoblocks,twotarget
+areas,andarobotpusherwith2-dimensionalactionspace(end-effectortranslation). Both
+theblocksandtargetsarecoloredredandgreen. Thetaskistopushtheblocksintoeither
+same-oropposite-coloredtargets. Thedatasethas1000demonstrationtrajectories. The
+observationisRGBimagesofsize(224,224)fromtwofixedviewpoints. Weevaluatefor
+100rolloutsandreportthemeannumberofblocksintargets(maximum2).
+(c) Push-T [3]: The environment consists of a pusher with 2-dimensional action space, a
+T-shaped rigid block, and a target area in green. The task is to push the block to cover
+thetargetarea. Thedatasethas206demonstrationtrajectories. Theobservationspaceisa
+top-downviewoftheenvironment,renderedasRGBimagesofsize(224,224). Weevaluate
+for100rolloutsandreportthefinalcoverageofthetargetarea(maximum1).
+(d) LIBERO Goal [29]: The environment consists of 10 manipulation tasks with a 7-
+dimensionalactionspacesimulatedFrankaarmandgripper. Thedatasethas500demon-
+stration trajectories in total, 50 per task goal. The observation space is RGB images of
+size(224,224)fromafixedexternalcamera,andawrist-mountedcamera. Weevaluatea
+5(a) Franka Kitchen (b) Block Pushing (c) Push-T (d) LIBERO Goal (e) Allegro Manipulation (f) xArm Kitchen
+Figure4:WeevaluateDynaMoonfoursimulatedbenchmarks-FrankaKitchen,BlockPushing,Push-T,and
+LIBEROGoal,andtworeal-worldenvironments-AllegroManipulation,andxArmKitchen.
+goal-conditionedpolicyfor100rolloutsintotal,10pertaskgoal,andreporttheaverage
+successrate(maximum1).
+(e) Allegro Manipulation: A real-world environment with an Allegro Hand attached to a
+Frankaarm. Weevaluateonthreetasks: pickingupasponge(6demonstrations),pickingup
+ateabag(7demonstrations),andopeningamicrowave(6demonstrations). Theobservation
+spaceisRGBimagesofsize(224,224)fromafixedexternalcamera. Theactionspaceis
+23-dimensional,consistingoftheFrankapose(7),andAllegrohandjointpositions(16).
+(f) xArm Kitchen: A real-world multi-task kitchen environment with an xArm robot arm
+andgripper. Theenvironmentconsistsoffivemanipulationtasks. Thedatasetincludes65
+demonstrationsacrossfivetasks. TheobservationspaceisRGBimagesofsize(128,128)
+fromthreefixedexternalcameras,andanegocentriccameraattachedtothegripper. The
+actionspaceis7-dimensionalwiththerobotendeffectorposeandthegripperstate.
+4.2 DoesDynaMoimprovedownstreampolicyperformance?
+We evaluate each representation by training an imitation policy head on the frozen embeddings,
+and reporting the downstream task performance on the simulated environments. We use Vector-
+QuantizedBehaviorTransformer(VQ-BeT)[1]forthepolicyhead. ForxArmKitchen,weusea
+goal-conditionedBAKU[38]withaVQ-BeTactionhead. MAE-stylebaselines(VC-1,MVP,MAE)
+useaViT-Bbackbone. AllotherbaselinesandDynaMouseaResNet18backbone.
+For environments with multiple views, we concatenate the embeddings from all views for the
+downstreampolicy. FurthertrainingdetailsareinAppendixB.Table1providescomparisonsof
+DynaMo pretrained representations with other self-supervised learning methods, and pretrained
+weightsforvisionandroboticmanipulation:
+• Random,ImageNet,R3M:ResNet18withrandom,ImageNet-1K,andR3M[9]weights.
+• VC-1: PretrainedweightsfromMajumdaretal.[11].
+• MVP:PretrainedweightsfromXiaoetal.[8].
+• BYOL:BYOL[16]pretrainingondemonstrationdata.
+• BYOL-T:BYOL+temporalcontrast[32]. Adjacentframeso ,o aresampledaspositive
+t t+1
+pairs,inadditiontoaugmentations.
+• MoCo-v3: MoCo[33]pretrainingondemonstrationdata.
+• RPT:RPT[39]trainedonobservationtokens.
+• TCN:Time-contrastivenetwork[31]pretrainingondemonstrations. MV:multi-viewobjec-
+tive;SV:singleviewobjective.
+• MAE:Maskedautoencoder[30]pretrainingondemonstrations.
+• DynaMo: DynaMopretrainingondemonstrations.
+Thebestpretrainedrepresentationisunderlinedandthebestself-supervisedrepresentationisbolded.
+Wefindthatourmethodmatchespriorstate-of-the-artvisualrepresentationsonFrankaKitchen,and
+outperformsallothervisualrepresentationsonBlockPushing,Push-T,andLIBEROGoal.
+6Table1:Downstreampolicyperformanceonfrozenvisualrepresentationonfoursimulatedbenchmarks-Franka
+Kitchen,BlockingPushing,Push-T,andLIBEROGoal. WeobservethatDynaMomatchesorsignificantly
+outperformspriorworkonallsimulatedtasks.
+FrankaKitchen BlockPushing Push-T LIBEROGoal
+Method
+(·/4) (·/2) (·/1) (·/1)
+Random 3.32 0.07 0.07 0.80
+ImageNet 3.01 0.12 0.41 0.93
+Pretrained R3M 2.84 0.11 0.49 0.89
+representations VC-1 2.63 0.05 0.38 0.91
+MVP 2.31 0.00 0.20 0.88
+BYOL 3.75 0.09 0.23 0.28
+BYOL-T 3.33 0.16 0.34 0.28
+Self-supervised MoCo-v3 3.28 0.03 0.57 0.70
+methods RPT 3.54 0.52 0.56 0.17
+TCN-MV — 0.07 — 0.69
+TCN-SV 2.41 0.07 0.07 0.76
+MAE 2.70 0.00 0.07 0.59
+DynaMo 3.64 0.65 0.66 0.93
+Table2:WeevaluateDynaMooneighttasksacrosstworeal-worldenvironments:AllegroManipulation,and
+xArmKitchen.Resultsarepresentedas(successes/total).WeobservethatDynaMosignificantlyoutperforms
+priorrepresentationlearningmethodsonrealtasks.
+Task BYOL BYOL-T MoCo-v3 DynaMo
+Sponge 2/10 4/10 5/10 7/10
+Allegro Tea 1/10 0/10 2/10 5/10
+Microwave 2/10 3/10 1/10 9/10
+Putyogurt 4/5 4/5 2/5 5/5
+Getyogurt 0/5 4/5 4/5 5/5
+xArmKitchen Putketchup 5/5 3/5 5/5 4/5
+Gettea 2/5 2/5 3/5 5/5
+Getwater 0/5 0/5 3/5 3/5
+4.3 DorepresentationstrainedwithDynaMoworkonrealrobotictasks?
+Weevaluatetherepresentationspre-trainedwithDynaMoontworeal-worldrobotenvironments: the
+AllegroManipulationenvironment,andthemulti-taskxArmKitchenenvironment. FortheAllegro
+environment,weuseak-nearestneighborspolicy[40]andinitializewithImageNet-1Kfeaturesfor
+allpretrainingmethods,asthedatasetisrelativelysmallwitharound1000framespertask. Inthe
+xArmKitchenenvironment,weusetheBAKU[38]architectureforgoal-conditionedrolloutsacross
+fivetasks. Forourreal-robotevaluations,wecompareDynaMoagainstthestrongestperforming
+baselinesfromoursimulatedexperiments(seeTable1). TheresultsarereportedinTable2. We
+observethatDynaMooutperformsthebestbaselineby43%onthesingle-taskAllegrohandand
+by20%onthemulti-taskxArmKitchenenvironment. Additionally,asshowninTable3,DynaMo
+exceedstheperformanceofpretrainedrepresentationsby50%ontheAllegrohand. Theseresults
+demonstratethatDynaMoiscapableoflearningeffectiverobotrepresentationsinbothsingle-task
+andmulti-tasksettings.
+4.4 IsDynaMocompatiblewithdifferentpolicyclasses?
+OnthePush-Tenvironment[3],wecompareallpretrainedrepresentationsacrossfourpolicyclasses:
+VQ-BeT[1],DiffusionPolicy[3],MLP(withactionchunking[2]),andk-nearestneighborswith
+locallyweightedregression[40]. WepresenttheresultsinTable4. WefindthatDynaMorepresenta-
+7Table4:WeevaluatethecompatibilityofDynaMowithdifferentpolicyclassesfordownstreampolicylearning
+onthePush-Tsimulatedbenchmark.Wereportthefinaltargetcoverageachieved(maximum1)anddemonstrate
+thatDynaMosignificantlyoutperformspriorrepresentationlearningmethodsacrossallpolicyclasses.
+Method VQ-BeT Diffusion MLP(chunking) kNN
+Random 0.07 0.04 0.07 0.01
+ImageNet 0.41 0.73 0.24 0.09
+Pretrained R3M 0.49 0.63 0.27 0.08
+representations VC-1 0.38 0.63 0.22 0.07
+MVP 0.20 0.49 0.11 0.08
+BYOL 0.23 0.40 0.11 0.04
+BYOL-T 0.34 0.50 0.16 0.04
+Self-supervised MoCov3 0.57 0.67 0.30 0.07
+methods RPT 0.56 0.62 0.30 0.07
+TCN-SV 0.07 0.14 0.07 0.01
+MAE 0.07 0.06 0.07 0.02
+DynaMo 0.66 0.73 0.35 0.12
+Table5:WeevaluatetheabilityofDynaMotofinetuneanImageNet-pretrainedResNet-18encoderacross4
+benchmarks.WedemonstratethatusingapretrainedencodercanfurtherimprovetheperformanceofDynaMo.
+FrankaKitchen BlockPushing Push-T LIBEROGoal
+Representation
+(·/4) (·/2) (·/1) (·/1)
+ImageNet 3.01 0.12 0.41 0.93
+DynaMo(randominit) 3.64 0.65 0.66 0.93
+DynaMo(ImageNetfine-tuned) 3.82 0.67 0.50 0.90
+tionsimprovedownstreampolicyperformanceacrosspolicyclassescomparedtopriorstate-of-the-art
+representations. Wealsonotethatourrepresentationworksontherobothandin§4.3withanearest
+neighborpolicy.
+4.5 Canpretrainedweightsbefine-tunedindomainwithDynaMo?
+Wefine-tuneanImageNet-1K-pretrainedResNet18 Table3:PretrainedbaselinesonAllegro
+withDynaMoforeachsimulatedenvironment,and
+evaluatewithdownstreampolicyperformanceon Method Sponge Tea Microwave
+thefrozenrepresentationasdescribedin§4.2. The
+ImageNet 4/10 1/10 0/10
+results are shown in Table 5. We find that Dy-
+naMo is compatible with ImageNet initialization, R3M 1/10 1/10 5/10
+and can be used to fine-tune out-of-domain pre- DynaMo 7/10 5/10 9/10
+trainedweightstofurtherimprovein-domaintask
+performance. Wealsonotethatourmethodworks
+inthelow-dataregimewithImageNetinitializationontherealAllegrohandinTable2.
+4.6 HowimportantiseachcomponentinDynaMo?
+InTable6,weablateeachcomponentinDynaMoandmeasureitsimpactondownstreampolicy
+performanceonoursimulatedbenchmarks.
+Forward dynamicsprediction: We replacethe one-stepforward predictiontargets∗ withthe
+1:h
+same-steptargets∗ . Topreventthemodelfromtriviallypredictings∗ givens ,wereplacethe
+:h−1 t t
+forwarddynamicsinput(s ,z )withonlyz . Theablatedobjectiveisessentiallyavariant
+:h−1 :h−1 :h−1
+ofautoencodings . Weobservethatremovingforwarddynamicspredictiondegradesperformance
+t
+acrossenvironments.
+8Table6:Ablationanalysisofdownstreamperformancerelativetothefullarchitecture(100%)
+Ablations Kitchen Block Push-T LIBERO
+Noforward 34% 8% 44% 33%
+Noinverse 72% 35% 97% 41%
+Nobottleneck 92% 22% 9% 75%
+Nocov. reg. 94% 62% 85% 59%
+Nostopgrad. 1% 5% 9% 0%
+Shortcontext 100% 75% 88% 89%
+Table7:Variantswithgroundtruthactions,downstreamperformancerelativetothebasemodel(100%)
+Variants Kitchen Block Push-T LIBERO
+Inversedynamicsonly 100% 54% 70% 11%
+DynaMo+actionlabels 97% 29% 94% 86%
+Inversedynamicstoatransitionlatent: Asdescribedin§3.1,theforwarddynamicslossassumes
+thatthetransitionisunimodalandrequiresaninferredtransitionlatent. Weobservedthatremoving
+thelatentfromtheforwarddynamicsinputresultsinasignificantperformancedrop.
+Bottleneck on the transition latent dimension: For the transition latent z and the observation
+embeddings,wefindthathavingdimz ≪dimsstabilizestraining. Herewesetdimz :=dims,
+andfindthatourmodelcanstilllearnareasonablerepresentationinsomeenvironments,buttraining
+candestabilize,leadingtoahighvarianceindownstreamperformance.
+Covariance regularization: We find that covariance regularization from Bardes et al. [36] im-
+provesperformanceacrossenvironments. Trainingstillconvergeswithoutit,butthedownstream
+performanceisslightlyworse.
+Stopgradientontargetembeddings:Weobservethatremovingtechniqueslikemomentumencoder
+[33,16]andstopgradient[37]leadstorepresentationcollapse[41,16,36].
+Observationcontext: Thedynamicsobjectiverequiresatleast2framesofobservationcontext. For
+FrankaKitchen,wefindthatacontextof2framesworksbest. Fortheotherenvironments,alonger
+observationcontext(5frames)improvesdownstreampolicyperformance. Detailsofhyperparameters
+usedforDynaMovisualpretrainingcanbefoundinAppendixB.1.
+4.7 Variantswithaccesstogroundtruthactions
+InTable7,wecomparewithtwovariantsofDynaMowhereweassumeaccesstogroundtruthaction
+labelsduringvisualencodertraining.
+Onlyinversedynamicstogroundtruthactions: asproposedinBrandfonbreneretal.[26],wetrain
+thevisualencoderbylearninganinversedynamicsmodeltogroundtruthactions,withcovariance
+regularization,andwithoutforwarddynamics.
+Fullmodel+inversedynamicstogroundtruthactions: wetrainthefullDynaMomodelplus
+anMLPheadtopredictthegroundtruthactionsgiventhetransitionlatentsinferredbytheinverse
+dynamicsmodel.
+Weobservethatinbothcases,havingaccesstogroundtruthactionsduringvisualpretrainingdoes
+not seem to improve downstream policy performance. We hypothesize that this is because the
+downstreampolicyalreadyhasaccesstothesameactionsforimitationlearning.
+5 Relatedworks
+Thisworkbuildsonalargebodyofresearchonself-supervisedvisualrepresentations,learningfrom
+humandemonstrations,neuroscientificbasisforlearningdynamicsforcontrol,predictivemodelsfor
+decisionmaking,learningfromvideosforcontrol,andvisualpretrainingforcontrol.
+9Self-supervisedvisualrepresentations: Self-supervisedvisualrepresentationshavebeenwidely
+studiedsincetheinceptionofdeeplearning. Thereareseveralcommonapproachestoself-supervised
+visualrepresentationlearning. Oneapproachistorecoverthegroundtruthfromnoise-degraded
+samplesusingtechniqueslikedenoisingautoencoders[42,43]andmaskedmodeling[44,45,30].
+Anotherapproachiscontrastivelearning,whichleveragesdataaugmentationpriors[41,16,33,36,
+37] or temporal proximity [31, 46] to produce contrastive sample pairs. A third self-supervised
+methodisgenerativemodeling[47–49],whichlearnstosequentiallygeneratethegroundtruthdata.
+Morerecently,self-supervisioninthelatentspaceratherthantherawpixelspacehasproveneffective,
+asseeninmethodsthatpredictrepresentationsinlatentspace[50,51].
+Learningfromdemonstrations: Learningfromhumandemonstrationsisawell-establishedidea
+inrobotics[52–55]. Withtheadvancesindeeplearning,recentworkssuchas[3,2,5,4,1,56]show
+thatimitationlearningfromhumandemonstrationshasbecomeaviableapproachfortrainingrobotic
+policiesinsimulatedandreal-worldsettings.
+Neuralbasisforlearningdynamics: Itiswidelybelievedthatanimalspossessinternaldynamics
+modelsthatfacilitatemotorcontrol. Thesemodelslearnrepresentationsthatarepredictiveofsensory
+inputsfordecisionmakingandmotorcontrol[57–60]. Earlyworkssuchas[17–20]proposethat
+thereexistsaninternalmodelofthemotorapparatusinthecerebellumformotorcontrolandplanning.
+[21,22]proposethatthecentralnervoussystemusesforwardmodelsthatpredictmotorcommand
+outcomesandmodeltheenvironment. Learningforwardandinversedynamicsmodelsalsohelps
+withgeneralizationtodiversetaskconditions[23,24].
+Predictivemodelsfordecisionmaking: Predictivemodellearningfordecisionmakingiswell-
+establishedinmachinelearning. Learninggenerativemodelsthatcanpredictsequentialinputshas
+achievedsuccess acrossmany domains, suchas naturallanguageprocessing [61], reinforcement
+learning[62],andrepresentationlearning[46,63]. Incorporatingthepredictionoffuturestatesas
+anintrinsicrewardhasalsobeenshowntoimprovereinforcementlearningperformance[64–66].
+Moreover,recentworkdemonstratesthatworldmodelstrainedtopredictenvironmentdynamicscan
+enableplanningincomplextasksandenvironments[67–70].
+Learningfromvideoforcontrol: Videosproviderichspatiotemporalinformationthatcanbe
+leveragedforself-supervisedrepresentationlearning [71–76]. Thesemethodshavebeenextended
+todecision-makingthrougheffectivedownstreampolicylearning[7–11,6]. Further,recentwork
+also enables learning robotic policies directly from in-domain human demonstration videos by
+incorporatingsomeadditionalpriors[77–81].
+Visualrepresentationforcontrol: Visualrepresentationlearningforcontrolhasbeenanactive
+areaofresearch. Priorworkhasshownthatdataaugmentationimprovestherobustnessoflearned
+representationsandpolicyperformanceinreinforcementlearningdomains[82,83]. Additionally,
+pretrainingvisualrepresentationsonlargeout-of-domaindatasetsbeforefine-tuningforcontroltasks
+hasbeenshowntooutperformtrainingpoliciesfromscratch[10,12,9,11,84,8,85]. Morerecent
+workhasshownthatin-domainself-supervisedpretrainingimprovespolicyperformance[86–88]and
+enablesnon-parametricdownstreampolicies[40].
+6 DiscussionandLimitations
+Inthiswork,wehavepresentedDynaMo,aself-supervisedalgorithmforrobotrepresentationlearning
+thatleveragesthesequentialnatureofdemonstrationdata. DynaMoincorporatespredictivedynamics
+modelingtolearnvisualfeaturesthatcapturethesequentialstructureofdemonstrationobservations.
+Duringpretraining,DynaMojointlyoptimizesthevisualencoderwithdynamicsmodelstoextract
+task-specificfeatures. Theselearnedrepresentationscanthenbeusedfordownstreamcontroltasks,
+leadingtomoreefficientpolicylearningcomparedtopriorapproaches. Webelievethattraining
+DynaMoonlargerunlabeleddatasetscouldpotentiallyimprovegeneralization. Additionally,while
+promisingforcontroltasks,moreresearchisneededtoevaluateDynaMo’seffectivenessonrobotic
+manipulationoutsideoflabsettings.
+10Acknowledgements
+WewouldliketothankAdemiAdeniji,AlexWang,GaoyueZhou,HarithejaEtukuru,IrmakGüzey,
+MahiShafiullah,NikhilBhattasali,RaunaqBhirangi,Seungjae(Jay)Lee,andUlyanaPiterbargfor
+theirvaluablefeedbackanddiscussions. ThisworkwassupportedbygrantsfromHonda,Google,
+NSFaward2339096andONRawardsN00014-21-1-2758andN00014-22-1-2773. LPissupported
+bythePackardFellowship.
+References
+[1] SeungjaeLee,YibinWang,HarithejaEtukuru,HJinKim,NurMuhammadMahiShafiullah,
+andLerrelPinto. Behaviorgenerationwithlatentactions. arXivpreprintarXiv:2403.03181,
+2024. 1,6,7,10,21
+[2] TonyZZhao,VikashKumar,SergeyLevine,andChelseaFinn. Learningfine-grainedbimanual
+manipulationwithlow-costhardware. arXivpreprintarXiv:2304.13705,2023. 1,7,10
+[3] Cheng Chi, Siyuan Feng, Yilun Du, Zhenjia Xu, Eric Cousineau, Benjamin Burchfiel, and
+ShuranSong. Diffusionpolicy: Visuomotorpolicylearningviaactiondiffusion. arXivpreprint
+arXiv:2303.04137,2023. 2,5,7,10,17
+[4] Zichen Jeff Cui, Yibin Wang, Nur Muhammad Mahi Shafiullah, and Lerrel Pinto. From
+play to policy: Conditional behavior generation from uncurated robot data. arXiv preprint
+arXiv:2210.10047,2022. 1,10
+[5] NurMuhammadShafiullah,ZichenCui,AriuntuyaArtyAltanzaya,andLerrelPinto. Behavior
+transformers: Cloningk modeswithonestone. Advancesinneuralinformationprocessing
+systems,35:22955–22968,2022. 1,4,10
+[6] AnnieSChen,SurajNair,andChelseaFinn. Learninggeneralizableroboticrewardfunctions
+from"in-the-wild"humanvideos. arXivpreprintarXiv:2103.16817,2021. 1,3,10
+[7] YechengJasonMa,ShagunSodhani,DineshJayaraman,OsbertBastani,VikashKumar,and
+Amy Zhang. Vip: Towards universal visual reward and representation via value-implicit
+pre-training. arXivpreprintarXiv:2210.00030,2022. 10
+[8] TeteXiao,IlijaRadosavovic,TrevorDarrell,andJitendraMalik. Maskedvisualpre-trainingfor
+motorcontrol. arXivpreprintarXiv:2203.06173,2022. 2,3,6,10
+[9] SurajNair,AravindRajeswaran,VikashKumar,ChelseaFinn,andAbhinavGupta. R3m: A
+universalvisualrepresentationforrobotmanipulation. arXivpreprintarXiv:2203.12601,2022.
+6,10
+[10] SimoneParisi,AravindRajeswaran,SenthilPurushwalkam,andAbhinavGupta. Theunsur-
+prisingeffectivenessofpre-trainedvisionmodelsforcontrol. Ininternationalconferenceon
+machinelearning,pages17359–17371.PMLR,2022. 10
+[11] ArjunMajumdar,KarmeshYadav,SergioArnaud,JasonMa,ClaireChen,SnehaSilwal,Aryan
+Jain,Vincent-PierreBerges,TingfanWu,JayVakil,etal. Whereareweinthesearchforan
+artificialvisualcortexforembodiedintelligence? AdvancesinNeuralInformationProcessing
+Systems,36,2024. 1,2,3,6,10
+[12] SudeepDasari,MohanKumarSrirama,UnnatJain,andAbhinavGupta. Anunbiasedlookat
+datasetsforvisuo-motorpre-training. InConferenceonRobotLearning, pages1183–1198.
+PMLR,2023. 1,3,10
+[13] SridharPandianArunachalam,IrmakGüzey,SoumithChintala,andLerrelPinto. Holo-dex:
+Teachingdexteritywithimmersivemixedreality. In2023IEEEInternationalConferenceon
+RoboticsandAutomation(ICRA),pages5962–5969.IEEE,2023. 1
+[14] AnthonyBrohan,NoahBrown,JusticeCarbajal,YevgenChebotar,JosephDabis,ChelseaFinn,
+KeerthanaGopalakrishnan,KarolHausman,AlexHerzog,JasmineHsu,etal. Rt-1: Robotics
+transformerforreal-worldcontrolatscale. arXivpreprintarXiv:2212.06817,2022. 1
+11[15] XinleiChen, SainingXie, andKaimingHe. Anempiricalstudyoftrainingself-supervised
+visiontransformers. InProceedingsoftheIEEE/CVFinternationalconferenceoncomputer
+vision,pages9640–9649,2021. 2
+[16] Jean-BastienGrill,FlorianStrub,FlorentAltché,CorentinTallec,PierreRichemond,Elena
+Buchatskaya,CarlDoersch,BernardoAvilaPires,ZhaohanGuo,MohammadGheshlaghiAzar,
+etal. Bootstrapyourownlatent-anewapproachtoself-supervisedlearning. Advancesinneural
+informationprocessingsystems,33:21271–21284,2020. 2,3,5,6,9,10
+[17] DanielMWolpert,ZoubinGhahramani,andMichaelIJordan. Aninternalmodelforsensori-
+motorintegration. Science,269(5232):1880–1882,1995. 2,10
+[18] Daniel M Wolpert, R Chris Miall, and Mitsuo Kawato. Internal models in the cerebellum.
+Trendsincognitivesciences,2(9):338–347,1998.
+[19] MShidara,KKawano,HGomi,andMKawato.Inverse-dynamicsmodeleyemovementcontrol
+bypurkinjecellsinthecerebellum. Nature,365(6441):50–52,1993.
+[20] ShigeruKitazawa,TatsuyaKimura,andPing-BoYin. Cerebellarcomplexspikesencodeboth
+destinationsanderrorsinarmmovements. Nature,392(6675):494–497,1998. 10
+[21] RChrisMiallandDanielMWolpert. Forwardmodelsforphysiologicalmotorcontrol. Neural
+networks,9(8):1265–1279,1996. 10
+[22] MichaelIJordanandDavidERumelhart. Forwardmodels: Supervisedlearningwithadistal
+teacher. CognitiveScience,16(3):307–354,1992. 10
+[23] JRandallFlanaganandAlanMWing. Theroleofinternalmodelsinmotionplanningand
+control: evidencefromgripforceadjustmentsduringmovementsofhand-heldloads. Journal
+ofNeuroscience,17(4):1519–1528,1997. 10
+[24] MasahikoHaruno,DanielMWolpert,andMitsuoKawato. Multiplepairedforward-inverse
+models for human motor learning and control. Advances in neural information processing
+systems,11,1998. 2,10
+[25] William Whitney, Rajat Agarwal, Kyunghyun Cho, and Abhinav Gupta. Dynamics-aware
+embeddings. arXivpreprintarXiv:1908.09357,2019. 2
+[26] DavidBrandfonbrener,OfirNachum,andJoanBruna. Inversedynamicspretraininglearnsgood
+representationsformultitaskimitation. AdvancesinNeuralInformationProcessingSystems,
+36,2024. 2,9
+[27] Abhishek Gupta, Vikash Kumar, Corey Lynch, Sergey Levine, and Karol Hausman. Relay
+policylearning: Solvinglong-horizontasksviaimitationandreinforcementlearning. arXiv
+preprintarXiv:1910.11956,2019. 2,5,17
+[28] Pete Florence, Corey Lynch, Andy Zeng, Oscar A Ramirez, Ayzaan Wahid, Laura Downs,
+AdrianWong,JohnnyLee,IgorMordatch,andJonathanTompson. Implicitbehavioralcloning.
+InConferenceonRobotLearning,pages158–168.PMLR,2022. 2,3,5,17
+[29] BoLiu,YifengZhu,ChongkaiGao,YihaoFeng,QiangLiu,YukeZhu,andPeterStone. Libero:
+Benchmarkingknowledgetransferforlifelongrobotlearning. AdvancesinNeuralInformation
+ProcessingSystems,36,2024. 2,5,17
+[30] KaimingHe,XinleiChen,SainingXie,YanghaoLi,PiotrDollár,andRossGirshick. Masked
+autoencoders are scalable vision learners. In Proceedings of the IEEE/CVF conference on
+computervisionandpatternrecognition,pages16000–16009,2022. 3,6,10
+[31] PierreSermanet,CoreyLynch,YevgenChebotar,JasmineHsu,EricJang,StefanSchaal,Sergey
+Levine,andGoogleBrain. Time-contrastivenetworks: Self-supervisedlearningfromvideo.
+In2018IEEEinternationalconferenceonroboticsandautomation(ICRA),pages1134–1141.
+IEEE,2018. 3,6,10
+12[32] SarahYoung,JyothishPari,PieterAbbeel,andLerrelPinto. Playfulinteractionsforrepresenta-
+tionlearning. In2022IEEE/RSJInternationalConferenceonIntelligentRobotsandSystems
+(IROS),pages992–999.IEEE,2022. 3,6
+[33] KaimingHe,HaoqiFan,YuxinWu,SainingXie,andRossGirshick. Momentumcontrastfor
+unsupervisedvisualrepresentationlearning. InProceedingsoftheIEEE/CVFconferenceon
+computervisionandpatternrecognition,pages9729–9738,2020. 3,5,6,9,10
+[34] KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimage
+recognition. InProceedingsoftheIEEEconferenceoncomputervisionandpatternrecognition,
+pages770–778,2016. 4
+[35] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,
+ŁukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. Advancesinneuralinformation
+processingsystems,30,2017. 4
+[36] AdrienBardes,JeanPonce,andYannLeCun. Vicreg: Variance-invariance-covarianceregular-
+izationforself-supervisedlearning. arXivpreprintarXiv:2105.04906,2021. 5,9,10
+[37] XinleiChenandKaimingHe.Exploringsimplesiameserepresentationlearning.InProceedings
+oftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,pages15750–15758,
+2021. 5,9,10
+[38] SiddhantHaldar,ZhuoranPeng,andLerrelPinto. Baku: Anefficienttransformerformulti-task
+policylearning. arXivpreprintarXiv:2406.07539,2024. 6,7
+[39] IlijaRadosavovic,BaifengShi,LetianFu,KenGoldberg,TrevorDarrell,andJitendraMalik.
+Robot learning with sensorimotor pre-training. In Conference on Robot Learning, pages
+683–693.PMLR,2023. 6
+[40] Jyothish Pari, Nur Muhammad Shafiullah, Sridhar Pandian Arunachalam, and Lerrel Pinto.
+The surprising effectiveness of representation learning for visual imitation. arXiv preprint
+arXiv:2112.01511,2021. 7,10
+[41] TingChen,SimonKornblith,MohammadNorouzi,andGeoffreyHinton. Asimpleframework
+for contrastive learning of visual representations. In International conference on machine
+learning,pages1597–1607.PMLR,2020. 9,10
+[42] WeilaiXiang,HongyuYang,DiHuang,andYunhongWang. Denoisingdiffusionautoencoders
+areunifiedself-supervisedlearners. InProceedingsoftheIEEE/CVFInternationalConference
+onComputerVision,pages15802–15812,2023. 10
+[43] Vladimiros Sterzentsenko, Leonidas Saroglou, Anargyros Chatzitofis, Spyridon Thermos,
+Nikolaos Zioulis, Alexandros Doumanoglou, Dimitrios Zarpalas, and Petros Daras. Self-
+superviseddeepdepthdenoising. InProceedingsoftheIEEE/CVFInternationalConferenceon
+ComputerVision,pages1242–1251,2019. 10
+[44] JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. Bert: Pre-trainingof
+deepbidirectionaltransformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,
+2018. 10
+[45] HangboBao,LiDong,SonghaoPiao,andFuruWei. Beit: Bertpre-trainingofimagetrans-
+formers. arXivpreprintarXiv:2106.08254,2021. 10
+[46] AaronvandenOord,YazheLi,andOriolVinyals. Representationlearningwithcontrastive
+predictivecoding. arXivpreprintarXiv:1807.03748,2018. 10
+[47] Mark Chen, Alec Radford, Rewon Child, Jeffrey Wu, Heewoo Jun, David Luan, and Ilya
+Sutskever. Generativepretrainingfrompixels. InInternationalconferenceonmachinelearning,
+pages1691–1703.PMLR,2020. 10
+[48] Aäron Van Den Oord, Nal Kalchbrenner, and Koray Kavukcuoglu. Pixel recurrent neural
+networks. InInternationalconferenceonmachinelearning,pages1747–1756.PMLR,2016.
+13[49] TrieuHTrinh,Minh-ThangLuong,andQuocVLe. Selfie: Self-supervisedpretrainingfor
+imageembedding. arXivpreprintarXiv:1906.02940,2019. 10
+[50] MahmoudAssran, QuentinDuval, IshanMisra, PiotrBojanowski, PascalVincent, Michael
+Rabbat,YannLeCun,andNicolasBallas. Self-supervisedlearningfromimageswithajoint-
+embeddingpredictivearchitecture. InProceedingsoftheIEEE/CVFConferenceonComputer
+VisionandPatternRecognition,pages15619–15629,2023. 10
+[51] AdrienBardes,QuentinGarrido,JeanPonce,XinleiChen,MichaelRabbat,YannLeCun,Mido
+Assran,andNicolasBallas. V-jepa: Latentvideopredictionforvisualrepresentationlearning.
+2023. 10
+[52] NathanDelsonandHarryWest. Robotprogrammingbyhumandemonstration: Adaptation
+andinconsistencyinconstrainedmotion. InProceedingsofIEEEInternationalconferenceon
+RoboticsandAutomation,volume1,pages30–36.IEEE,1996. 10
+[53] MichaelKaiserandRüdigerDillmann. Buildingelementaryrobotskillsfromhumandemonstra-
+tion. InProceedingsofIEEEInternationalConferenceonRoboticsandAutomation,volume3,
+pages2700–2705.IEEE,1996.
+[54] Sheng Liu and Haruhiko Asada. Teaching and learning of deburring robots using neural
+networks. In[1993]ProceedingsIEEEInternationalConferenceonRoboticsandAutomation,
+pages339–345.IEEE,1993.
+[55] Haruhiko Asada and Boo-Ho Yang. Skill acquisition from human experts through pattern
+processingofteachingdata. JournalofTheRoboticsSocietyofJapan,8(1):17–24,1990. 10
+[56] MoritzReuss,MaximilianLi,XiaogangJia,andRudolfLioutikov. Goal-conditionedimitation
+learningusingscore-baseddiffusionpolicies. arXivpreprintarXiv:2304.02532,2023. 10
+[57] RichardSSuttonandAndrewGBarto. Towardamoderntheoryofadaptivenetworks: expecta-
+tionandprediction. Psychologicalreview,88(2):135,1981. 10
+[58] HermannVonHelmholtz. HandbuchderphysiologischenOptik,volume9. Voss,1867.
+[59] AndreMBastos,WMartinUsrey,RickAAdams,GeorgeRMangun,PascalFries,andKarlJ
+Friston. Canonicalmicrocircuitsforpredictivecoding. Neuron,76(4):695–711,2012.
+[60] LisaFeldmanBarrettandWKyleSimmons. Interoceptivepredictionsinthebrain. Nature
+reviewsneuroscience,16(7):419–429,2015. 10
+[61] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019. 10
+[62] YounggyoSeo,KiminLee,StephenLJames,andPieterAbbeel. Reinforcementlearningwith
+action-freepre-trainingfromvideos. InInternationalConferenceonMachineLearning,pages
+19561–19579.PMLR,2022. 10
+[63] KarlSchmeckpeper,AnnieXie,OlehRybkin,StephenTian,KostasDaniilidis,SergeyLevine,
+andChelseaFinn. Learningpredictivemodelsfromobservationandinteraction. InEuropean
+ConferenceonComputerVision,pages708–725.Springer,2020. 10
+[64] DeepakPathak,PulkitAgrawal,AlexeiAEfros,andTrevorDarrell.Curiosity-drivenexploration
+byself-supervisedprediction. InInternationalconferenceonmachinelearning,pages2778–
+2787.PMLR,2017. 10
+[65] EvanShelhamer,ParsaMahmoudieh,MaxArgus,andTrevorDarrell. Lossisitsownreward:
+Self-supervisionforreinforcementlearning. arXivpreprintarXiv:1612.07307,2016.
+[66] ZhaohanGuo,ShantanuThakoor,MirunaPîslar,BernardoAvilaPires,FlorentAltché,Corentin
+Tallec,AlaaSaade,DanieleCalandriello,Jean-BastienGrill,YunhaoTang,etal. Byol-explore:
+Explorationbybootstrappedprediction. Advancesinneuralinformationprocessingsystems,
+35:31855–31870,2022. 10
+14[67] JulianSchrittwieser,IoannisAntonoglou,ThomasHubert,KarenSimonyan,LaurentSifre,Si-
+monSchmitt,ArthurGuez,EdwardLockhart,DemisHassabis,ThoreGraepel,etal. Mastering
+atari,go,chessandshogibyplanningwithalearnedmodel. Nature,588(7839):604–609,2020.
+10
+[68] DanijarHafner,TimothyLillicrap,IanFischer,RubenVillegas,DavidHa,HonglakLee,and
+JamesDavidson.Learninglatentdynamicsforplanningfrompixels.InInternationalconference
+onmachinelearning,pages2555–2565.PMLR,2019.
+[69] DanijarHafner, TimothyLillicrap, JimmyBa, andMohammadNorouzi. Dreamtocontrol:
+Learningbehaviorsbylatentimagination. arXivpreprintarXiv:1912.01603,2019.
+[70] DanijarHafner,TimothyLillicrap,MohammadNorouzi,andJimmyBa. Masteringatariwith
+discreteworldmodels. arXivpreprintarXiv:2010.02193,2020. 10
+[71] RossGoroshin,JoanBruna,JonathanTompson,DavidEigen,andYannLeCun. Unsupervised
+learning of spatiotemporally coherent metrics. In Proceedings of the IEEE international
+conferenceoncomputervision,pages4086–4093,2015. 10
+[72] Adrien Bardes, Quentin Garrido, Jean Ponce, Xinlei Chen, Michael Rabbat, Yann LeCun,
+MahmoudAssran,andNicolasBallas. Revisitingfeaturepredictionforlearningvisualrepre-
+sentationsfromvideo. arXivpreprintarXiv:2404.08471,2024.
+[73] ChristophFeichtenhofer,HaoqiFan,BoXiong,RossGirshick,andKaimingHe. Alarge-scale
+studyonunsupervisedspatiotemporalrepresentationlearning. InProceedingsoftheIEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pages3299–3309,2021.
+[74] XiaolongWang,AllanJabri,andAlexeiAEfros. Learningcorrespondencefromthecycle-
+consistency of time. In Proceedings of the IEEE/CVF conference on computer vision and
+patternrecognition,pages2566–2576,2019.
+[75] DebidattaDwibedi,YusufAytar,JonathanTompson,PierreSermanet,andAndrewZisserman.
+Temporalcycle-consistencylearning. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pages1801–1810,2019.
+[76] Sören Pirk, Mohi Khansari, Yunfei Bai, Corey Lynch, and Pierre Sermanet. Online object
+representationswithcontrastivelearning. arXivpreprintarXiv:1906.04312,2019. 10
+[77] ShikharBahl,AbhinavGupta,andDeepakPathak. Human-to-robotimitationinthewild. arXiv
+preprintarXiv:2207.09450,2022. 10
+[78] PratyushaSharma,LekhaMohan,LerrelPinto,andAbhinavGupta. Multipleinteractionsmade
+easy(mime): Largescaledemonstrationsdataforimitation. InConferenceonrobotlearning,
+pages906–915.PMLR,2018.
+[79] BoyuanChen,PieterAbbeel,andDeepakPathak. Unsupervisedlearningofvisual3dkeypoints
+forcontrol.InInternationalConferenceonMachineLearning,pages1539–1549.PMLR,2021.
+[80] YuzheQin,Yueh-HuaWu,ShaoweiLiu,HanwenJiang,RuihanYang,YangFu,andXiaolong
+Wang. Dexmv: Imitationlearningfordexterousmanipulationfromhumanvideos. InEuropean
+ConferenceonComputerVision,pages570–587.Springer,2022.
+[81] AravindSivakumar,KennethShaw,andDeepakPathak. Robotictelekinesis: Learningarobotic
+handimitatorbywatchinghumansonyoutube. arXivpreprintarXiv:2202.10448,2022. 10
+[82] IlyaKostrikov,DenisYarats,andRobFergus.Imageaugmentationisallyouneed:Regularizing
+deepreinforcementlearningfrompixels. arXivpreprintarXiv:2004.13649,2020. 10
+[83] MishaLaskin,KiminLee,AdamStooke,LerrelPinto,PieterAbbeel,andAravindSrinivas.
+Reinforcement learning with augmented data. Advances in neural information processing
+systems,33:19884–19895,2020. 10
+[84] IlijaRadosavovic,TeteXiao,StephenJames,PieterAbbeel,JitendraMalik,andTrevorDarrell.
+Real-worldrobotlearningwithmaskedvisualpre-training. InConferenceonRobotLearning,
+pages416–426.PMLR,2023. 10
+15[85] Abhishek Padalkar, Acorn Pooley, Ajinkya Jain, Alex Bewley, Alex Herzog, Alex Irpan,
+AlexanderKhazatsky,AnantRai,AnikaitSingh,AnthonyBrohan,etal. Openx-embodiment:
+Roboticlearningdatasetsandrt-xmodels. arXivpreprintarXiv:2310.08864,2023. 10
+[86] Nur Muhammad Mahi Shafiullah, Anant Rai, Haritheja Etukuru, Yiqian Liu, Ishan Misra,
+SoumithChintala,andLerrelPinto.Onbringingrobotshome.arXivpreprintarXiv:2311.16098,
+2023. 10
+[87] GaoyueZhou,VictoriaDean,MohanKumarSrirama,AravindRajeswaran,JyothishPari,Kyle
+Hatch,AryanJain,TianheYu,PieterAbbeel,LerrelPinto,etal. Trainoffline,testonline:Areal
+robotlearningbenchmark. In2023IEEEInternationalConferenceonRoboticsandAutomation
+(ICRA),pages9197–9203.IEEE,2023.
+[88] Irmak Guzey, Ben Evans, Soumith Chintala, and Lerrel Pinto. Dexterity from touch:
+Self-supervised pre-training of tactile representations with robotic play. arXiv preprint
+arXiv:2303.12076,2023. 10
+[89] AadhithyaIyer,ZhuoranPeng,YinlongDai,IrmakGuzey,SiddhantHaldar,SoumithChintala,
+andLerrelPinto. Openteach: Aversatileteleoperationsystemforroboticmanipulation,2024.
+17,18
+[90] Andrej Karpathy. nanogpt. https://github.com/karpathy/nanoGPT, 2023. Accessed:
+2024-05-20. 20
+16A Environmentanddatasetdetails
+A.1 FrankaKitchen
+The Franka Kitchen environment introdued by Gupta et al. [27] consists of a Franka arm with a
+9-dimensional action space. This environment includes seven tasks and a dataset of 566 human-
+collecteddemonstrations. Whiletheoriginalenvironmentisstate-based,wecreatedanimage-based
+variantbyrenderingthestatesto224×224RGBimages.
+A.2 BlockPushing
+IntheBlockPushingenvironmentintroducedbyFlorenceetal.[28],theobjectiveisfortherobotto
+pushtwocoloredblocks(redandgreen)intotwotargetsquares(alsoredandgreen). Thetraining
+datasetconsistsof1000trajectories,evenlydistributedamongthefourpossiblecombinationsof
+blocktargetandpushorder. Thesetrajectorieswerecollectedbyascriptedexpertcontroller.
+A.3 Push-T
+InthePush-TenvironmentintroducedbyChietal.[3],thegoalistopushaT-shapedblocktoa
+designatedtargetpositiononatable. Thedatasetforthisenvironmentcontains206demonstrations
+collectedbyhumanoperators. Theactionspaceinthisenvironmentisatwo-dimensionalend-effector
+positioncontrol. SimilartotheFrankaKitchenenvironment,wehavecreatedanimage-basedvariant
+byrenderingdemonstrationsto224×224RGBimages.
+A.4 LIBEROGoal
+IntheLIBEROGoalenvironmentintroducedbyLiuetal.[29],thereare10manipulationtasks,each
+with50teleoperateddemonstrationsforgoal-conditionedpolicybenchmarking. Theenvironmenthas
+a7-dimensionalactionspaceandanobservationspaceof224×224RGBimagesfromtwocameras
+(fixedexternalview,andwrist-mountedegocentricview).
+A.5 AllegroManipulation
+TheenvironmentconsistsofanAllegrohandattachedtoaFrankaarm,andafixedcameraforimage
+observations. Theobservationspaceis224×224RGBimages. Theactionspaceis23-dimensional,
+consisting of Cartesian position and orientation of the Franka robot arm (7 DoF), and 16 joint
+positionsoftheAllegroRobotHand. Thedemonstrationsarecollectedat50HzforFranka,and60Hz
+fortheAllegrohand. Thelearnedpoliciesarerolledoutat4Hz.
+We evaluate on three contact-rich dexterous manipulation tasks that require precise multi-finger
+controlandarmmovement,describedindetailbelow.
+Spongepicking: Thistaskrequiresthehandtoreachtothepositionofthesponge,graspthesponge,
+andliftthespongefromthetable. Wecollect6demonstrationsviaOpenTeach[89]forthetask,
+startingfromdifferentpositions,with543framesintotal. Thetaskisconsideredsuccessfulifthe
+robothandcangraspthespongefromthetablewithin120seconds.
+Teabagpicking: Thistaskissimilartotheprevioustask,butmoredifficultwithasmallertaskobject.
+Wecollect7demonstrationsviaOpenTeachwith1034framesintotal. Inthistask,therobotneeds
+reachtheteabag,grasptheteabagwithtwofingers,thenpickitup. Thetaskisconsideredsuccessful
+iftherobothandcangrasptheteabagfromthetablewithin240seconds.
+Microwaveopening: Thistaskrequiresthehandtoreachthemicrowavedoorhandle, graspthe
+handle,andpulldownthedoor. Wecollect6demonstrationsviaOpenTeachwith735framesintotal.
+Thetaskisconsideredsuccessfuliftherobothandcanopenthedoorwithin240seconds.
+A.6 xArmKitchen
+Thisisareal-worldmulti-taskkitchenenvironmentcomprisingaUfactoryxArm7robotwithan
+xArmGripper.ThepoliciesaretrainedonRGBimagesofsize128×128obtainedfromfourdifferent
+camera views, including an egocentric camera attached to the robot gripper. The action space
+17comprisestherobotendeffectorposeandthegripperstate. Wecollectatotalof65demonstrations
+across5tasks,depictedinFigure5. ThedemonstrationswerecollectedusingOpenTeach[89]at
+30Hz. Thelearnedpoliciesaredeployedat10Hz. Figure5showsreal-worldtaskrolloutsforthe
+multitaskpolicylearnedforall5tasks.
+Put yogurt bottle in fridge door: Pick up the b ottle of yogurt and place it in the door of the fridge.
+F e tc h yog u r t b o tt le fr om fr id ge d oo r : T a ke the bo tlt e of yogurt o ut from the door of the fr idg e .
+Put ketchup bottle inside fridge: Pick up the bottle of tomato ketchup and put it inside the fridge.
+Fetch tea bottle from fridge door: Take the bottle of green tea out from the door of the fridge.
+Fetch water bottle from fridge: Take the bottle of vitamin water out of the fridge.
+Figure5:xArmKitchenenvironmenttasks
+18B Hyperparametersandimplementationdetails
+B.1 Visualencodertraining
+WepresenttheDynaMohyperparametersbelow.
+Table8:Environment-dependenthyperparametersforDynaMopretraining,randominit
+Obs. context EMAβ Forwarddynamicsdropout Transitionlatentdim
+FrankaKitchen 2 SimSiam 0 64
+BlockPushing 5 0.99 0.3 16
+Push-T 5 SimSiam 0 8
+LIBEROGoal 5 SimSiam 0 32
+xArmKitchen 5 0.99 0 64
+Table9:SharedhyperparametersforDynaMopretraining,randominit
+Name Value
+Optimizer AdamW
+Learningrate 10−4
+Weightdecay 0.0
+Betas (0.9,0.999)
+Gradientclipnorm 0.1
+Covariancereg. coefficient 0.04
+Epochs 40
+Batchsize 64
+Table10:Environment-dependenthyperparametersforDynaMofine-tuningfromImageNetweights
+Obs. context EMAβ Transitionlatentdim
+FrankaKitchen 2 SimSiam 64
+BlockPushing 5 0.99 16
+Push-T 5 SimSiam 8
+LIBEROGoal 5 0.99 32
+Allegro 5 SimSiam 32
+Table11:SharedhyperparametersforDynaMofine-tuning
+Name Value
+Optimizer AdamW
+Learningrate 10−5
+Forwarddynamicsdropout 0.0
+Weightdecay 0.0
+Betas (0.9,0.999)
+Gradientclipnorm 0.1
+Covariancereg. coefficient 0.04
+Epochs 40
+Batchsize 64
+For Block Pushing and xArm kitchen, we use an EMA encoder with the beta schedule from the
+MoCo-v3officialrepo. ForDynaMotraining,weuseaconstantlearningratescheduleforLIBERO
+19Goal,andacosinelearningratedecayschedulewith5warmupepochsonallotherenvironments.
+ForDynaMofine-tuning,weuseacosinelearningratedecayschedulewith5warmupepochsonall
+environments.
+Weusethefollowingofficialimplementationrepos:
+• MoCo-v3: https://github.com/facebookresearch/moco-v3
+• BYOL:https://github.com/lucidrains/byol-pytorch
+• MAE:https://github.com/facebookresearch/mae
+• R3M:https://github.com/facebookresearch/r3m/
+• MVP:https://github.com/ir413/mvp
+• VC-1: https://github.com/facebookresearch/eai-vc
+We base our transformer encoder implementation on nanoGPT [90] at https://github.com/
+karpathy/nanoGPT.
+For the Allegro Manipulation environment, we fine-tune MoCo and BYOL from ImageNet-1K
+weightsfor1000epochs. Forallotherenvironments,wetrainMoCoandBYOLfor200epochs,
+MAEfor400epochs,allfromrandominitialization. Thehyperparametersusedfortrainingthese
+modelsaredetailedinTable12.
+ComputeusedfortrainingDynaMo:
+• FrankaKitchen: 3hourson1xNVIDIAA100.
+• BlockPushing: 7hourson1xNVIDIAA100.
+• Push-T:1houron1xNVIDIAA100.
+• LIBEROGoal: 2hourson1xNVIDIAH100.
+• AllegroManipulation: 3minuteson1xNVIDIARTXA6000forthespongetask,4minutes
+fortheteabagtask,and3minutesforthemicrowavetask.
+• xArmkitchen: 4hourson1xNVIDIARTXA6000.
+Table12:SSLHyperparameters
+(a)MoCoHyperparameters (b)BYOLHyperparameters
+Name Value Name Value
+Optimizer LARS Optimizer LARS
+Batchsize 1024 Batchsize 512
+Learningrate 0.6 Learningrate 0.2
+Momentum 0.9 Momentum 0.9
+Weightdecay 10−6 Weightdecay 1.5×10−6
+(c)MAEHyperparameters
+Name Value
+Optimizer AdamW
+Batchsize 64
+Learningrate 2.5×10−5
+Weightdecay 0.05
+B.2 Downstreampolicytraining
+Table13,14and15detailthedownstreampolicyhyperparametersforVQ-BeT,DiffusionPolicyand
+MLPtrainingforthesimulatedenvironments.
+20For VQ-BeT, we use the implementation from the original paper [1] with the recommended
+hyperparameters. For Diffusion Policy, we use the implementation at https://github.com/
+real-stanford/diffusion_policywithatransformer-basednoisepredictionnetworkwiththe
+recommendedhyperparameters. WeuseAdamWasoptimizerforthethreepolicyheads.
+Computeusedfordownstreampolicytraining:
+• FrankaKitchenVQ-BeT:8.5hourson1xNVIDIAA4000.
+• BlockPushingVQ-BeT:4hourson1xNVIDIAA100.
+• Push-TVQ-BeT:7hourson1xNVIDIAA100.
+• Push-TDiffusionPolicy: 8hourson1xNVIDIAA100.
+• Push-TMLP:2hourson1xNVIDIAA100.
+• LIBEROGoalVQ-BeT:5hourson1xNVIDIAA4000.
+• xArmKitchenVQ-BeT:6hourson1xNVIDIAA4000.
+Table13:HyperparametersforVQ-BeTtraining
+Parameter FrankaKitchen BlockPushing Push-T LIBEROGoal
+Batchsize 2048 64 512 64
+Epochs 1000 300 5000 50
+Windowsize 10 3 5 10
+Predictionwindowsize 1 1 5 1
+Learningrate 5.5×10−5 10−4 5.5×10−5 5.5×10−5
+Weightdecay 2×10−4 0 2×10−4 2×10−4
+Table14:HyperparametersforDiffusionPolicyTraining
+Parameter Push-T
+Batchsize 256
+Epochs 2000
+Learningrate 10−4
+Weightdecay 0
+Observationhorizon 2
+Predictionhorizon 10
+Actionhorizon 8
+Table15:HyperparametersforMLPTraining
+Parameter Push-T
+Batchsize 256
+Epochs 2000
+Learningrate 10−4
+Weightdecay 0
+Hiddendim 256
+Hiddendepth 8
+Observationcontext 5
+Predictioncontext 5
+21C Realrobotenvironmentrollouts
+Figure6:RolloutsonAllegroManipulationwithourDynaMo-pretrainedencoder.
+22Figure7:RolloutsonxArmKitchenwithourDynaMo-pretrainedencoder.
+23
