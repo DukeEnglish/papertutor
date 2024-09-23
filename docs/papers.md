@@ -2,11 +2,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.12194v2 |
+|idx| 2409.12194v3 |
 |title| Gender Representation and Bias in Indian Civil Service Mock Interviews |
 |authors| Somonnoy BanerjeeSujan DuttaSoumyajit DattaAshiqur R. KhudaBukhsh
-|links| http://arxiv.org/abs/2409.12194v2 |
-|updated| 2024-09-19 02:56:26 UTC |
+|links| http://arxiv.org/abs/2409.12194v3 |
+|updated| 2024-09-20 04:38:21 UTC |
 |summary| This paper makes three key contributions. First via a substantial corpus of51278 interview questions sourced from 888 YouTube videos of mock interviewsof Indian civil service candidates we demonstrate stark gender bias in thebroad nature of questions asked to male and female candidates. Second ourexperiments with large language models show a strong presence of gender bias inexplanations provided by the LLMs on the gender inference task. Finally wepresent a novel dataset of 51278 interview questions that can inform futuresocial science studies. |
 
 
