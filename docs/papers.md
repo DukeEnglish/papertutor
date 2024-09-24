@@ -42,11 +42,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.12181v1 |
+|idx| 2409.12181v2 |
 |title| A Controlled Study on Long Context Extension and Generalization in LLMs |
 |authors| Yi LuJing Nathan YanSonglin YangJustin T. ChiuSiyu RenFei YuanWenting ZhaoZhiyong WuAlexander M. Rush
-|links| http://arxiv.org/abs/2409.12181v1 |
-|updated| 2024-09-18 17:53:17 UTC |
+|links| http://arxiv.org/abs/2409.12181v2 |
+|updated| 2024-09-23 14:39:07 UTC |
 |summary| Broad textual understanding and in-context learning require language modelsthat utilize full document contexts. Due to the implementation challengesassociated with directly training long-context models many methods have beenproposed for extending models to handle long contexts. However owing todifferences in data and model classes it has been challenging to compare theseapproaches leading to uncertainty as to how to evaluate long-contextperformance and whether it differs from standard evaluation. We implement acontrolled protocol for extension methods with a standardized evaluationutilizing consistent base models and extension data. Our study yields severalinsights into long-context behavior. First we reaffirm the critical role ofperplexity as a general-purpose performance indicator even in longer-contexttasks. Second we find that current approximate attention methodssystematically underperform across long-context tasks. Finally we confirm thatexact fine-tuning based methods are generally effective within the range oftheir extension whereas extrapolation remains challenging. All codebasesmodels and checkpoints will be made available open-source promotingtransparency and facilitating further research in this critical area of AIdevelopment. |
 
 
@@ -136,11 +136,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.12181v1 |
+|idx| 2409.12181v2 |
 |title| A Controlled Study on Long Context Extension and Generalization in LLMs |
 |authors| Yi LuJing Nathan YanSonglin YangJustin T. ChiuSiyu RenFei YuanWenting ZhaoZhiyong WuAlexander M. Rush
-|links| http://arxiv.org/abs/2409.12181v1 |
-|updated| 2024-09-18 17:53:17 UTC |
+|links| http://arxiv.org/abs/2409.12181v2 |
+|updated| 2024-09-23 14:39:07 UTC |
 |summary| Broad textual understanding and in-context learning require language modelsthat utilize full document contexts. Due to the implementation challengesassociated with directly training long-context models many methods have beenproposed for extending models to handle long contexts. However owing todifferences in data and model classes it has been challenging to compare theseapproaches leading to uncertainty as to how to evaluate long-contextperformance and whether it differs from standard evaluation. We implement acontrolled protocol for extension methods with a standardized evaluationutilizing consistent base models and extension data. Our study yields severalinsights into long-context behavior. First we reaffirm the critical role ofperplexity as a general-purpose performance indicator even in longer-contexttasks. Second we find that current approximate attention methodssystematically underperform across long-context tasks. Finally we confirm thatexact fine-tuning based methods are generally effective within the range oftheir extension whereas extrapolation remains challenging. All codebasesmodels and checkpoints will be made available open-source promotingtransparency and facilitating further research in this critical area of AIdevelopment. |
 
 
