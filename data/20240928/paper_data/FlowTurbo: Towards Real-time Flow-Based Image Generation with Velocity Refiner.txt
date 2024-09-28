@@ -1,0 +1,1108 @@
+FlowTurbo: Towards Real-time Flow-Based Image
+Generation with Velocity Refiner
+WenliangZhao∗ MingleiShi∗ XuminYu JieZhou JiwenLu†
+TsinghuaUniversity
+Abstract
+Buildingonthesuccessofdiffusionmodelsinvisualgeneration,flow-basedmodels
+reemergeasanotherprominentfamilyofgenerativemodelsthathaveachieved
+competitiveorbetterperformanceintermsofbothvisualqualityandinference
+speed. Bylearningthevelocityfieldthroughflow-matching,flow-basedmodels
+tend to produce a straighter sampling trajectory, which is advantageous during
+thesamplingprocess. However,unlikediffusionmodelsforwhichfastsamplers
+arewell-developed,efficientsamplingofflow-basedgenerativemodelshasbeen
+rarely explored. In this paper, we propose a framework called FlowTurbo to
+acceleratethesamplingofflow-basedmodelswhilestillenhancingthesampling
+quality. Our primary observation is that the velocity predictor’s outputs in the
+flow-basedmodelswillbecomestableduringthesampling,enablingtheestimation
+ofvelocityviaalightweightvelocityrefiner. Additionally,weintroduceseveral
+techniquesincludingapseudocorrectorandsample-awarecompilationtofurther
+reduceinferencetime. SinceFlowTurbodoesnotchangethemulti-stepsampling
+paradigm, it can be effectively applied for various tasks such as image editing,
+inpainting,etc. ByintegratingFlowTurbointodifferentflow-basedmodels,we
+obtainanaccelerationratioof53.1%∼58.3%onclass-conditionalgenerationand
+29.8%∼38.5%ontext-to-imagegeneration. Notably,FlowTurboreachesanFID
+of 2.12 on ImageNet with 100 (ms / img) and FID of 3.93 with 38 (ms / img),
+achievingthereal-timeimagegenerationandestablishingthenewstate-of-the-art.
+Codeisavailableathttps://github.com/shiml20/FlowTurbo.
+1 Introduction
+Inrecentyears,diffusionmodelshaveemergedaspowerfulgenerativemodels,drawingconsiderable
+interestanddemonstratingremarkableperformanceacrossvariousdomains[10,38,30,12].Diffusion
+models utilize a denoising network, ϵ , to learn the reverse of a diffusion process that gradually
+θ
+addsnoisetotransformthedatadistributionintoaGaussiandistribution. Whiletheformulationof
+diffusionmodelsenablesstabletrainingandflexibleconditioninjection[30],samplingfromthese
+modelsrequiresiterativedenoising. Thisprocessnecessitatesmultipleevaluationsofthedenoising
+network,therebyincreasingcomputationalcosts. Toaddressthis,severaltechniquessuchasfast
+diffusionsamplers[22,18,42]andefficientdistillation[31,37]havebeenproposedtoreducethe
+samplingstepsofdiffusionmodels.
+Alongsidetheresearchondiffusionmodels,flow-basedmodels[5,19,17]havegarneredincreasing
+attentionduetotheirversatilityinmodelingdatadistributions. Flowisdefinedasaprobabilitypath
+thatconnectstwodistributionsandcanbeefficientlymodeledbylearninganeuralnetworktoestimate
+theconditionalvelocityfieldthroughaneuralnetworkv viaflowmatching[17]. Encompassing
+θ
+∗Equalcontribution. †Correspondingauthor.
+38thConferenceonNeuralInformationProcessingSystems(NeurIPS2024).
+4202
+peS
+62
+]VC.sc[
+1v82181.9042:viXra0.70 0.03 0.03
+SiT SiT SD3-Medium
+DiT
+0.02 0.02
+SD3-Medium
+0.53 FLUX.1-dev
+Open-Sora 0.01 0.01
+0.35 0.00 4 8 12 16 20 0.00 4 8 12 16 20
+(b)SiT (c)SD3-Medium
+0.03 0.03
+FLUX.1-dev Open-Sora
+0.18
+0.02 0.02
+0.00 0.01 0.01
+4 8 12 16 20
+Sampling Steps 0.00 4 8 12 16 200.00 4 8 12 16 20
+(a)Comparisonofcurvaturesofdifferentmodels. (d)FLUX.1-dev (e)Open-Sora
+Figure1: Visualizationofthecurvaturesofthesamplingtrajectoriesofdifferentmodels. We
+comparethecurvaturesofthemodelpredictionsofastandarddiffusionmodel(DiT[28])andseveral
+flow-basedmodels(SiT[24],SD3-Medium[8],FLUX.1-dev[14],andOpen-Sora[43])duringthe
+sampling. We observe that the v in flow-based models is much more stable than ϵ of diffusion
+θ
+modelsduringthesampling, whichmotivatesustoseekamorelightweightestimationmodelto
+reducethesamplingcostsofflow-basedgenerativemodels.
+thestandarddiffusionprocessasaspecialcase,flow-basedgenerativemodelssupportmoreflexible
+choicesofprobabilitypaths. Recentworkhasfavoredasimplelinearinterpolantpath[20,24,8],
+whichcorrespondstotheoptimaltransportfromtheGaussiandistributiontothedatadistribution.
+Thislinearconnectionbetweendataandnoiseresultsinamoreefficientsamplingprocessforflow-
+basedmodels. However,unlikediffusionmodels,whichbenefitfromnumerousefficientsampling
+methods,currentsamplersforflow-basedmodelsprimarilyrelyontraditionalnumericalmethods
+suchasEuler’smethodandHeun’smethod[24]. Thesetraditionalmethods,whilefunctional,failto
+fullyexploittheuniquepropertiesofflow-basedgenerativemodels,therebylimitingthepotentialfor
+fasterandmoreefficientsampling.
+Inthispaper,weproposeFlowTurbo,aframeworkdesignedtoacceleratethegenerationprocess
+offlow-basedgenerativemodels. FlowTurboismotivatedbycomparingthetrainingobjectivesof
+diffusionandflow-basedgenerativemodels,aswellasanalyzinghowthepredictionresultsϵ and
+θ
+v varyovertime. Ourobservation,illustratedinFigure1,indicatesthatthevelocitypredictions
+θ
+of a flow-based model remain relatively stable during sampling, in contrast to the more variable
+predictionsofϵ indiffusionmodels. Thisstabilityallowsustoregresstheoffsetofthevelocityat
+θ
+eachsamplingstepusingalightweightvelocityrefiner,whichcontainsonly5%oftheparameters
+oftheoriginalvelocitypredictionmodel. Duringthesamplingprocess,wecanreplacetheoriginal
+velocitypredictionmodelwithourlightweightrefineratspecificstepstoreducecomputationalcosts.
+As a step towards real-time image generation, we propose two useful techniques called pseudo
+correctorandsample-awarecompilationtofurtherimprovethesamplingspeed. Specifically,the
+pseudo corrector method modifies the updating rule in Heun’s method by reusing the velocity
+predictionoftheprevioussamplingstep,whichwillreducethenumberofmodelevaluationsateach
+stepbyhalfwhilekeepingtheoriginalconvergenceorder. Thesample-awarecompilationintegrates
+themodelevaluations,thesamplingstepsaswellastheclassifier-freeguidance[11]togetherand
+compilethemintoastaticgraph,whichcanbringextraspeedupcomparedwithstandardmodel-level
+compilation. Sinceeachsampleblockisindependent,wecanstilladjustthenumberofinference
+stepsandsamplingconfigurationsflexibly.
+OurFlowTurboframeworkisfundamentallydifferentfrompreviousone-stepdistillationmethods
+fordiffusionmodels[20,40,32],whichrequiregeneratingmillionsofnoise-imagepairsofflineand
+conductingdistillationoverhundredsofGPUdays. Incontrast,FlowTurbo’svelocityrefinercanbe
+efficientlytrainedonpureimagesinlessthan6hours. Moreover,one-stepdistillation-basedmethods
+arelimitedtoimagegenerationanddisablemostofthefunctionalitiesoftheoriginalbasemodel.
+Conversely, FlowTurbopreservesthemulti-stepsamplingparadigm, allowingittobeeffectively
+appliedtovarioustaskssuchasimageediting,inpainting,andmore.
+We perform extensive experiments to evaluate our method. By applying FlowTurbo to different
+flow-basedmodels,weobtainanaccelerationratioof53.1%∼58.3%onclass-conditionalgeneration
+2
+erutavruC
+fo
+eulaV
+dezilamroNand29.8%∼38.5%ontext-to-imagegeneration. Notably,FlowTurboattainsanFIDscoreof2.12
+onImageNetwith100(ms/img)andFIDofscore3.93with38(ms/img),therebyenablingreal-
+timeimagegenerationandestablishesthenewstate-of-the-art. Additionally,wepresentqualitative
+comparisonsdemonstratinghowFlowTurbogeneratessuperiorimageswithhigherthroughputand
+howitcanbeseamlesslyintegratedintovariousapplicationssuchasimageediting,inpainting,etc.
+WebelieveourFlowTurbocanserveasageneralframeworktoaccelerateflow-basedgenerative
+modelsandwillseewideruseasthesemodelscontinuetogrow[24,20,8,9].
+2 RelatedWork
+Diffusionandflow-basedmodels. Diffusionmodels[10,38]areafamilyofgenerativemodelsthat
+havebecomethede-factomethodforhigh-qualitygeneration. Thediffusionprocessgraduallyadds
+noisetotransformthedatadistributiontoanormaldistribution,andthegoalofdiffusionmodelsisto
+useanetworkϵ tolearnthereverseofthediffusionprocessviascore-matching[10,38].Rombachet
+θ
+al.[30]firstscalesupdiffusionmodelstolarge-scaletext-to-imagegenerationbyperformingthe
+diffusiononlatentspaceandadoptingcross-attentiontoinjectconditions. Thepre-traineddiffusion
+modelscanalsobeeasilyfine-tunedtoachievegenerationwithmorediverseconditions[41,27]and
+haveattractedincreasingattentioninthecommunity.Flow-basedgenerativemodelsaredifferentfrom
+diffusionmodelsinbothdatamodelingandtrainingobjectives. Flow-basedmodels[20,17,8,24]
+considertheprobabilitypathfromonedistributiontoanother,andlearnthevelocityfieldviaflow
+matching[17]. Bychoosingthelinearinterpolantastheprobabilitypathwhichcorrespondstothe
+optimal transport from the normal distribution to the data distribution, the trajectory from noise
+to data becomes more straighter which is beneficial to the sampling. Recent work [24, 8] have
+demonstrates the effectiveness and scalability of flow-based generation models. However, both
+diffusionandflow-basedmodelsrequiresmultipleevaluationsofthepredictionmodel,leadingto
+lowerinferencespeedthantraditionalarchitectureslikeGAN.Inthiswork,wefocusonthisissue
+andaimtoaccelerateflow-basedgenerativemodels.
+Efficientvisualgeneration. Acceleratingthegenerationofdiffusionmodelshasbecomeanincreas-
+inglyimportanttopic.Existingmethodscanberoughlycategorizedastraining-freeandtraining-based
+methods. Training-freemethodsaimtodesignfastersamplersthatcanreducetheapproximation
+errorwhensamplingfromthediffusionSDEorODE[36,22,18,42],whilekeepingtheweightsof
+diffusionmodelsunchanged. Training-basedmethodsoftenaimtoreshapethesamplingtrajectoryby
+distillationfromthediffusionmodel[31,40]toachievethefew-steporevenone-stepgeneration.
+Thesetraining-basedmethodsusuallyrequiresmultiple-roundofdistillation[31,20]andexpensive
+trainingresources(e.g.,>100GPUdaysin[20]). Besides,thedistilledone-stepmodelnolonger
+supportsimageeditingduetothelackofmulti-stepsampling. Althoughthereareavarietyofmeth-
+odsforacceleratingdiffusionmodels,therearefewfastsamplingmethodsdesignedforflow-based
+generativemodels. Existingflow-basedmodelsadopttraditionalnumericalmethodslikeEuler’s
+methodorHeun’smethodduringtheinference[24]. Inthiswork,weprovideaframeworkcalled
+FlowTurbo to accelerate the generation of flow-based models by learning a lightweight velocity
+refiner(whichonlyrequires<6GPUhours)toregresstheoffsetofthevelocity. Togetherwithother
+proposedtechniques,FlowTurboaddressesthepreviouslyunmetneedforanefficientflow-based
+generationframework,pavingthewayforreal-timegenerativeapplications.
+3 Method
+3.1 Preliminaries: DiffusionandFlow-basedModels
+Diffusionmodels. Recently,diffusionmodels[10,38,35,30]haveemergedasapowerfulfamilyof
+generativemodels. Thediffusionmodelsaretrainedtolearntheinverseofadiffusionprocesssuch
+thatitcanrecoverthedatadistributionp (x )fromtheGaussiannoise. Thediffusionprocesscanbe
+0 0
+representedas:
+x =α x +σ ϵ, t∈[0,1], ϵ∼N(0,I), (1)
+t t 0 t
+whereα ,σ arethechosennoiseschedulesuchthatthemarginaldistributionp (x ) ∼ N(0,I).
+t t 1 1
+TheoptimizationofdiffusionmodelscanbederivedbyeitherminimizingtheELBOofthereverse
+process[10]orsolvingthereversediffusionSDE[38],whichwouldbothleadtothesametraining
+objectiveofscore-matching,i.e.,tolearnanoisepredictionmodelϵ (x ,t)toestimatethescaled
+θ t
+3scorefunction−σ ∇ logp (x ):
+t x t t
+(cid:104) (cid:105)
+L (θ)=E λ(t)∥ϵ (x ,t)+σ ∇ logp (x )∥2 , (2)
+DM t,p0(x0),p(xt|x0) θ t t x t t 2
+whereλ(t)isatime-dependentcoefficient. Samplingfromadiffusionmodelcanbeachievedby
+solvingthereverse-timeSDEorthecorrespondingdiffusionODEs[38],whichcanbeefficiently
+achievedbymodernfastdiffusionsamplers[36,22,42].
+Flow-basedmodels. Flow-basedmodelscanbetracedbacktoContinuousNormalizingFlows[5]
+(CNF),whichisamoregenericmodelingtechniqueandcancapturetheprobabilitypathsofthe
+diffusionprocessaswell[17]. TrainingaCNFbecomesmorepracticalsincethepurposeoftheflow
+matchingtechnique[17],whichlearnstheconditionalvelocityfieldoftheflow. Similarto(1),we
+canaddsomeconstraintstothenoiseschedulesuchthatα =1,σ =0andα =0,σ =1,and
+0 0 1 1
+thendefinetheflowas:
+ψ (·|ϵ):x (cid:55)→α x +σ ϵ, (3)
+t 0 t 0 t
+Inthiscase,thevelocityfieldthatgeneratestheflowψ canberepresentedas:
+t
+d
+u (ψ (x |ϵ)|ϵ)= ψ (x |ϵ)=α˙ x +σ˙ ϵ. (4)
+t t 0 dt t 0 t 0 t
+The training objective of conditional flow matching is to train a velocity prediction model v to
+θ
+estimatetheconditionalvelocityfield:
+L FM(θ)=E t,p1(ϵ),p0(x0)(cid:13) (cid:13) (cid:13) (cid:13)v θ(ψ t(x 0|ϵ),t)− dd tψ t(x 0|ϵ)(cid:13) (cid:13) (cid:13) (cid:13)2 (5)
+2
+Thesamplingofaflow-basedmodelcanbeachievedbysolvingtheprobabilityflowODEwiththe
+learnedvelocity
+dx
+t =v (x ,t), x ∼p (x ). (6)
+dt θ t 1 1 1
+Sincetheformulationoftheflowψ canbeviewedastheinterpolationbetweenx andv,itisalso
+t 0
+referred to as interpolant in some literature [1, 24]. Among various types of interpolants, a very
+simplechoiceislinearinterpolant[24,8],whereα =(1−t)andσ =t. Inthiscase,thevelocity
+t t
+fieldbecomesastraightlineconnectingtheinitialnoiseandthedatapoint,whichalsocorrespondsto
+theoptimaltransportbetweenthetwodistributions[19,17]. Theeffectivenessandscalabilityofthe
+linearinterpolanthavealsobeenproveninrecentwork[17,24,8].
+3.2 EfficientEstimationofVelocity
+Weconsiderthevelocityestimationinflow-basedgenerativemodelswiththelinearinterpolant[24,
+8,20]. Asshownin(5),thetrainingtargetofthevelocitypredictionmodelv isexactlyϵ−x ,a
+θ 0
+constantvalueindependentoft. Ourmainmotivationistoefficientlyestimatethevelocityduringthe
+sampling,insteadofevaluatingthewholevelocitypredictionmodelv everytime.
+θ
+Analyzingthestabilityofvelocity. Westartbyanalyzingthestabilityoftheoutputvalueofv
+θ
+along the sampling trajectory. By comparing the training objectives of diffusion and flow-based
+models (2)(5), we know that the target of v is independent of t. A more in-depth discussion is
+θ
+providedinAppendixA.3,whereweshowthetwotrainingobjectiveshavedifferenttime-dependent
+weightfunctions. Toverifywhethertherearesimilarpatternsduringthesampling,wecomparehow
+thepredictionresultschangeacrossthesamplingstepsinFigure1. Specifically,wecomparethe
+curvaturesofϵ ofadiffusionmodel(DiT[28])andthev offlow-basedmodels(SiT[8],SD3[8],
+θ θ
+etc)duringthesamplingsteps. Foreachmodel,wesamplefrom8randomnoisesandsetthetotal
+samplingstepsas20. Itcanbeclearlyobservedthatv ofaflow-basedmodelismuchmorestable
+θ
+thantheϵ ofadiffusionmodel. Therefore,Wedefinethev asa“stablevalue”. Thestabilityofv
+θ θ θ
+makesitpossibletoobtainthevelocitymoreefficientlyratherthanperformingtheforwardpassof
+thewholevelocitypredictionnetworkv ateverysamplingstep.
+θ
+Learningalightweightvelocityrefiner. Sincethevelocityinaflow-basedmodelisa“stablevalue”,
+weproposetolearnalightweightrefinerthatcanadjustthevelocitywithminimalcomputational
+costs. Thevelocityrefinertakesasinputsboththecurrentintermediateresultandthevelocityofthe
+previousstep,andreturnstheoffsetofvelocity:
+v =r (x ,v ,t )+v . (7)
+ti ϕ ti ti−1 i ti−1
+4(a)Learning a Lightweight Velocity Refiner (b)Heun’sMethod Sample Block
+𝐱 ∼𝑝 𝐱 ,𝝐∼𝒩(0,𝐈) 𝐱 =𝜓 𝐱 𝝐 = 1−𝑡 𝐱 +𝑡 𝝐
+0 0 𝑡𝑖−1 𝑡𝑖−1 0 𝑖−1 0 𝑖−1
+𝐱 𝑡𝑖−1 Velocity 𝐯 𝑡𝑖−1+ +𝐱 𝑡𝑖
+𝐱 𝑡𝑖−1 Velocity
+𝐯 𝑡𝑖−1
+×Δ𝑡+
+𝐱 𝑡𝑖
+Velocity
++𝐯෤
+𝑡𝑖 +
+Predictor × 𝐯 𝜃Δ𝑡 ×0.5
+Predictor 𝐯 𝜃 𝐯 Refiner 𝐫 𝜙 ×Δ𝑡
+𝑡𝑖−1
+Velocity 𝐯ത 𝑡𝑖
+ℒ 𝜙=𝔼 𝐯෤ 𝑡𝑖−𝐯 𝜃(𝐱 𝑡𝑖,𝑡 𝑖) 22 𝐱ത 𝑡𝑖 Predictor 𝐯 𝜃
+(d)FlowTurboSampling (c)Pseudo Corrector Sample Block
+𝑁=𝑁𝐻+𝑁𝑃+𝑁𝑅
+×𝑁𝐻 ×𝑁𝑃 ×𝑁𝑅 𝐱 𝑡𝑖−1 Velocity 𝐯ത 𝑡𝑖−1+ +𝐱 𝑡𝑖
+𝐱 Heun’sMethod Pseudo Corrector Velocity Refiner 𝐱 Cache ×Δ𝑡 ×0.5
+𝑡0
+Sample Block Sample Block Sample block
+𝑡𝑁
++
+×Δ𝑡
+SAC SAC SAC
+Velocity 𝐯ത 𝑡𝑖
+𝐱 𝑡0∼𝒩(0,𝐈) SAC: Sample-Aware Compilation 𝐱ത 𝑡𝑖 Predictor 𝐯 𝜃
+Figure2: OverviewofFlowTurbo.(a)Motivatedbythestabilityofthevelocitypredictor’soutputsduringthe
+sampling,weproposetolearnalightweightvelocityrefinertoregresstheoffsetofthevelocityfield.(b)(c)We
+proposethepseudocorrectorwhichleveragesavelocitycachetoreducethenumberofmodelevaluationswhile
+maintainingthesameconvergenceorderasHeun’smethod.(d)Duringsampling,weemployacombinationof
+Heun’smethod,thepseudocorrector,andthevelocityrefiner,whereeachsampleblockisprocessedwiththe
+proposedsample-awarecompilation.
+Thevelocityrefinerr canbedesignedtobeverylightweight(<5%parametersofv ). Thedetailed
+ϕ θ
+architecturecanbefoundinAppendixC.
+Tolearnthevelocityrefiner,weneedtominimizethedifferencebetweentheoutputofr andthe
+ϕ
+actualoffsetv −v . However,itrequiresmultiple-stepsamplingtoobtainanintermediateresult
+ti ti−1
+x tomakethetrainingobjectiveperfectlyalignwithourtarget. Toreducethetrainingcost,we
+ti
+simulatethex withone-stepsamplingstartingfromx ,whichisdirectlyobtainedbytheflow
+t ti−1
+ψ . Thedetailedproceduretocomputethelossislistedasfollows:
+ti−1
+x ←ψ (x |ϵ), x ∼p (x),ϵ∼p (x) (8)
+ti−1 ti−1 0 0 0 1
+v ←v (x ,t ), x ←Solver(x ,v ,∆t) (9)
+ti−1 θ ti−1 i−1 ti ti−1 ti−1
+L ←E∥v (x ,t )−(r (x ,v ,t )+v )∥2 (10)
+ϕ θ ti i ϕ ti ti−1 i ti−1 2
+Where∆t=t −t andweuseasimpleEulerstepfortheSolvertoobtainx . Oncethevelocity
+i i−1 ti
+refinerislearned,wecanuseittoreplacetheoriginalv atsomespecificsamplingsteps. Wewill
+θ
+demonstratethroughexperimentsthataddingthevelocityrefinercanimprovethesamplingquality
+withoutintroducingnoticeablecomputationaloverhead.
+Compatibilitywithclassifier-freeguidance. Classifier-freeguidance[11]isausefultechnique
+toimprovethesamplingqualityinconditionalsampling. Letybethecondition,theclassifier-free
+guidanceforavelocitypredictionmodel[8]canbedefinedas:
+vζ(x,t|y)=(1−ζ)v (x,t|∅)+ζv (x,t|y), (11)
+θ θ
+whereζ istheguidancescaleand∅denotesthenullcondition. Tomakeourvelocityrefinersupport
+classifier-freeguidance,weonlyneedtomakesureboththeconditionalpredictionv (x,t|y)andthe
+θ
+unconditionalpredictionv (x,t|∅)appearduringthetraining. Notethatwealwaysfeedthevelocity
+θ
+predictionmodelv andthevelocityrefinerr withthesamecondition.
+θ ϕ
+y =I ·∅+I ·y, γ ∈U[0,1], (12)
+γ γ≤γ1 γ>γ1
+LCFG ←E∥v (x ,t |y )−(r (x ,v ,t |y )+v )∥2, (13)
+ϕ θ ti i γ ϕ ti ti−1 i γ ti−1 2
+wherewesettheγ =0.1astheprobabilityofusinganunconditionalvelocity.
+1
+3.3 TowardsReal-TimeImageGeneration
+The sampling costs of a flow-based model can be significantly minimized by integrating our
+lightweightvelocityrefinerr inplaceofthevelocitypredictionnetworkv atselectedsampling
+ϕ θ
+5steps. Inthissection, weproposetwotechniquestofurtherimprovethesamplingspeedtowards
+real-timeimagegeneration.
+Pseudocorrector. TraditionalnumericalODEsolversareusuallyusedtosamplefromaprobability
+flowODE.Forexample,SiT[8]adoptaHeunmethod(orimprovedEuler’smethod)[15]astheODE
+solver. Theupdaterulefromt tot canbewrittenas:
+i−1 i
+d ←v (x ,t |y), x˜ ←x +∆td (14)
+i−1 θ ti−1 i−1 ti ti−1 i−1
+∆t
+d ←v (x˜ ,t |y), x ←x + [d +d ] (15)
+i θ ti i i i−1 2 i−1 i
+EachHeunstepcontainsapredictorstep(14)andacorrectorstep(15),thusincludestwoevaluations
+ofthevelocitypredictorv ,bringingextrainferencecosts. Motivatedby[42],weproposetoreuse
+θ
+thed inthenextsamplingstep, insteadofre-computingitviad ← v (x ,t |y)(seeFigure2
+i i θ ti i
+(b)(c)forillustration). Wecallthisapseudocorrectorsinceitisdifferentfromthepredictor-corrector
+solversinnumericalanalysis. Itcanbeproved(seeAppendixB)thatthepseudocorrectoralsoenjoys
+2-orderconvergencewhileonlyhavingonemodelevaluationateachstep.
+Sample-awarecompilation. Compilingthenetworkintoastaticgraphisawidelyusedtechnique
+formodelacceleration. However,allthepreviousworkonlyconsidersnetwork-levelcompilation,
+i.e.,onlycompilingtheϵ orv . Weproposethesample-awarecompilationwhichwrapsboththe
+θ θ
+forwardpassofv orr andthesamplingoperationtogether(includingtheclassifier-freeguidance)
+θ ϕ
+and performs the compilation. For example, the sample blocks illustrated in Figure 2 (b, c) are
+compiledintostaticgraphs. Sinceeachsampleblockisindependent,wecanstilladjustthenumber
+ofinferencestepsandsamplingconfigurationsflexibly.
+3.4 Discussion
+Recently,therehavebeenmoreandmoretraining-basedmethods[20,40,32]aimingtoaccelerate
+diffusionmodelsorflow-basedmodelsthroughone-stepdistillation. Althoughthesemethodscan
+achievefasterinference,theyusuallyrequiregeneratingpaireddatausingthepre-trainedmodeland
+sufferfromlargetrainingcosts(e.g.,>100GPUdaysin[40,20]). Besides,one-stepmethodsonly
+keepthegenerationabilityoftheoriginalmodelwhiledisablingmorediverseapplicationssuchas
+imageinpaintingandimageediting. Incontrast,ourFlowTurboaimstoaccelerateflow-basedmodels
+throughvelocityrefinement,whichstillworksinamulti-stepmannerandperformssamplingonthe
+originaltrajectory. Forexample,FlowTurbocanbeeasilycombinedwithexistingdiffusion-based
+imageeditingmethodslikeSDEdit[25](seeSection4.4).
+4 Experiments
+WeconductextensiveexperimentstoverifytheeffectivenessofFlowTurbo. Specifically, weap-
+plyFlowTurbotobothclass-conditionalimagegenerationandtext-to-imagegenerationtasksand
+demonstratethatFlowTurbocansignificantlyreducethesamplingcostsoftheflow-basedgenerative
+models. WealsoprovideadetailedanalysisofeachcomponentofFlowTurbo,aswellasqualitative
+comparisonsofdifferenttasks.
+4.1 Setups
+Inourexperiments,weconsidertwowidelyusedbenchmarksincludingclass-conditionalimagegen-
+erationandtext-to-imagegeneration. Forclass-conditionalimagegeneration,weadoptatransformer-
+styleflow-basedmodelSiT-XL[24]pre-trainedonImageNet256×256. Fortext-to-imagegeneration,
+weutilizeInstaFlow[20]astheflow-basedmodel, whosebackboneisaU-NetsimilartoStable-
+Diffusion[30]. Notethatweusethe2-RFmodelfrom [19]insteadofthedistilledversionsince
+ourFlowTurboisdesignedtoachieveaccelerationwithinthemulti-stepsamplingframework. The
+velocityrefineronlycontains4.3%and5%parametersofthecorrespondingpredictor,andthedetailed
+architecturecanbefoundinAppendixC.Duringtraining,werandomlysample∆t∈(0,0.12]and
+computethetrainingobjectivesin(13). Inbothtasks,weuseasingleNVIDIAA800GPUtotrain
+thevelocityrefinerandfinditconvergeswithin6hours. Weuseabatchsizeof8onasingleA800
+GPUtomeasurethelatencyofeachmethod. PleaserefertoAppendixCformoredetails.
+6Table1: Mainresults.WeapplyourFlowTurboonSiT-XL[24]andthe2-RFofInstaFlow[20]toperform
+class-conditionalimagegenerationandtext-to-imagegeneration,respectively.Theimagequalityismeasuredby
+theFID50K↓onImageNet(256×256)andtheFID5K↓onMSCOCO2017(512×512).Weusethesuffixto
+representthenumberofHeun’smethodblock(H),pseudocorrectorblock(P),andthevelocityrefinerblock
+(R).OurresultsdemonstratethatFlowTurbocansignificantlyacceleratetheinferenceofflow-basedmodels
+whileachievingbettersamplingquality.
+(a)Class-conditionalImageGeneration (b)Text-to-imageGeneration
+Sample FLOPs Latency Sample FLOPs Latency
+Method FID↓ Method FID↓
+Config (G) (ms/img) Config (G) (ms/img)
+SiT-XL[8],ImageNet(256×256) InstaFlow[20],MSCOCO2017(512×512)
+Heun’s H8 1898 3.68 89.4 Heun’s H4 3955 32.77 104.5
+FlowTurbo H2P4R2 957 3.63 41.6(-53.4%) FlowTurbo H1P2R2 2649 32.48 68.4(-34.5%)
+Heun’s H11 2610 2.79 117.8 Heun’s H5 4633 30.73 120.3
+FlowTurbo H2P8R2 1431 2.69 55.2(-53.1%) FlowTurbo H1P4R2 3327 30.19 84.5(-29.8%)
+Heun’s H15 3559 2.42 154.8 Heun’s H8 6667 28.61 170.5
+FlowTurbo H5P7R3 2274 2.22 72.5(-53.2%) FlowTurbo H1P6R3 4030 28.60 104.8(-38.5%)
+Heun’s H24 5694 2.20 240.6 Heun’s H10 8023 28.06 203.7
+FlowTurbo H8P9R5 3457 2.12 100.3(-58.3%) FlowTurbo H3P6R3 5386 27.60 137.0(-32.7%)
+Table2: Comparisonswiththestate-of-the-arts.Wecomparethesamplingqualityandspeedofdifferent
+methodsonImageNet256×256class-conditionalsampling.WedemonstratethatFlowTurbocansignificantly
+improveoverthebaselineSiT-XL[24]andachievesthefastestsampling(38ms/img)andthebestquality(2.12
+FID)withdifferentconfigurations.
+Latency
+Model SampleConfig Params FID↓ IS↑ Precision↑ Recall↑
+(ms/img)
+StyleGAN-XL[33] - 166M 190 2.30 265.1 0.78 0.53
+Mask-GIT[2] 8steps 227M 120 6.18 182.1 0.80 0.51
+ADM[7] 250stepsDDIM[36] 554M 2553 10.94 101.0 0.69 0.63
+ADM-G[7] 250stepsDDIM[36] 608M 4764 4.59 186.7 0.83 0.53
+LDM-4-G[30] 250stepsDDIM[36] 400M 448 3.60 247.7 0.87 0.48
+DiT-XL[28] 250stepsDDPM[10] 675M 6914 2.27 278.2 0.83 0.57
+SiT-XL[24] 25stepsdopri5[15] 675M 3225 2.15 258.1 0.81 0.60
+SiT-XL[24] 25stepsHeun’s[15] 675M 250 2.20 254.9 0.81 0.60
+FlowTurbo(ours) H 1P 5R 3 704M 38 3.93 223.6 0.79 0.56
+FlowTurbo(ours) H 5P 7R 3 704M 73 2.22 248.0 0.81 0.60
+FlowTurbo(ours) H 8P 9R 5 704M 100 2.12 255.6 0.81 0.60
+4.2 MainResults
+Class-conditionalimagegeneration.WeadopttheSiT-XL[24]trainedonImageNet[6]ofresolution
+of256×256. Followingcommonpractice[24,30],weadoptaclassifier-freeguidancescale(CFG)
+of 1.5. According to [24], a widely used sampling method of the flow-based model is Heun’s
+method[15]. InTable1a, wedemonstratehowourFlowTurbocanachievefasterinferencethan
+Heun’smethodinvariouscomputationalbudgets. Specifically,weconductexperimentswithdifferent
+samplingconfigurations(thesecondcolumnofTable1a),whereweusethesuffixtorepresentthe
+numberofHeun’smethodblock(H),pseudocorrectorblock(P),andthevelocityrefinerblock(R).
+NotethateachHeun’sblockcontainstwoevaluationsofthevelocitypredictorwhileeachpseudo
+correctorblockonlycontainsone. WealsoprovidethetotalFLOPsduringthesamplingandthe
+inferencespeedofeachsampleconfiguration. Ineachgroupofcomparison,wechoosethesampling
+strategy of FlowTurbo to make the sampling quality (measured by the FID 50K↓) similar to the
+baseline. OurresultsdemonstratethatFlowTurbocanacceleratetheinferenceby37.2%∼43.1%,
+whilestillachievingbettersamplingquality. Notably,FlowTurboobtains3.63FIDwithasampling
+speedof41.6ms/img,achievingreal-timeimagegeneration.
+Text-to-imagegeneration. Weadoptthe2-RFmodelin[20]asourbasemodelfortext-to-image
+generation. Notethatwedonotadoptthedistilledversionin[20]sincewefocusonaccelerating
+flow-based models within the multi-step sampling paradigm. Following [20, 26], we compute
+theFID5K↓betweenthegenerated512×512samplesandtheimagesonMSCOCO2017[16]
+7Table 3: Ablationstudies. WeevaluatetheeffectivenessofeachcomponentinFlowTurboaswellasthe
+selectionofsomehyper-parameters.(a)WegraduallyaddthecomponentsofFlowTurbotothebaselineand
+showthatFlowTurbocanachieveover50%accelerationwithbettersamplingquality.(b)weexperimentwith
+differentrangesof∆tandfind∆t∈(0.0,0.12]yieldsrelativelygoodresultsinallthesituations. (c)(d)we
+showhowthesamplingquality/speedchangeswiththenumberofvelocityrefinerandpseudocorrectorblocks.
+(a)AblationofcomponentsofFlowTurbo. (c)Effectsofthevelocityrefiner.
+Sample Latency Sample Latency
+Config N H N P H R FID↓ (ms/img) Config FID↓ (ms/img)
+7 0 0 4.42 80.0 H 3.68 68.0
+baselines 8
+8 0 0 3.68 89.4(+11.8%)
+H R 2.80 61.6(-9.4%)
+7 1
+A 7 0 1 2.80 80.5(+0.7%) H R 3.55 55.2(-18.8%)
+6 2
+B 2 8 2 2.69 71.6(-10.4%) H R 7.62 49.9(-26.5%)
+5 3
+C 3 3 2 3.25 57.4(-28.2%)
+D 2 4 2 3.63 52.7(-34.1%)
+(d)Effectsofthepseudocorrector.
+E 1 5 3 3.93 48.0(-40.0%)
+E+Model-LevelComp. 3.93 41.0(-48.7%) Sample Latency
+FID↓
+E+Sample-AwareComp. 3.93 38.3(-52.2%) Config (ms/img)
+H 3.68 68.0
+(b)Ablationof∆t. 8
+H R 2.93 62.0(-8.8%)
+7 2
+Sample ∆t\FID↓ H 6P 1R 2 2.60 58.6(-13.8%)
+Config (0.0,0.1] (0.0,0.12] (0.0,0.2] [0.06,0.12] H 5P 2R 2 2.66 55.2(-18.8%)
+H P R 2.78 51.8(-23.8%)
+4 3 2
+H 6R 2 3.58 3.55 4.48 3.36 H 3P 4R 2 2.96 48.4(-28.8%)
+H 9R 3 2.73 2.65 2.93 2.62 H 2P 5R 2 3.21 45.0(-33.7%)
+H 12R 5 2.53 2.54 2.64 2.89 H 1P 6R 2 3.59 41.6(-38.7%)
+validationset. TheresultsaresummarizedinTable1b,wherewecomparethesamplingspeed/quality
+withthebaselineHeun’smethod. Notethatthenotationofthesamplingconfigurationisthesame
+as Table 1a. The results clearly demonstrate that Our FlowTurbo can also achieve significant
+acceleration(29.8%∼38.5%)ontext-to-imagegeneration.
+4.3 ComparisonstoState-of-the-Arts
+9
+InTable2,wecompareourFlowTurbowithstate-of-the-
+SiT
+art methods on ImageNet 256 × 256 class-conditional 8
+FlowTurbo
+generation. WeuseSiT-XL[24]asourbasemodeland 7
+Mask-GIT
+applyFlowTurbowithdifferentsamplingconfigurations
+6
+on it. We show that FlowTurbo with H P R achieves
+1 5 3
+thesamplingspeedof38(ms/img)with3.93FID(still 5 ADM-G
+betterthanmostmethodslikeMask-GIT[2],ADM[7]). 4 LDM-4-G
+Ontheotherhand,FlowTurbowithH P R archivesthe
+8 9 5 3
+lowest FID 2.12, outperforming all the other methods. StyleGAN-XL DiT-XL
+Besides, we also provide a comparison of the sampling 2
+speed/qualitytrade-offsofSiT(bychangingthenumber 1
+ofsamplingstepsofHeun’smethod)andFlowTurbo(by 40 100 1000 10000
+Latency (ms / img)
+changing the sampling configurations) in 3, where the
+Figure 3: FlowTurboexhibitsfavorable
+results of some other state-of-the-arts methods are also
+trade-offscomparedwithSOTAmethods.
+included. ThecomparisonshowsourFlowTurboexhibits
+favorablesamplingquality/speedtrade-offs.
+4.4 Analysis
+Ablation of components of FlowTurbo. We evaluate the effectiveness of each component of
+FlowTurboinTable3a. Specifically,westartfromthebaseline,a7-stepHeun’smethodandgradually
+add components of FlowTurbo. In the sample config A, we show that adding a velocity refiner
+cansignificantlyimprovetheFID↓(4.42→2.80),whileintroducingminimalcomputationalcosts
+(only+0.7%inthelatency). FromBtoE,weadjusttheratiosofHeun’smethodblock,thepseudo
+correctorblock,andthevelocityrefinerblocktoachievedifferenttrade-offsbetweensamplingspeed
+8
+K05
+DIFImage Inpainting
+A moving train against the background of a blue sky and epic clouds A pink rectangular potion with intricate gold adornment
+Image Editing
+A multicolored iridescent horse with unicorn horn and dragon wings An alien ship crashed with a sad alien sitting on the desert ground Object Removal
+(a)ResultsofHeun’s(2.6s/img,left)andFlowTurbo(1.8s/img,right) (b)Extensions
+Figure4: Qualitativeresults.(a)WecomparedourFlowTurbowithHeun’smethodonLumina-Next-T2I[9].
+Withbetterimagequality, ourmethodrequiresmuchlesssamplingtime(−30.8%). (b)SinceFlowTurbo
+remainsthemulti-stepsamplingparadigm,itcanbeseamlesslyappliedtomoreapplicationssuchasimage
+inpainting,imageediting,andobjectremoval.
+andquality. Inthelasttworows,weshowthatoursample-awarecompilationisbetterthanstandard
+model-levelcompilation,furtherincreasingthesamplingspeed.
+Choiceof∆t. Wefindthechoiceof∆tduringtrainingiscrucialandaffectsthesamplingresultsa
+lotinourexperiments,asshowninTable3b. Wefind∆t∈(0.0,0.1]workswellformoresampling
+stepslikeH R ,while∆t∈[0.06,0.12]isbetterforefewersamplingstepslikeH R andH R .
+12 5 6 2 9 3
+Besides,wefind∆t∈(0.0,0.12]yieldsrelativelygoodresultsinallthesituations.
+Effects of velocity refiner. We evaluate the effects of the different number of velocity refiners
+inTable3c,andfindthatappropriatelyincreasingthenumberofvelocityrefinerscanimprovethe
+trade-offbetweensamplingqualityandspeed. Specifically,wefindH R canachievebetterimage
+6 2
+qualityandgenerationspeedthanthebaselineH .
+8
+Effectsofpseudocorrector. InTable3d,wefixthetotalnumberofbothHeun’ssampleblockand
+pseudocorrectorblockandadjusttheratioofthepseudocorrector. Ourresultsdemonstratethat
+increasingthenumberofpseudocorrectorblockscansignificantlyimprovethesamplingspeedwhile
+introducingneglectableperformancedrop(e.g.,FlowTurbowithH P R performsbetterthanH ).
+1 6 2 8
+Qualitativeresultsandextensions. Weprovidequalitativeresultsofhigh-resolutiontext-to-image
+generationbyapplyingFlowTurbotothenewlyreleasedflow-basedmodelLumina-Next-T2I[9].
+SinceLumina-Next-T2IadoptsaheavylanguagemodelGemma-2B[39]toextracttextfeaturesand
+generateshigh-resolutionimages(1024×1024),theinferencespeedofitisslowerthanSiT[24].
+In Figure 4a, we show that our FlowTurbo can generate images with better quality and higher
+inferencespeedcomparedwiththebaselineHeun’smethod. Besides,sinceFlowTurboremainsthe
+multi-stepsamplingparadigm,itcanbeseamlesslyappliedtomoreapplicationslikeimageinpainting,
+imageediting,andobjectremoval(Section4.4). PleasealsorefertotheAppendixCforthedetailed
+implementationofvarioustasks.
+Limitations and broader impact. Despite the effectiveness of FlowTurbo, our velocity refiner
+highlyreliesontheobservationthatthevelocityisa“stablevalue”duringthesampling. However,we
+havenotfoundsuchastablevalueindiffusion-basedmodelsyet,whichmightlimittheapplication.
+Besides,theabuseofFlowTurbomayalsoacceleratethegenerationofmaliciouscontent.
+5 Conclusion
+Inthispaper,weintroduceFlowTurbo,anovelframeworkdesignedtoaccelerateflow-basedgenera-
+tivemodels. Byleveragingthestabilityofthevelocitypredictor’soutputs,weproposealightweight
+velocityrefinertoadjustthevelocityfieldoffsets.Thisrefinercomprisesonlyabout5%oftheoriginal
+velocitypredictor’sparametersandcanbeefficientlytrainedinunder6GPUhours. Additionally,
+wehaveproposedapseudocorrectorthatreducesthenumberofmodelevaluationswhilemaintain-
+ingthesameconvergenceorderasthesecond-orderHeun’smethod. Furthermore, weproposea
+9sample-awarecompilationtechniquetoenhancesamplingspeed. Extensiveexperimentsonvarious
+flow-basedgenerativemodelsdemonstrateFlowTurbo’seffectivenessonbothclass-conditionalimage
+generationandtext-to-imagegeneration. Wehopeourworkwillinspirefutureeffortstoaccelerate
+flow-basedgenerativemodelsacrossvariousapplicationscenarios.
+Acknowledgments
+ThisworkwassupportedinpartbytheNationalNaturalScienceFoundationofChinaunderGrant
+62321005,Grant624B1026,Grant62336004,andGrant62125603.
+References
+[1] MichaelSAlbergo,NicholasMBoffi,andEricVanden-Eijnden. Stochasticinterpolants: Aunifying
+frameworkforflowsanddiffusions. arXivpreprintarXiv:2303.08797,2023.
+[2] HuiwenChang,HanZhang,LuJiang,CeLiu,andWilliamTFreeman.Maskgit:Maskedgenerativeimage
+transformer. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,
+pages11315–11325,2022.
+[3] JunsongChen,ChongjianGe,EnzeXie,YueWu,LeweiYao,XiaozheRen,ZhongdaoWang,PingLuo,
+HuchuanLu,andZhenguoLi. Pixart-sigma: Weak-to-strongtrainingofdiffusiontransformerfor4k
+text-to-imagegeneration. arXivpreprintarXiv:2403.04692,2024.
+[4] JunsongChen, JinchengYu, ChongjianGe, LeweiYao, EnzeXie, YueWu, ZhongdaoWang, James
+Kwok,PingLuo,HuchuanLu,etal. Pixart-alpha:Fasttrainingofdiffusiontransformerforphotorealistic
+text-to-imagesynthesis. arXivpreprintarXiv:2310.00426,2023.
+[5] RickyTQChen,YuliaRubanova,JesseBettencourt,andDavidKDuvenaud. Neuralordinarydifferential
+equations. Advancesinneuralinformationprocessingsystems,31,2018.
+[6] JiaDeng,WeiDong,RichardSocher,Li-JiaLi,KaiLi,andLiFei-Fei.Imagenet:Alarge-scalehierarchical
+imagedatabase. InCVPR,pages248–255.IEEE,2009.
+[7] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. NeurIPS,
+34:8780–8794,2021.
+[8] PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,YamLevi,
+DominikLorenz,AxelSauer,FredericBoesel,etal. Scalingrectifiedflowtransformersforhigh-resolution
+imagesynthesis. arXivpreprintarXiv:2403.03206,2024.
+[9] PengGao,LeZhuo,ZiyiLin,ChrisLiu,JunsongChen,RuoyiDu,EnzeXie,XuLuo,LongtianQiu,
+YuhangZhang, etal. Lumina-t2x: Transformingtextintoanymodality, resolution, anddurationvia
+flow-basedlargediffusiontransformers. arXivpreprintarXiv:2405.05945,2024.
+[10] JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. NeurIPS,33:6840–
+6851,2020.
+[11] JonathanHoandTimSalimans. Classifier-freediffusionguidance. NeurIPS,2021.
+[12] JonathanHo,TimSalimans,AlexeyGritsenko,WilliamChan,MohammadNorouzi,andDavidJFleet.
+Videodiffusionmodels. arXivpreprintarXiv:2204.03458,2022.
+[13] DiederikKingma,TimSalimans,BenPoole,andJonathanHo. Variationaldiffusionmodels. NeurIPS,
+34:21696–21707,2021.
+[14] Black Forest Labs. Flux: A powerful tool for text generation. https://huggingface.co/
+black-forest-labs/FLUX.1-dev,2024. Accessed:2024-09-26.
+[15] JohnDenholmLambertetal. Numericalmethodsforordinarydifferentialsystems,volume146. Wiley
+NewYork,1991.
+[16] Tsung-YiLin,MichaelMaire,SergeBelongie,JamesHays,PietroPerona,DevaRamanan,PiotrDollár,
+andCLawrenceZitnick. Microsoftcoco:Commonobjectsincontext. InECCV,pages740–755.Springer,
+2014.
+[17] YaronLipman,RickyTQChen,HeliBen-Hamu,MaximilianNickel,andMattLe. Flowmatchingfor
+generativemodeling. arXivpreprintarXiv:2210.02747,2022.
+[18] LupingLiu,YiRen,ZhijieLin,andZhouZhao. Pseudonumericalmethodsfordiffusionmodelson
+manifolds. ICLR,2022.
+[19] XingchaoLiu,ChengyueGong,andQiangLiu. Flowstraightandfast:Learningtogenerateandtransfer
+datawithrectifiedflow. arXivpreprintarXiv:2209.03003,2022.
+10[20] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, et al. Instaflow: One step is enough for high-
+qualitydiffusion-basedtext-to-imagegeneration. InTheTwelfthInternationalConferenceonLearning
+Representations,2023.
+[21] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101,2017.
+[22] ChengLu,YuhaoZhou,FanBao,JianfeiChen,ChongxuanLi,andJunZhu. Dpm-solver: Afastode
+solverfordiffusionprobabilisticmodelsamplinginaround10steps. NeurIPS,2022.
+[23] ChengLu,YuhaoZhou,FanBao,JianfeiChen,ChongxuanLi,andJunZhu. Dpm-solver++:Fastsolver
+forguidedsamplingofdiffusionprobabilisticmodels. arXivpreprintarXiv:2211.01095,2022.
+[24] NanyeMa,MarkGoldstein,MichaelSAlbergo,NicholasMBoffi,EricVanden-Eijnden,andSainingXie.
+Sit:Exploringflowanddiffusion-basedgenerativemodelswithscalableinterpolanttransformers. arXiv
+preprintarXiv:2401.08740,2024.
+[25] ChenlinMeng,YutongHe,YangSong,JiamingSong,JiajunWu,Jun-YanZhu,andStefanoErmon.Sdedit:
+Guidedimagesynthesisandeditingwithstochasticdifferentialequations.arXivpreprintarXiv:2108.01073,
+2021.
+[26] ChenlinMeng,RobinRombach,RuiqiGao,DiederikKingma,StefanoErmon,JonathanHo,andTim
+Salimans. Ondistillationofguideddiffusionmodels. InProceedingsoftheIEEE/CVFConferenceon
+ComputerVisionandPatternRecognition,pages14297–14306,2023.
+[27] ChongMou,XintaoWang,LiangbinXie,YanzeWu,JianZhang,ZhongangQi,andYingShan. T2i-
+adapter: Learningadapterstodigoutmorecontrollableabilityfortext-to-imagediffusionmodels. In
+ProceedingsoftheAAAIConferenceonArtificialIntelligence,volume38,pages4296–4304,2024.
+[28] WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InProceedingsofthe
+IEEE/CVFInternationalConferenceonComputerVision,pages4195–4205,2023.
+[29] DustinPodell,ZionEnglish,KyleLacey,AndreasBlattmann,TimDockhorn,JonasMüller,JoePenna,
+andRobinRombach. Sdxl:Improvinglatentdiffusionmodelsforhigh-resolutionimagesynthesis. arXiv
+preprintarXiv:2307.01952,2023.
+[30] RobinRombach,AndreasBlattmann,DominikLorenz,PatrickEsser,andBjörnOmmer. High-resolution
+imagesynthesiswithlatentdiffusionmodels. InCVPR,pages10684–10695,2022.
+[31] TimSalimansandJonathanHo. Progressivedistillationforfastsamplingofdiffusionmodels. ICLR,2022.
+[32] AxelSauer,DominikLorenz,AndreasBlattmann,andRobinRombach. Adversarialdiffusiondistillation.
+arXivpreprintarXiv:2311.17042,2023.
+[33] AxelSauer,KatjaSchwarz,andAndreasGeiger. Stylegan-xl:Scalingstylegantolargediversedatasets. In
+ACMSIGGRAPH2022conferenceproceedings,pages1–10,2022.
+[34] ChristophSchuhmann,RichardVencu,RomainBeaumont,RobertKaczmarczyk,ClaytonMullis,Aarush
+Katta,TheoCoombes,JeniaJitsev,andAranKomatsuzaki. Laion-400m:Opendatasetofclip-filtered400
+millionimage-textpairs. arXivpreprintarXiv:2111.02114,2021.
+[35] JaschaSohl-Dickstein,EricWeiss,NiruMaheswaranathan,andSuryaGanguli.Deepunsupervisedlearning
+usingnonequilibriumthermodynamics. InICML,pages2256–2265.PMLR,2015.
+[36] JiamingSong,ChenlinMeng,andStefanoErmon. Denoisingdiffusionimplicitmodels. ICLR,2021.
+[37] YangSong,PrafullaDhariwal,MarkChen,andIlyaSutskever. Consistencymodels. 2023.
+[38] YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,andBenPoole.
+Score-basedgenerativemodelingthroughstochasticdifferentialequations. InICLR,2021.
+[39] GemmaTeam,ThomasMesnard,CassidyHardin,RobertDadashi,SuryaBhupatiraju,ShreyaPathak,
+LaurentSifre,MorganeRivière,MihirSanjayKale,JulietteLove,etal. Gemma:Openmodelsbasedon
+geminiresearchandtechnology. arXivpreprintarXiv:2403.08295,2024.
+[40] TianweiYin,MichaëlGharbi,RichardZhang,EliShechtman,FredoDurand,WilliamTFreeman,and
+TaesungPark. One-stepdiffusionwithdistributionmatchingdistillation. arXivpreprintarXiv:2311.18828,
+2023.
+[41] LvminZhang,AnyiRao,andManeeshAgrawala. Addingconditionalcontroltotext-to-imagediffusion
+models. InICCV,pages3836–3847,2023.
+[42] WenliangZhao,LujiaBai,YongmingRao,JieZhou,andJiwenLu. Unipc:Aunifiedpredictor-corrector
+frameworkforfastsamplingofdiffusionmodels. NeurIPS,2023.
+[43] ZangweiZheng,XiangyuPeng,TianjiYang,ChenhuiShen,ShengguiLi,HongxinLiu,YukunZhou,
+TianyiLi,andYangYou. Open-sora:Democratizingefficientvideoproductionforall,2024.
+11A DetailedBackgroundofDiffusionandFlow-basedModels
+Inthissection,wewillprovideadetailedbackgroundofdiffusionandflow-basedmodels,whichis
+helpfultounderstandthedifferenceandrelationshipbetweenthem.
+A.1 DiffusionModels
+Theforwardpassi.e. diffusioinpassofDPMscanbedefinedasasequenceofvariables{x }
+t t∈[0,1]
+startingwithx ,suchthatforanyt∈[0,1],x ∈RD isaD-dimensionalrandomvariablewithan
+0 0
+unknowndatadistributionp (x ). thedistributionofx conditionedonx satisfies
+0 0 t 0
+p (x |x )=N(x |α x ,σ I) (16)
+0t t 0 t t 0 t
+whereα , σ ∈ R+ aredifferentiablefunctionsoftwithboundedderevatives. Thechoiceforα
+t t t
+andσ isreferredtoasthenoisescheduleofaDPM.Letp (x )denotethemarginaldistribution
+t t t
+ofx ,DPMschoosenoiseschedulestoensurethemarginaldistributionp (x )=N(0,I)andthe
+t 1 1
+signal-to-noise-ratio(SNR)α2/σ2isstrictlydecreasingw.r.t. t[13]. Andwehave
+t t
+x =α x +σ ϵ, t∈[0,1], ϵ∼N(0,I) (17)
+t t 0 t
+Moreover,Kingmaetal.[13]provethatthefollowingstochasticdifferentialequation(SDE)hasthe
+sametransitiondistributionq (x |x )asin(16)foranyt∈[0,1]:
+0t t 0
+dx =f(t)x dt+g(t)dw , t∈[0,1], x ∼p (x ) (18)
+t t t 0 0 0
+wherew ∈RD isthestandardWienerprocess,and
+t
+dlogα dσ2 dlogα
+f(t)= t, g2(t)= t −2 tσ2 (19)
+dt dt dt t
+Songetal. [38]haveshownthattheforwardprocessin(18)hasanequivalentreverseprocessfrom
+time1to0undersomeregularityconditions,startingwiththemarginaldistributionp (x ):
+T T
+dx =[f(t)x −g2(t)∇ logp (x )]dt+g(t)dw¯ , x ∼p (x ) (20)
+t t x t t t T T T
+wherew¯ ∈RD isastandardWienerprocessinthereversetime. Tosolvethereverseprocessin(20),
+t
+theonlythingweshoulddoistoestimatethescoreterm∇ logp (x )ateachtimet. Inpractice,
+x t t
+DPMs train a neural network ϵ (x,t) parameterized by θ to estimate the scaled score function:
+θ
+−σ ∇ logp (x ). Theparameterθisoptimizedbyminimizingthefollowingobjective[10,38,24]
+t x t t
+L (θ)=E (cid:2) λ(t)∥ϵ (x ,t)+σ ∇ logp (x )∥2(cid:3) (21)
+DM t,p0(x0),p(xt|x0) θ t t x t t 2
+where λ(t) is a time-dependent coefficient. As ϵ (x ,t) can alse be regarded as predicting the
+θ t
+Gaussiannoiseaddedtox ,itisusuallycalledthenoisepredictionmodel. Sincethegroundtruthof
+t
+ϵ (x ,t)is−σ ∇ logp (x ),DPMsreplacethescorefunctionin(20)by−ϵ (x ,t)/σ andwerefer
+θ t t x t t θ t t
+toitasdiffusion-basedgenerativemodel. DPMsdefineaparameterizedreverseprocess(diffusion
+SDE)fromtime1to0,startingwithx ∼p (x ):
+1 1 1
+(cid:20) g2(t) (cid:21)
+dx = f(t)x + ϵ (x ,t) dt+g(t)dw¯ , x ∼N(0,I) (22)
+t t σ θ t t 1
+t
+SamplescanbegeneratedfromDPMsbysolvingthediffusionSDEin(22)withnumericalsolvers.
+WhendiscretizingSDEs,thestepsizeislimitedbytherandomnessoftheWienerprocess. Alarge
+step size (small number of steps) often causes non-convergence, especially in high dimensional
+spaces. Forfastersampling,wecanconsidertheassociatedprobabilityflowODE[38]whichhasthe
+samemarginladistributionateachtimetasthatoftheSDE.Specifically,forDPMs,Songetal.[38]
+provedthattheprobabilityflowODEof(22)is
+dx g2(t)
+t =v(x ,t):=f(t)x + ϵ (x ,t), x ∼N(0,I) (23)
+dt t t 2σ θ t 1
+t
+SamplescanbegeneratedbysolvingtheODEfrom1to0. ComparingwithSDEs,ODEscanbe
+solvedwithlargerstepsizesastheyhavenorandomness. Furthermore,wecantakeadvantageof
+efficientnumericalODEsolverstoacceleratethesampling.
+12A.2 Flow-basedModels
+Tointroduceflowindetail,firstweconstructatime-dependentvectorfield,u:[0,1]×RD →RD.
+A vector field u can be used to construct a time-dependent diffeomorphic map, called a flow,
+t
+ϕ:[0,1]×RD →RD,definedviatheordinarydifferentialequation(ODE):
+d
+ϕ (x )=u (ϕ (x )) (24)
+dt t 0 t t 0
+ϕ (x )=x (25)
+0 0 0
+Chenetal.[5]suggestedmodelingthevectorfieldu withaneuralnetworkv ,whichinturnleads
+t θ
+toadeepparametricmodeloftheflowϕ , calledaContinuousNormalizingFlow(CNF).Itisa
+t
+moregenericmodelingtechniqueandcancapturetheprobabilitypathsofdiffusionprocessaswell.
+TrainingaCNFbecomesmorepracticalsincetheproposeoftheconditionalflowmatching(CFM)
+technique[17],whichlearnstheconditionalvelocityfieldoftheflow.
+Forgenerativemodels,similarto(17)wecanaddsomeconstraintstothenoiseschedulesuchthat
+α =1,σ =0andα =0,σ =1,andthendefinetheflowas:
+0 0 1 1
+ψ (·|ϵ):x (cid:55)→α x +σ ϵ (26)
+t 0 t 0 t
+Thecorrespondingvelocityvectorfieldwhichisusedtoconstructtheflowψ canberepresentedas:
+t
+d
+u (ψ (x |ϵ)|ϵ)= ψ (x |ϵ)=α˙ x +σ˙ ϵ (27)
+t t 0 dt t 0 t 0 t
+Considerthetime-dependentprobabilitydensityfunction(PDF)p (x)ofx =ψ (x |ϵ)=α x +
+t t t 0 t 0
+σ ϵ. Lipmanetal.[17]provedthatthemarginalvectorfieldu thatgeneratestheprobabilitypathp
+t t t
+satisfiesaPartialDifferentialEquation(PDE)calledcontinuityequation(alsotransportequation)
+d
+p (x)+∇ ·(u (x)p (x))=0 (28)
+dt t x t t
+Using conditional flow matching technique v(x ,t) in (23) can be estimated parametrically as
+t
+v (x ,t)byminimizingthefollowingobjective
+θ t
+L FM(θ)=E t,p1(ϵ),p0(x0)(cid:13) (cid:13) (cid:13) (cid:13)v θ(x t,t)− dd tψ t(x 0|ϵ)(cid:13) (cid:13) (cid:13) (cid:13)2 (29)
+2
+=E ∥v (x ,t)−α˙ x −σ˙ ϵ∥2 (30)
+t,p1(ϵ),p0(x0) θ t t 0 t 2
+Wereferto(23)asaflow-basedgenerativemodel. Sincewehavex =ψ (x |ϵ),thesamplingofa
+t t 0
+flow-basedmodelcanbeachievedbysolvingtheprobabilityflowODEwithlearnedvelocity
+dx
+t =v (x ,t), x ∼p (x ) (31)
+dt θ t 1 1 1
+A.3 RelationshipBetweenDiffusionandFlow-basedModels
+There exists a straightforward connection between v(x ,t) and the score term σ ∇ logp (x )
+t t x t t
+accordingto[24].
+(cid:18) (cid:19)
+α˙ α˙ σ
+v(x ,t)= tx + σ˙ − t t (−σ ∇ logp (x )) (32)
+t α t t α t x t t
+t t
+13Algorithm1Heun’sMethodSampler
+Require: timesteps{t }N−1,α ,σ ,x ∼N(0,I),velocitypredictionmodelv (x,t|y)
+i i=0 t t 0 θ
+fori=0toN −1do
+∆t ←t −t
+i i+1 i
+d ←v (x ,t |y)
+i θ i i
+x˜ ←x +∆t d
+ti+1 i i i
+d ←v (x˜ ,t |y)
+i+1 θ ti+1 i+1
+x
+ti+1
+←x i+ ∆ 2ti[d i+d i+1]
+endfor
+return: x
+N
+Algorithm2PseudoCorrectorSampler
+Require: timesteps{t }N−1,α ,σ ,x ∼N(0,I),velocitypredictionmodelv (x,t|y)
+i i=0 t t 0 θ
+∆t←t −t
+1 0
+fori=0toN −1do
+∆t ←t −t
+i i+1 i
+ifi=0then
+d ←v (x ,t |y)
+i θ i i
+endif
+x˜ ←x +∆t d
+ti+1 i i i
+d ←v (x˜ ,t |y)
+i+1 θ ti+1 i+1
+x
+ti+1
+←x i+ ∆ 2ti[d i+d i+1]
+endfor
+return: x
+N
+Wecandefineζ
+t
+=σ˙ t− α˙ αtσ tt,andwehaveϵ θ(x t,t)toestimate−σ t∇ xlogp t(x t),thenderivethe
+relationshipbetweenL (θ)andL (θ)Wecanplug(32)intothelossL (θ)inEquation(30)
+DM FM FM
+L (θ)=E ∥v (x ,t)−α˙ x −σ˙ ϵ∥2 (33)
+FM t,p1(ϵ),p0(x0) θ t t 0 t 2
+=E t,p1(ϵ),p0(x0)(cid:13) (cid:13) (cid:13) (cid:13)α α˙ tx t+ζ tϵ θ(x t,t)−α˙ tx 0−σ˙ tϵ(cid:13) (cid:13) (cid:13) (cid:13)2 (34)
+t 2
+=E t,p1(ϵ),p0(x0)(cid:13) (cid:13) (cid:13) (cid:13)α˙ αtσ tϵ+ζ tϵ θ(x t,t)−α˙ tx 0−σ˙ tϵ(cid:13) (cid:13) (cid:13) (cid:13)2 (35)
+t 2
+=E ∥ζ ϵ (x ,t)−ζ ϵ∥2 (36)
+t,p1(ϵ),p0(x0) t θ t t 2
+(cid:104) (cid:105)
+=E ζ2∥ϵ (x ,t)−ϵ∥2 (37)
+t,p1(ϵ),p0(x0) t θ t 2
+(cid:104) (cid:105)
+xt=αt=x0+σtϵE ζ2∥ϵ (x ,t)+σ ∇ logp (x )∥2 (38)
+t,p0(x0),p(xt|x0) t θ t t x t t 2
+Recallthat
+(cid:104) (cid:105)
+L (θ)=E λ(t)∥ϵ (x ,t)+σ ∇ logp (x )∥2 , (39)
+DM t,p0(x0),p(xt|x0) θ t t x t t 2
+wecanseethatthedifferenceofL (θ)andL (θ)duringtrainingiscausedbytheweighted
+DM FM
+function,whichleavingtodifferenttrajectoriesandproperties.
+B ProofofConvergenceofPseudoCorrector
+Inthissection,wewillprovethattheproposedpseudocorrectorhasthesamelocaltruncationerror
+andglobalconvergenceorderasHeun’smethod. ThedetailedsamplingprocedureofHeun’smethod
+14and pseudo corrector are provided in Algorithm 1 and Algorithm 2. In this section, we use x
+ti
+torepresenttheintermediatesamplingresultatthet timestep,andusex∗ = x(t )todenotethe
+i ti i
+corresponding ground-truth value on the trajectory. In all the proofs in this section, we omit the
+conditionyforsimplicity.
+B.1 Assumptions
+AssumptionB.1. Thevelocitypredictorv (x,t)isLipschitzcontinousofconstantLw.r.tx.
+θ
+AssumptionB.2. Thevelocitypredictorv (x,t)hasatleast2derivatives dv (x,t)and d2 v (x,t)
+θ dt θ dt2 θ
+andthederivativesarecontinuous.
+AssumptionB.3. h=max h =O(1/N),whereN isthetotalnumberofsamplingsteps.
+0≤i≤N−1 i
+Alltheabovearecommonintheanalysisoftheconvergenceorderoffastsamplers[22,23,42]of
+diffusionmodels.
+B.2 LocalConvergence
+WestartbystudyingthelocalconvergenceandHeun’smethod. Consideringtheupdatingfromt to
+i
+t andassumeallpreviousresultsarecorrect(seethedefinitionoflocalconvergence[15]). The
+i+1
+Taylor’sexpansionofx∗ att gives:
+ti+1 i
+h2 h3
+x∗ =x +h x(1)(t )+ ix(2)(t )+ ix(3)(t )+O(h4). (40)
+ti+1 ti i i 2 i 6 i
+Ontheotherhand,letx¯ bethepredictionassumingx iscorrect,theupdatingruleofHeun’s
+ti+1 i
+methodshows:
+h
+x¯ =x + i[d +d ] (41)
+ti+1 ti 2 i i+1
+h h2
+=x + i[x(1)(t )+x(1)(t )+h x(2)(t )+ ix(3)(t )+O(h3)] (42)
+ti 2 i i i i 2 i
+h2 h3
+=x +h x(1)(t )+ ix(2)(t )+ ix(3)(t )+O(h4) (43)
+i i i 2 i 4 i
+Therefore,thelocaltruncationerrorcanbecomputedby:
+h3
+T =∥x∗ −x¯ ∥=∥− ix(3)(t )+O(h4)∥≤C h3, (44)
+i+1 ti+1 ti+1 12 i 1
+whichindicatesthatHeun’smethodhas2orderofaccuracy.
+It is also noted that the local truncation error of the predictor step (which is the same as Euler’s
+method)canbesimilarlyderivedby:
+h2
+T˜ =∥x∗ −x˜ ∥=∥ x(2)(t )+O(h2)∥≤C h2. (45)
+i+1 ti+1 ti+1 2 i 2
+For pseudo corrector, the analysis of local convergence is the same since we need to assume all
+previousresults(includingthex andd ),whichmeansthelocaltruncationerrorofpseudocorrector
+ti i
+isthesameastheHeun’smethod.
+B.3 GlobalConvergence
+GlobalconvergenceforHeun’smethod. Whenanalyzingglobalconvergence,weneedtotake
+intoaccountboththelocaltruncationerrorandtheeffectsoftheerrorofpreviousresults. According
+totheLipschitzcondition,wehave:
+∥x∗ −x˜ ∥≤(1+hL)∥x∗ −x ∥+C h2 (46)
+ti+1 ti+1 ti ti 2
+15and
+hL hL
+∥x∗ −x ∥≤(1+ )∥x∗ −x ∥+ ∥x∗ −x˜ ∥+C h3. (47)
+ti+1 ti+1 2 ti ti 2 ti+1 ti+1 1
+Combiningtheabovetwoinequalitiestogether,wehave
+h2L2
+∥x∗ −x ∥≤(1+hL+ )∥x∗ −x ∥+C h3, (48)
+ti+1 ti+1 2 ti ti 3
+where C
+3
+= hL 2C2 +C 1. Note that ∥x∗
+t0
+−x t0∥ = 0 (their is no error at the beginning of the
+sampling),itcanbeeasilyderivedthat
+C h2 h2L2
+∥x∗ −x ∥≤ 3 ((1+hL+ )N −1)≤C h2(eC5 −1)=C h2. (49)
+tN tN L+ hL2 2 4 6
+2
+Therefore,wehaveproventhatHeun’smethodhave2orderofglobalconvergence.
+Globalconvergenceforpseudocorrector. Theonlydifferencebetweenpseudocorrectorand
+Heun’smethodishowd isobtained. Pseudocorrectorreusethed fromthelastsamplingstep
+i i
+ratherthanre-computeitasinHeun’smethod. Asaresult,d usedinpseudocorrectoriscomputed
+i
+onx˜ ratherthanx ,whichwillleadtoanothererrortermwhenanalyzingtheglobalconvergence.
+ti ti
+Concretely,theglobalerrorofpseudocorrectorcanbecomputedby:
+∥x∗ −x˜ ∥≤(1+hL)∥x∗ −x ∥+hL∥x˜ −x ∥+C h2 (50)
+ti+1 ti+1 ti ti ti ti 2
+hL hL hL
+∥x∗ −x ∥≤(1+ )∥x∗ −x˜ ∥+ ∥x∗ −x˜ ∥+ ∥x −x˜ ∥+C h3. (51)
+ti+1 ti+1 2 ti ti 2 ti+1 ti+1 2 ti ti 1
+Forthesakeofsimplicity,let∆˜ =∥x∗ −x˜ ∥and∆ =∥x∗ −x ∥.Therefore,theaboveformulas
+i ti ti i ti ti
+becomes:
+∆˜ ≤∆ +hL∆˜ +C h2 (52)
+i+1 i i 2
+hL hL hL
+∆ ≤(1+ )∆ + (1+ )∆˜ +C h3. (53)
+i+1 2 i 2 2 i 4
+Bycalculating(52)×hL+(53)wehave:
+hL hL hL
+∆ +hL∆˜ ≤(1+ )∆ + (1+ )∆˜ +C h3+hL∆ +h2L2∆˜ +C Lh3
+i+1 i+1 2 i 2 2 i 4 i i 2
+(cid:34) (cid:35)
+3 hL + 5h2L2
+=(1+ hL) ∆ + 2 4 ∆˜ +C h3 (54)
+2 i 1+ 3hL i 7
+2
+3
+≤(1+ hL)(∆ +hL∆˜ )+C h3.
+2 i i 7
+Notethat∆ +hL∆˜ =0. Let∆′ =∆ +hL∆˜ ,wehave
+0 0 i i i
+3
+∆′ ≤(1+ hL)∆′ +C h3. (55)
+i 2 i 7
+Similartothederivationof(49),wecanderivethat
+3
+∆′ ≤C h2((1+ hL)N −1)≤C h2, (56)
+i 8 2 9
+whichindicatesthat
+∆ ≤C h2, hL∆˜ ≤C h2. (57)
+N 9 i+1 9
+Thereforewehave∆ ≤C h2,andthustheglobalconvergenceofpseudocorrectoris2-order.
+N 9
+16Table4: Ablationofthenumberofthevelocityrefiners. Wechangethenumberofvelocityrefinersand
+comparethesamplingqualityofeachconfiguration.Wefindthereexistsaoptimalnumberofvelocityrefiners
+toachievethelowestFID.
+Method SampleConfig RatioofRefiner FID↓ Latency(ms/img)
+SiT-XL[8],ImageNet(256×256)
+FlowTurbo H P R 0.26 2.19 100.7
+7 10 6
+FlowTurbo H P R 0.23 2.12 100.3
+7 10 5
+FlowTurbo H P R 0.19 2.18 99.9
+7 10 4
+FlowTurbo H P R 0.15 2.15 99.6
+7 10 3
+FlowTurbo H P R 0.29 2.25 87.2
+5 10 6
+FlowTurbo H P R 0.25 2.20 86.8
+5 10 5
+FlowTurbo H P R 0.21 2.21 86.4
+5 10 4
+FlowTurbo H P R 0.17 2.22 86.0
+5 10 3
+C ImplementationDetails
+Class-conditionalimagegeneration. WeusetheSiT-XL-2[24]asourbasemodeltoperformthe
+experimentsonclass-conditionalimagegeneration.WeuseasingleblockofSiT-XL-2astheVelocity
+Refiner. Wedoubletheinputchannelfrom4to8totakethepreviousvelocityasinput. Theresulting
+velocityrefineronlycontains29Mparameters,about4.3%oftheoriginalSiT-XL-2(675M).Weuse
+ImageNet-1K[6]2totrainourvelocitymodel. WeusedAdamW[21]optimizerforallmodels. We
+useaconstantlearningrateof5×10−5 andabatchsizeof18onasingleA800GPU.Weuseda
+randomhorizontalflipwithaprobabilityof0.5indataaugmentation. Wedidnottunethelearning
+rates,decay/warm-upschedules,AdamWparameters,oruseanyextradataaugmentationduring
+training. Ourvelocityrefiner(forSiT-XL-2)trainsatapproximately4.44steps/seconanA800GPU,
+andconvergesin30,000steps,whichtakesabout2hours.
+Text-to-imagegeneration. Weusethe2-RFinInstaFlow[20]asourbasemodeltoperformthe
+experimentsontext-to-imagegeneration. Sincethearchitectureoftheoriginalvelocitypredictor
+in[20]isaU-Net[30],wecannotdirectlyuseasingleblockofitasthevelocityrefineraswedo
+forSiT[24]. Instead,wesimplyreducethenumberofchannelsineachblockfrom[320,640,1280,
+1280]to[160,160,320,320]andreducethenumberoflayersineachblockfrom2to1. Wealso
+doubletheinputchannelfrom4to8totakethepreviousvelocityasinput. Theresultingvelocity
+refineronlycontains43.5Mparameters,about5%oftheoriginalU-Net(860M).Weuseasubset
+of LAION [34]3 containing only 50K images to train our velocity model. We use AdamW [21]
+optimizerwithalearningrateof2e-5andweightdecayof0.0. Weadoptabatchsizeof16andset
+thewarming-upstepsas100. Wealsouseagradientclippingof0.01tostabilizetraining. Wetrain
+ourmodelonasingleA800GPUfor10Kiterations,whichtakesabout5.5hours.
+Implementationofextensiontasks. WehavedemonstratedourFlowTurboisalsosuitablefor
+extensiontasksduetothemulti-stepnatureofourframeworkinSection4.4.Forimageinpainting,we
+adopttheinpaintingpipelineindiffusionmodels4,wherewemergethenoiselatentandthegenerated
+latentataspecifictimestepbytheinputmask. Forobjectremoval,wefirstuseaGrounded-SAM5
+togeneratethemaskandperformsimilarimageinpaintingpipeline. Forimageediting,weadopt
+theSDEdit[25]whichfirstaddsnoisetotheoriginalimageanduseitasanintermediateresultto
+continuethesampling.
+D MoreAnalysis
+Inthissection,weprovidemoreanalysisthroughbothquantitativeresultsandqualitativeresults.
+2License:Custom(research,non-commercial)
+3License:CreativeCommonCC-BY4.0
+4https://huggingface.co/docs/diffusers/en/using-diffusers/inpaint
+5https://github.com/IDEA-Research/Grounded-Segment-Anything
+17Table5: Comparisonswithstate-of-the-artmethodsontext-to-imagegeneration. Wecompare
+ourFlowTurbowithstate-of-the-artdiffusionmodels(15stepsDPM-Solver++[23])andshowour
+FlowTurboenjoysfavorabletrade-offsbetweensamplingqualityandspeed.
+Method SampleConfig FLOPs(G) Latency(ms/img) FID↓
+SD2.1[30] 15stepsDPM++[23] 11427 286.0 33.03
+SDXL[29] 15stepsDPM++[23] 24266 427.2 29.46
+PixArt-α[4] 15stepsDPM++[23] 17523 366.8 37.96
+PixArt-σ[3] 15stepsDPM++[23] 17957 365.9 33.62
+FlowTurbo H P R 4030 104.8 28.60
+1 6 3
+FlowTurbo H P R 5386 137.0 27.60
+3 6 3
+D.1 MoreQuantitativeResults
+Ablationofthenumberofthevelocityrefiners. InTable4,weinvestigatehowtochoosethe
+numberofvelocityrefinerstogetabettersamplingquality. Weadopttwobasicconfigurationsof
+H R andH R ,andvarythenumberofvelocityrefinersfrom3to6. WefindthattheFIDwill
+7 10 5 10
+firstdecreaseandthenincreasewhenN becomeslarger,andthereexistsanoptimalN =5where
+R R
+we reach the lowest FID. These results indicate that we can always tune this hyper-parameter to
+expectabetterresult.
+More comparisons on text-to-image generation. In Table Table 5, we compare the sampling
+qualityandspeedofFLowTurbowithstate-of-the-artdiffusionmodelsontext-to-imagegeneration.
+Forallthediffusionmodels,weadopta15-stepDPM-Solver++[23]asthedefaultsampler. The
+FLOPsreportedalsotakethemulti-stepsamplingintoaccount. OurresultsshowthatourFlowTurbo
+canachievethelowestFIDandinferencelatency.
+D.2 MoreQualitativeResults
+TobetterillustratethesamplingqualityofourFlowTurbo,weprovidemorequalitativeresultson
+bothclass-conditionalimagegenerationandtext-to-imagegeneration.
+Class-conditional image generation. We use SiT-XL [24] as our flow-based model for class-
+conditional image generation. In Figure 5, we provide random samples from FlowTurbo of the
+sampleconfigH P R ,whichinferenceat100ms/img. Wealsodemonstratethesamplingquality
+8 9 5
+trade-offsinFigure6,wecomparethesamplingqualityoftwodifferentconfigurationsH P R (38
+1 5 3
+ms/img)andH P R (100ms/img). Wegeneratetheimagesfromthesameinitialnoiseforbetter
+8 9 5
+comparisons. OurresultdemonstratesthatourFlowTurbocanachievereal-timeimagegeneration,
+andthesamplingqualitycanbefurtherimprovedwithmorecomputationalbudgets.
+Text-to-imagegeneration. WeadoptLumina-Next-T2I[9]toachievetext-to-imagegeneration.
+WecomparethesamplingqualityandspeedofHeun’smethodandourFlowTurboinFigure7. We
+findthatFlowTurbocanconsistentlygenerateimageswithbetterqualityandmorevisualdetails,
+whilerequiringlessinferencetime.
+E Code
+OurcodeisimplementedinPyTorch6. Weusethecodebaseof[24]toconductexperiments. The
+codeisavailableathttps://github.com/shiml20/FlowTurbo.
+6https://pytorch.org
+18Figure 5: Random samples from FlowTurbo on ImageNet 256 × 256. We use a classifier-free
+guidancescaleof4.0andthesampleconfigofH P R (100ms/img)
+8 9 5
+19(a)SampleConfigH P R (38ms/img) (b)SampleConfigH P R (100ms/img)
+1 5 3 8 9 5
+Figure6: Uncurated256×256samplesfromFlowTurbo(CFG=4.0). Forbettervisualization. We
+comparetwosampleconfigurations(H P R andH P R ). Thesameinitialnoiseisusedforboth
+1 5 3 8 9 5
+sampleconfigurationsforbettercomparisons.
+20A rough linen knightess, wielding dual axes resembling two moons A cute kitten wearing a witch's robe and hat, holding a magic book
+Underwater landscape with colorful mechanical parts, cable, wires Inside the glass sphere, Pirate Ship in a storm with waves in the dark
+A beautiful girl flying through a paradox with piercing eyes A legendary fruit castle in a fruit kingdom
+A single brown bird perched on a mossy branch Digital watercolor of a summer scape sunset, with flowery pastel colors
+A beautiful panorama from inside a camper with beautiful beach and cliffs The moon, a silver boat, sails through the sea of stars
+A tree house on a beautiful beach surrounded by mountains and waterfalls A sailboat in the ocean with a moon in the sky
+Figure7: MorevisualcomparisonsbetweenHeun’smethod(2.6s/img,left)andourFlowTurbo
+(1.8s/img,right).
+21

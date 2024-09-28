@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17146v1 |
-|title| Molmo and PixMo: Open Weights and Open Data for State-of-the-Art Multimodal Models |
-|authors| Matt DeitkeChristopher ClarkSangho LeeRohun TripathiYue YangJae Sung ParkMohammadreza SalehiNiklas MuennighoffKyle LoLuca SoldainiJiasen LuTaira AndersonErin BransomKiana EhsaniHuong NgoYenSung ChenAjay PatelMark YatskarChris Callison-BurchAndrew HeadRose HendrixFavyen BastaniEli VanderBiltNathan LambertYvonne ChouArnavi ChhedaJenna SparksSam SkjonsbergMichael SchmitzAaron SarnatByron BischoffPete WalshChris NewellPiper WoltersTanmay GuptaKuo-Hao ZengJon BorchardtDirk GroeneveldJen DumasCrystal NamSophie LebrechtCaitlin WittlifCarissa SchoenickOscar MichelRanjay KrishnaLuca WeihsNoah A. SmithHannaneh HajishirziRoss GirshickAli FarhadiAniruddha Kembhavi
-|links| http://arxiv.org/abs/2409.17146v1 |
-|updated| 2024-09-25 17:59:51 UTC |
-|summary| Todays most advanced multimodal models remain proprietary. The strongestopen-weight models rely heavily on synthetic data from proprietary VLMs toachieve good performance effectively distilling these closed models into openones. As a result the community is still missing foundational knowledge abouthow to build performant VLMs from scratch. We present Molmo a new family ofVLMs that are state-of-the-art in their class of openness. Our key innovationis a novel highly detailed image caption dataset collected entirely from humanannotators using speech-based descriptions. To enable a wide array of userinteractions we also introduce a diverse dataset mixture for fine-tuning thatincludes in-the-wild QA and innovative 2D pointing data. The success of ourapproach relies on careful choices for the model architecture details awell-tuned training pipeline and most critically the quality of our newlycollected datasets all of which will be released. The best-in-class 72B modelwithin the Molmo family not only outperforms others in the class of open weightand data models but also compares favorably against proprietary systems likeGPT-4o Claude 3.5 and Gemini 1.5 on both academic benchmarks and humanevaluation.  We will be releasing all of our model weights captioning and fine-tuningdata and source code in the near future. Select model weights inference codeand demo are available at https://molmo.allenai.org. |
+|idx| 2409.18110v1 |
+|title| Open-World Evaluation for Retrieving Diverse Perspectives |
+|authors| Hung-Ting ChenEunsol Choi
+|links| http://arxiv.org/abs/2409.18110v1 |
+|updated| 2024-09-26 17:52:57 UTC |
+|summary| We study retrieving a set of documents that covers various perspectives on acomplex and contentious question e.g. will ChatGPT do more harm than good.We curate a Benchmark for Retrieval Diversity for Subjective questions BERDSwhere each example consists of a question and diverse perspectives associatedwith the question sourced from survey questions and debate websites. On thisdata retrievers paired with a corpus are evaluated to surface a document setthat contains diverse perspectives. Our framing diverges from most retrievaltasks in that document relevancy cannot be decided by simple string matches toreferences. Instead we build a language model based automatic evaluator thatdecides whether each retrieved document contains a perspective. This allows usto evaluate the performance of three different types of corpus Wikipedia websnapshot and corpus constructed on the fly with retrieved pages from thesearch engine paired with retrievers. Retrieving diverse documents remainschallenging with the outputs from existing retrievers covering allperspectives on only 33.74 of the examples. We further study the impact ofquery expansion and diversity-focused reranking approaches and analyzeretriever sycophancy. Together we lay the foundation for future studies inretrieval diversity handling complex queries. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17141v1 |
-|title| FineZip : Pushing the Limits of Large Language Models for Practical Lossless Text Compression |
-|authors| Fazal MittuYihuan BuAkshat GuptaAshok DevireddyAlp Eren OzdarendeliAnant SinghGopala Anumanchipalli
-|links| http://arxiv.org/abs/2409.17141v1 |
-|updated| 2024-09-25 17:58:35 UTC |
-|summary| While the language modeling objective has been shown to be deeply connectedwith compression it is surprising that modern LLMs are not employed inpractical text compression systems. In this paper we provide an in-depthanalysis of neural network and transformer-based compression techniques toanswer this question. We compare traditional text compression systems withneural network and LLM-based text compression methods. Although LLM-basedsystems significantly outperform conventional compression methods they arehighly impractical. Specifically LLMZip a recent text compression systemusing Llama3-8B requires 9.5 days to compress just 10 MB of text although withhuge improvements in compression ratios. To overcome this we present FineZip -a novel LLM-based text compression system that combines ideas of onlinememorization and dynamic context to reduce the compression time immensely.FineZip can compress the above corpus in approximately 4 hours compared to 9.5days a 54 times improvement over LLMZip and comparable performance. FineZipoutperforms traditional algorithmic compression methods with a large marginimproving compression ratios by approximately 50. With this work we take thefirst step towards making lossless text compression with LLMs a reality. WhileFineZip presents a significant step in that direction LLMs are still not aviable solution for large-scale text compression. We hope our work paves theway for future research and innovation to solve this problem. |
+|idx| 2409.18073v1 |
+|title| Infer Human's Intentions Before Following Natural Language Instructions |
+|authors| Yanming WanYue WuYiping WangJiayuan MaoNatasha Jaques
+|links| http://arxiv.org/abs/2409.18073v1 |
+|updated| 2024-09-26 17:19:49 UTC |
+|summary| For AI agents to be helpful to humans they should be able to follow naturallanguage instructions to complete everyday cooperative tasks in humanenvironments. However real human instructions inherently possess ambiguitybecause the human speakers assume sufficient prior knowledge about their hiddengoals and intentions. Standard language grounding and planning methods fail toaddress such ambiguities because they do not model human internal goals asadditional partially observable factors in the environment. We propose a newframework Follow Instructions with Social and Embodied Reasoning FISERaiming for better natural language instruction following in collaborativeembodied tasks. Our framework makes explicit inferences about human goals andintentions as intermediate reasoning steps. We implement a set ofTransformer-based models and evaluate them over a challenging benchmarkHandMeThat. We empirically demonstrate that using social reasoning toexplicitly infer human intentions before making action plans surpasses purelyend-to-end approaches. We also compare our implementation with strongbaselines including Chain of Thought prompting on the largest availablepre-trained language models and find that FISER provides better performance onthe embodied social reasoning tasks under investigation reaching thestate-of-the-art on HandMeThat. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17130v1 |
-|title| Assessing the Level of Toxicity Against Distinct Groups in Bangla Social Media Comments: A Comprehensive Investigation |
-|authors| Mukaffi Bin MoinPronay DebnathUsafa Akther RifaRijeet Bin Anis
-|links| http://arxiv.org/abs/2409.17130v1 |
-|updated| 2024-09-25 17:48:59 UTC |
-|summary| Social media platforms have a vital role in the modern world serving asconduits for communication the exchange of ideas and the establishment ofnetworks. However the misuse of these platforms through toxic comments whichcan range from offensive remarks to hate speech is a concerning issue. Thisstudy focuses on identifying toxic comments in the Bengali language targetingthree specific groups: transgender people indigenous people and migrantpeople from multiple social media sources. The study delves into the intricateprocess of identifying and categorizing toxic language while considering thevarying degrees of toxicity: high medium and low. The methodology involvescreating a dataset manual annotation and employing pre-trained transformermodels like Bangla-BERT bangla-bert-base distil-BERT andBert-base-multilingual-cased for classification. Diverse assessment metricssuch as accuracy recall precision and F1-score are employed to evaluate themodels effectiveness. The experimental findings reveal that Bangla-BERTsurpasses alternative models achieving an F1-score of 0.8903. This researchexposes the complexity of toxicity in Bangla social media dialogues revealingits differing impacts on diverse demographic groups. |
+|idx| 2409.18046v1 |
+|title| IFCap: Image-like Retrieval and Frequency-based Entity Filtering for Zero-shot Captioning |
+|authors| Soeun LeeSi-Woo KimTaewhan KimDong-Jin Kim
+|links| http://arxiv.org/abs/2409.18046v1 |
+|updated| 2024-09-26 16:47:32 UTC |
+|summary| Recent advancements in image captioning have explored text-only trainingmethods to overcome the limitations of paired image-text data. Howeverexisting text-only training methods often overlook the modality gap betweenusing text data during training and employing images during inference. Toaddress this issue we propose a novel approach called Image-like Retrievalwhich aligns text features with visually relevant features to mitigate themodality gap. Our method further enhances the accuracy of generated captions bydesigning a Fusion Module that integrates retrieved captions with inputfeatures. Additionally we introduce a Frequency-based Entity Filteringtechnique that significantly improves caption quality. We integrate thesemethods into a unified framework which we refer to as IFCaptextbfImage-like Retrieval and textbfFrequency-based EntityFiltering for Zero-shot textbfCaptioning. Through extensiveexperimentation our straightforward yet powerful approach has demonstrated itsefficacy outperforming the state-of-the-art methods by a significant margin inboth image captioning and video captioning compared to zero-shot captioningbased on text-only training. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17120v1 |
-|title| Deep Learning and Machine Learning, Advancing Big Data Analytics and Management: Handy Appetizer |
-|authors| Benji PengXuanhe PanYizhu WenZiqian BiKeyu ChenMing LiMing LiuQian NiuJunyu LiuJinlang WangSen ZhangJiawei XuPohsun Feng
-|links| http://arxiv.org/abs/2409.17120v1 |
-|updated| 2024-09-25 17:31:45 UTC |
-|summary| This book explores the role of Artificial Intelligence AI Machine LearningML and Deep Learning DL in driving the progress of big data analytics andmanagement. The book focuses on simplifying the complex mathematical conceptsbehind deep learning offering intuitive visualizations and practical casestudies to help readers understand how neural networks and technologies likeConvolutional Neural Networks CNNs work. It introduces several classic modelsand technologies such as Transformers GPT ResNet BERT and YOLOhighlighting their applications in fields like natural language processingimage recognition and autonomous driving. The book also emphasizes theimportance of pre-trained models and how they can enhance model performance andaccuracy with instructions on how to apply these models in various real-worldscenarios. Additionally it provides an overview of key big data managementtechnologies like SQL and NoSQL databases as well as distributed computingframeworks such as Apache Hadoop and Spark explaining their importance inmanaging and processing vast amounts of data. Ultimately the book underscoresthe value of mastering deep learning and big data management skills as criticaltools for the future workforce making it an essential resource for bothbeginners and experienced professionals. |
+|idx| 2409.18044v1 |
+|title| Unveiling the Role of Pretraining in Direct Speech Translation |
+|authors| Belen AlastrueyGerard I. GállegoMarta R. Costa-jussà
+|links| http://arxiv.org/abs/2409.18044v1 |
+|updated| 2024-09-26 16:46:46 UTC |
+|summary| Direct speech-to-text translation systems encounter an important drawback indata scarcity. A common solution consists on pretraining the encoder onautomatic speech recognition hence losing efficiency in the training process.In this study we compare the training dynamics of a system using a pretrainedencoder the conventional approach and one trained from scratch. We observethat throughout the training the randomly initialized model struggles toincorporate information from the speech inputs for its predictions. Hence wehypothesize that this issue stems from the difficulty of effectively trainingan encoder for direct speech translation. While a model trained from scratchneeds to learn acoustic and semantic modeling simultaneously a pretrained onecan just focus on the latter. Based on these findings we propose a subtlechange in the decoder cross-attention to integrate source information fromearlier steps in training. We show that with this change the model trainedfrom scratch can achieve comparable performance to the pretrained one whilereducing the training time. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17115v1 |
-|title| Programming Every Example: Lifting Pre-training Data Quality like Experts at Scale |
-|authors| Fan ZhouZengzhi WangQian LiuJunlong LiPengfei Liu
-|links| http://arxiv.org/abs/2409.17115v1 |
-|updated| 2024-09-25 17:28:13 UTC |
-|summary| Large language model pre-training has traditionally relied on human expertsto craft heuristics for improving the corpora quality resulting in numerousrules developed to date. However these rules lack the flexibility to addressthe unique characteristics of individual example effectively. Meanwhileapplying tailored rules to every example is impractical for human experts. Inthis paper we demonstrate that even small language models with as few as 0.3Bparameters can exhibit substantial data refining capabilities comparable tothose of human experts. We introduce Programming Every Example ProX a novelframework that treats data refinement as a programming task enabling models torefine corpora by generating and executing fine-grained operations such asstring normalization for each individual example at scale. Experimentalresults show that models pre-trained on ProX-curated data outperform eitheroriginal data or data filtered by other selection methods by more than 2across various downstream benchmarks. Its effectiveness spans various modelsizes and pre-training corpora including C4 RedPajama-V2 and FineWeb.Furthermore ProX exhibits significant potential in domain-specific continualpre-training: without domain specific design models trained on OpenWebMathrefined by ProX outperform human-crafted rule-based methods improving averageaccuracy by 7.6 over Mistral-7B with 14.6 for Llama-2-7B and 20.3 forCodeLlama-7B all within 10B tokens to be comparable to models like Llemma-7Btrained on 200B tokens. Further analysis highlights that ProX significantlysaves training FLOPs offering a promising path for efficient LLMpre-training.We are open-sourcing ProX with 100B corpus models and sharingall training and implementation details for reproducible research and futureinnovation. Code: https://github.com/GAIR-NLP/ProX |
+|idx| 2409.18042v1 |
+|title| EMOVA: Empowering Language Models to See, Hear and Speak with Vivid Emotions |
+|authors| Kai ChenYunhao GouRunhui HuangZhili LiuDaxin TanJing XuChunwei WangYi ZhuYihan ZengKuo YangDingdong WangKun XiangHaoyuan LiHaoli BaiJianhua HanXiaohui LiWeike JinNian XieYu ZhangJames T. KwokHengshuang ZhaoXiaodan LiangDit-Yan YeungXiao ChenZhenguo LiWei ZhangQun LiuLanqing HongLu HouHang Xu
+|links| http://arxiv.org/abs/2409.18042v1 |
+|updated| 2024-09-26 16:44:02 UTC |
+|summary| GPT-4o an omni-modal model that enables vocal conversations with diverseemotions and tones marks a milestone for omni-modal foundation models.However empowering Large Language Models to perceive and generate imagestexts and speeches end-to-end with publicly available data remains challengingin the open-source community. Existing vision-language models rely on externaltools for the speech processing while speech-language models still suffer fromlimited or even without vision-understanding abilities. To address this gap wepropose EMOVA EMotionally Omni-present Voice Assistant to enable LargeLanguage Models with end-to-end speech capabilities while maintaining theleading vision-language performance. With a semantic-acoustic disentangledspeech tokenizer we notice surprisingly that omni-modal alignment can furtherenhance vision-language and speech abilities compared with the correspondingbi-modal aligned counterparts. Moreover a lightweight style module is proposedfor flexible speech style controls e.g. emotions and pitches. For the firsttime EMOVA achieves state-of-the-art performance on both the vision-languageand speech benchmarks and meanwhile supporting omni-modal spoken dialoguewith vivid emotions. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17144v1 |
-|title| Differential Privacy Regularization: Protecting Training Data Through Loss Function Regularization |
-|authors| Francisco Aguilera-MartínezFernando Berzal
-|links| http://arxiv.org/abs/2409.17144v1 |
-|updated| 2024-09-25 17:59:32 UTC |
-|summary| Training machine learning models based on neural networks requires largedatasets which may contain sensitive information. The models however shouldnot expose private information from these datasets. Differentially private SGDDP-SGD requires the modification of the standard stochastic gradient descentSGD algorithm for training new models. In this short paper a novelregularization strategy is proposed to achieve the same goal in a moreefficient manner. |
+|idx| 2409.18119v1 |
+|title| Multi-View and Multi-Scale Alignment for Contrastive Language-Image Pre-training in Mammography |
+|authors| Yuexi DuJohn OnofreyNicha C. Dvornek
+|links| http://arxiv.org/abs/2409.18119v1 |
+|updated| 2024-09-26 17:56:59 UTC |
+|summary| Contrastive Language-Image Pre-training CLIP shows promise in medical imageanalysis but requires substantial data and computational resources. Due tothese restrictions existing CLIP applications in medical imaging focus mainlyon modalities like chest X-rays that have abundant image-report data availableleaving many other important modalities under-explored. Here we propose thefirst adaptation of the full CLIP model to mammography which presentssignificant challenges due to labeled data scarcity high-resolution imageswith small regions of interest and data imbalance. We first develop aspecialized supervision framework for mammography that leverages its multi-viewnature. Furthermore we design a symmetric local alignment module to betterfocus on detailed features in high-resolution images. Lastly we incorporate aparameter-efficient fine-tuning approach for large language models pre-trainedwith medical knowledge to address data limitations. Our multi-view andmulti-scale alignment MaMA method outperforms state-of-the-art baselines forthree different tasks on two large real-world mammography datasets EMBED andRSNA-Mammo with only 52 model size compared with the largest baseline. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17143v1 |
-|title| Attention Prompting on Image for Large Vision-Language Models |
-|authors| Runpeng YuWeihao YuXinchao Wang
-|links| http://arxiv.org/abs/2409.17143v1 |
-|updated| 2024-09-25 17:59:13 UTC |
-|summary| Compared with Large Language Models LLMs Large Vision-Language ModelsLVLMs can also accept images as input thus showcasing more interestingemergent capabilities and demonstrating impressive performance on variousvision-language tasks. Motivated by text prompting in LLMs visual promptinghas been explored to enhance LVLMs capabilities of perceiving visualinformation. However previous visual prompting techniques solely processvisual inputs without considering text queries limiting the models ability tofollow text instructions to complete tasks. To fill this gap in this work wepropose a new prompting technique named Attention Prompting on Image whichjust simply overlays a text-query-guided attention heatmap on the originalinput image and effectively enhances LVLM on various tasks. Specifically wegenerate an attention heatmap for the input image dependent on the text querywith an auxiliary model like CLIP. Then the heatmap simply multiplies the pixelvalues of the original image to obtain the actual input image for the LVLM.Extensive experiments on various vison-language benchmarks verify theeffectiveness of our technique. For example Attention Prompting on Imageimproves LLaVA-1.5 by 3.8 and 2.9 on MM-Vet and LLaVA-Wild benchmarksrespectively. |
+|idx| 2409.18104v1 |
+|title| Find Rhinos without Finding Rhinos: Active Learning with Multimodal Imagery of South African Rhino Habitats |
+|authors| Lucia GordonNikhil BehariSamuel CollierElizabeth Bondi-KellyJackson A. KillianCatherine RessijacPeter BoucherAndrew DaviesMilind Tambe
+|links| http://dx.doi.org/10.24963/ijcai.2023/663 |
+|updated| 2024-09-26 17:49:20 UTC |
+|summary| Much of Earths charismatic megafauna is endangered by human activitiesparticularly the rhino which is at risk of extinction due to the poachingcrisis in Africa. Monitoring rhinos movement is crucial to their protectionbut has unfortunately proven difficult because rhinos are elusive. Thereforeinstead of tracking rhinos we propose the novel approach of mapping communaldefecation sites called middens which give information about rhinos spatialbehavior valuable to anti-poaching management and reintroduction efforts.This paper provides the first-ever mapping of rhino midden locations bybuilding classifiers to detect them using remotely sensed thermal RGB andLiDAR imagery in passive and active learning settings. As existing activelearning methods perform poorly due to the extreme class imbalance in ourdataset we design MultimodAL an active learning system employing a rankingtechnique and multimodality to achieve competitive performance with passivelearning models with 94 fewer labels. Our methods could therefore save over 76hours in labeling time when used on a similarly-sized dataset. Unexpectedlyour midden map reveals that rhino middens are not randomly distributedthroughout the landscape rather they are clustered. Consequently rangersshould be targeted at areas with high midden densities to strengthenanti-poaching efforts in line with UN Target 15.7. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17141v1 |
-|title| FineZip : Pushing the Limits of Large Language Models for Practical Lossless Text Compression |
-|authors| Fazal MittuYihuan BuAkshat GuptaAshok DevireddyAlp Eren OzdarendeliAnant SinghGopala Anumanchipalli
-|links| http://arxiv.org/abs/2409.17141v1 |
-|updated| 2024-09-25 17:58:35 UTC |
-|summary| While the language modeling objective has been shown to be deeply connectedwith compression it is surprising that modern LLMs are not employed inpractical text compression systems. In this paper we provide an in-depthanalysis of neural network and transformer-based compression techniques toanswer this question. We compare traditional text compression systems withneural network and LLM-based text compression methods. Although LLM-basedsystems significantly outperform conventional compression methods they arehighly impractical. Specifically LLMZip a recent text compression systemusing Llama3-8B requires 9.5 days to compress just 10 MB of text although withhuge improvements in compression ratios. To overcome this we present FineZip -a novel LLM-based text compression system that combines ideas of onlinememorization and dynamic context to reduce the compression time immensely.FineZip can compress the above corpus in approximately 4 hours compared to 9.5days a 54 times improvement over LLMZip and comparable performance. FineZipoutperforms traditional algorithmic compression methods with a large marginimproving compression ratios by approximately 50. With this work we take thefirst step towards making lossless text compression with LLMs a reality. WhileFineZip presents a significant step in that direction LLMs are still not aviable solution for large-scale text compression. We hope our work paves theway for future research and innovation to solve this problem. |
+|idx| 2409.18101v1 |
+|title| AI-Powered Augmented Reality for Satellite Assembly, Integration and Test |
+|authors| Alvaro PatricioJoao ValenteAtabak DehbanInes CadilhaDaniel ReisRodrigo Ventura
+|links| http://arxiv.org/abs/2409.18101v1 |
+|updated| 2024-09-26 17:44:52 UTC |
+|summary| The integration of Artificial Intelligence AI and Augmented Reality AR isset to transform satellite Assembly Integration and Testing AIT processesby enhancing precision minimizing human error and improving operationalefficiency in cleanroom environments. This paper presents a technicaldescription of the European Space Agencys ESA project AI for AR inSatellite AIT which combines real-time computer vision and AR systems toassist technicians during satellite assembly. Leveraging Microsoft HoloLens 2as the AR interface the system delivers context-aware instructions andreal-time feedback tackling the complexities of object recognition and 6D poseestimation in AIT workflows. All AI models demonstrated over 70 accuracy withthe detection model exceeding 95 accuracy indicating a high level ofperformance and reliability. A key contribution of this work lies in theeffective use of synthetic data for training AI models in AR applicationsaddressing the significant challenges of obtaining real-world datasets inhighly dynamic satellite environments as well as the creation of the SegmentedAnything Model for Automatic Labelling SAMAL which facilitates the automaticannotation of real data achieving speeds up to 20 times faster than manualhuman annotation. The findings demonstrate the efficacy of AI-driven AR systemsin automating critical satellite assembly tasks setting a foundation forfuture innovations in the space industry. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17140v1 |
-|title| Turn Every Application into an Agent: Towards Efficient Human-Agent-Computer Interaction with API-First LLM-Based Agents |
-|authors| Junting LuZhiyang ZhangFangkai YangJue ZhangLu WangChao DuQingwei LinSaravan RajmohanDongmei ZhangQi Zhang
-|links| http://arxiv.org/abs/2409.17140v1 |
-|updated| 2024-09-25 17:58:08 UTC |
-|summary| Multimodal large language models MLLMs have enabled LLM-based agents todirectly interact with application user interfaces UIs enhancing agentsperformance in complex tasks. However these agents often suffer from highlatency and low reliability due to the extensive sequential UI interactions. Toaddress this issue we propose AXIS a novel LLM-based agents frameworkprioritize actions through application programming interfaces APIs over UIactions. This framework also facilitates the creation and expansion of APIsthrough automated exploration of applications. Our experiments on Office Worddemonstrate that AXIS reduces task completion time by 65-70 and cognitiveworkload by 38-53 while maintaining accuracy of 97-98 compare to humans.Our work contributes to a new human-agent-computer interaction HACI frameworkand a fresh UI design principle for application providers in the era of LLMs.It also explores the possibility of turning every applications into agentspaving the way towards an agent-centric operating system Agent OS. |
+|idx| 2409.18099v1 |
+|title| EfficientCrackNet: A Lightweight Model for Crack Segmentation |
+|authors| Abid Hasan ZimAquib IqbalZaid Al-HudaAsad MalikMinoru Kuribayash
+|links| http://arxiv.org/abs/2409.18099v1 |
+|updated| 2024-09-26 17:44:20 UTC |
+|summary| Crack detection particularly from pavement images presents a formidablechallenge in the domain of computer vision due to several inherent complexitiessuch as intensity inhomogeneity intricate topologies low contrast and noisybackgrounds. Automated crack detection is crucial for maintaining thestructural integrity of essential infrastructures including buildingspavements and bridges. Existing lightweight methods often face challengesincluding computational inefficiency complex crack patterns and difficultbackgrounds leading to inaccurate detection and impracticality for real-worldapplications. To address these limitations we propose EfficientCrackNet alightweight hybrid model combining Convolutional Neural Networks CNNs andtransformers for precise crack segmentation. EfficientCrackNet integratesdepthwise separable convolutions DSC layers and MobileViT block to captureboth global and local features. The model employs an Edge Extraction MethodEEM and for efficient crack edge detection without pretraining andUltra-Lightweight Subspace Attention Module ULSAM to enhance featureextraction. Extensive experiments on three benchmark datasets Crack500DeepCrack and GAPs384 demonstrate that EfficientCrackNet achieves superiorperformance compared to existing lightweight models while requiring only 0.26Mparameters and 0.483 FLOPs G. The proposed model offers an optimal balancebetween accuracy and computational efficiency outperforming state-of-the-artlightweight models and providing a robust and adaptable solution forreal-world crack segmentation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17126v1 |
-|title| Blox-Net: Generative Design-for-Robot-Assembly Using VLM Supervision, Physics Simulation, and a Robot with Reset |
-|authors| Andrew GoldbergKavish KondapTianshuang QiuZehan MaLetian FuJustin KerrHuang HuangKaiyuan ChenKuan FangKen Goldberg
-|links| http://arxiv.org/abs/2409.17126v1 |
-|updated| 2024-09-25 17:42:20 UTC |
-|summary| Generative AI systems have shown impressive capabilities in creating textcode and images. Inspired by the rich history of research in industrialDesign for Assembly we introduce a novel problem: GenerativeDesign-for-Robot-Assembly GDfRA. The task is to generate an assembly based ona natural language prompt e.g. giraffe and an image of availablephysical components such as 3D-printed blocks. The output is an assembly aspatial arrangement of these components and instructions for a robot to buildthis assembly. The output must 1 resemble the requested object and 2 bereliably assembled by a 6 DoF robot arm with a suction gripper. We then presentBlox-Net a GDfRA system that combines generative vision language models withwell-established methods in computer vision simulation perturbation analysismotion planning and physical robot experimentation to solve a class of GDfRAproblems with minimal human supervision. Blox-Net achieved a Top-1 accuracy of63.5 in the recognizability of its designed assemblies eg resemblinggiraffe as judged by a VLM. These designs after automated perturbationredesign were reliably assembled by a robot achieving near-perfect successacross 10 consecutive assembly iterations with human intervention only duringreset prior to assembly. Surprisingly this entire design process from textualword giraffe to reliable physical assembly is performed with zero humanintervention. |
+|idx| 2409.18092v1 |
+|title| DiffSSC: Semantic LiDAR Scan Completion using Denoising Diffusion Probabilistic Models |
+|authors| Helin CaoSven Behnke
+|links| http://arxiv.org/abs/2409.18092v1 |
+|updated| 2024-09-26 17:39:05 UTC |
+|summary| Perception systems play a crucial role in autonomous driving incorporatingmultiple sensors and corresponding computer vision algorithms. 3D LiDAR sensorsare widely used to capture sparse point clouds of the vehicles surroundings.However such systems struggle to perceive occluded areas and gaps in the scenedue to the sparsity of these point clouds and their lack of semantics. Toaddress these challenges Semantic Scene Completion SSC jointly predictsunobserved geometry and semantics in the scene given raw LiDAR measurementsaiming for a more complete scene representation. Building on promising resultsof diffusion models in image generation and super-resolution tasks we proposetheir extension to SSC by implementing the noising and denoising diffusionprocesses in the point and semantic spaces individually. To control thegeneration we employ semantic LiDAR point clouds as conditional input anddesign local and global regularization losses to stabilize the denoisingprocess. We evaluate our approach on autonomous driving datasets and ourapproach outperforms the state-of-the-art for SSC. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17146v1 |
-|title| Molmo and PixMo: Open Weights and Open Data for State-of-the-Art Multimodal Models |
-|authors| Matt DeitkeChristopher ClarkSangho LeeRohun TripathiYue YangJae Sung ParkMohammadreza SalehiNiklas MuennighoffKyle LoLuca SoldainiJiasen LuTaira AndersonErin BransomKiana EhsaniHuong NgoYenSung ChenAjay PatelMark YatskarChris Callison-BurchAndrew HeadRose HendrixFavyen BastaniEli VanderBiltNathan LambertYvonne ChouArnavi ChhedaJenna SparksSam SkjonsbergMichael SchmitzAaron SarnatByron BischoffPete WalshChris NewellPiper WoltersTanmay GuptaKuo-Hao ZengJon BorchardtDirk GroeneveldJen DumasCrystal NamSophie LebrechtCaitlin WittlifCarissa SchoenickOscar MichelRanjay KrishnaLuca WeihsNoah A. SmithHannaneh HajishirziRoss GirshickAli FarhadiAniruddha Kembhavi
-|links| http://arxiv.org/abs/2409.17146v1 |
-|updated| 2024-09-25 17:59:51 UTC |
-|summary| Todays most advanced multimodal models remain proprietary. The strongestopen-weight models rely heavily on synthetic data from proprietary VLMs toachieve good performance effectively distilling these closed models into openones. As a result the community is still missing foundational knowledge abouthow to build performant VLMs from scratch. We present Molmo a new family ofVLMs that are state-of-the-art in their class of openness. Our key innovationis a novel highly detailed image caption dataset collected entirely from humanannotators using speech-based descriptions. To enable a wide array of userinteractions we also introduce a diverse dataset mixture for fine-tuning thatincludes in-the-wild QA and innovative 2D pointing data. The success of ourapproach relies on careful choices for the model architecture details awell-tuned training pipeline and most critically the quality of our newlycollected datasets all of which will be released. The best-in-class 72B modelwithin the Molmo family not only outperforms others in the class of open weightand data models but also compares favorably against proprietary systems likeGPT-4o Claude 3.5 and Gemini 1.5 on both academic benchmarks and humanevaluation.  We will be releasing all of our model weights captioning and fine-tuningdata and source code in the near future. Select model weights inference codeand demo are available at https://molmo.allenai.org. |
+|idx| 2409.18119v1 |
+|title| Multi-View and Multi-Scale Alignment for Contrastive Language-Image Pre-training in Mammography |
+|authors| Yuexi DuJohn OnofreyNicha C. Dvornek
+|links| http://arxiv.org/abs/2409.18119v1 |
+|updated| 2024-09-26 17:56:59 UTC |
+|summary| Contrastive Language-Image Pre-training CLIP shows promise in medical imageanalysis but requires substantial data and computational resources. Due tothese restrictions existing CLIP applications in medical imaging focus mainlyon modalities like chest X-rays that have abundant image-report data availableleaving many other important modalities under-explored. Here we propose thefirst adaptation of the full CLIP model to mammography which presentssignificant challenges due to labeled data scarcity high-resolution imageswith small regions of interest and data imbalance. We first develop aspecialized supervision framework for mammography that leverages its multi-viewnature. Furthermore we design a symmetric local alignment module to betterfocus on detailed features in high-resolution images. Lastly we incorporate aparameter-efficient fine-tuning approach for large language models pre-trainedwith medical knowledge to address data limitations. Our multi-view andmulti-scale alignment MaMA method outperforms state-of-the-art baselines forthree different tasks on two large real-world mammography datasets EMBED andRSNA-Mammo with only 52 model size compared with the largest baseline. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17145v1 |
-|title| DreamWaltz-G: Expressive 3D Gaussian Avatars from Skeleton-Guided 2D Diffusion |
-|authors| Yukun HuangJianan WangAiling ZengZheng-Jun ZhaLei ZhangXihui Liu
-|links| http://arxiv.org/abs/2409.17145v1 |
-|updated| 2024-09-25 17:59:45 UTC |
-|summary| Leveraging pretrained 2D diffusion models and score distillation samplingSDS recent methods have shown promising results for text-to-3D avatargeneration. However generating high-quality 3D avatars capable of expressiveanimation remains challenging. In this work we present DreamWaltz-G a novellearning framework for animatable 3D avatar generation from text. The core ofthis framework lies in Skeleton-guided Score Distillation and Hybrid 3DGaussian Avatar representation. Specifically the proposed skeleton-guidedscore distillation integrates skeleton controls from 3D human templates into 2Ddiffusion models enhancing the consistency of SDS supervision in terms of viewand human pose. This facilitates the generation of high-quality avatarsmitigating issues such as multiple faces extra limbs and blurring. Theproposed hybrid 3D Gaussian avatar representation builds on the efficient 3DGaussians combining neural implicit fields and parameterized 3D meshes toenable real-time rendering stable SDS optimization and expressive animation.Extensive experiments demonstrate that DreamWaltz-G is highly effective ingenerating and animating 3D avatars outperforming existing methods in bothvisual quality and animation expressiveness. Our framework further supportsdiverse applications including human video reenactment and multi-subject scenecomposition. |
+|idx| 2409.18104v1 |
+|title| Find Rhinos without Finding Rhinos: Active Learning with Multimodal Imagery of South African Rhino Habitats |
+|authors| Lucia GordonNikhil BehariSamuel CollierElizabeth Bondi-KellyJackson A. KillianCatherine RessijacPeter BoucherAndrew DaviesMilind Tambe
+|links| http://dx.doi.org/10.24963/ijcai.2023/663 |
+|updated| 2024-09-26 17:49:20 UTC |
+|summary| Much of Earths charismatic megafauna is endangered by human activitiesparticularly the rhino which is at risk of extinction due to the poachingcrisis in Africa. Monitoring rhinos movement is crucial to their protectionbut has unfortunately proven difficult because rhinos are elusive. Thereforeinstead of tracking rhinos we propose the novel approach of mapping communaldefecation sites called middens which give information about rhinos spatialbehavior valuable to anti-poaching management and reintroduction efforts.This paper provides the first-ever mapping of rhino midden locations bybuilding classifiers to detect them using remotely sensed thermal RGB andLiDAR imagery in passive and active learning settings. As existing activelearning methods perform poorly due to the extreme class imbalance in ourdataset we design MultimodAL an active learning system employing a rankingtechnique and multimodality to achieve competitive performance with passivelearning models with 94 fewer labels. Our methods could therefore save over 76hours in labeling time when used on a similarly-sized dataset. Unexpectedlyour midden map reveals that rhino middens are not randomly distributedthroughout the landscape rather they are clustered. Consequently rangersshould be targeted at areas with high midden densities to strengthenanti-poaching efforts in line with UN Target 15.7. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17144v1 |
-|title| Differential Privacy Regularization: Protecting Training Data Through Loss Function Regularization |
-|authors| Francisco Aguilera-MartínezFernando Berzal
-|links| http://arxiv.org/abs/2409.17144v1 |
-|updated| 2024-09-25 17:59:32 UTC |
-|summary| Training machine learning models based on neural networks requires largedatasets which may contain sensitive information. The models however shouldnot expose private information from these datasets. Differentially private SGDDP-SGD requires the modification of the standard stochastic gradient descentSGD algorithm for training new models. In this short paper a novelregularization strategy is proposed to achieve the same goal in a moreefficient manner. |
+|idx| 2409.18102v1 |
+|title| MALPOLON: A Framework for Deep Species Distribution Modeling |
+|authors| Theo LarcherLukas PicekBenjamin DeneuTitouan LorieulMaximilien ServajeanAlexis Joly
+|links| http://arxiv.org/abs/2409.18102v1 |
+|updated| 2024-09-26 17:45:10 UTC |
+|summary| This paper describes a deep-SDM framework MALPOLON. Written in Python andbuilt upon the PyTorch library this framework aims to facilitate training andinferences of deep species distribution models deep-SDM and sharing for userswith only general Python language skills e.g. modeling ecologists who areinterested in testing deep learning approaches to build new SDMs. More advancedusers can also benefit from the frameworks modularity to run more specificexperiments by overriding existing classes while taking advantage ofpress-button examples to train neural networks on multiple classification tasksusing custom or provided raw and pre-processed datasets. The framework isopen-sourced on GitHub and PyPi along with extensive documentation and examplesof use in various scenarios. MALPOLON offers straightforward installationYAML-based configuration parallel computing multi-GPU utilization baselineand foundational models for benchmarking and extensivetutorials/documentation aiming to enhance accessibility and performancescalability for ecologists and researchers. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17141v1 |
-|title| FineZip : Pushing the Limits of Large Language Models for Practical Lossless Text Compression |
-|authors| Fazal MittuYihuan BuAkshat GuptaAshok DevireddyAlp Eren OzdarendeliAnant SinghGopala Anumanchipalli
-|links| http://arxiv.org/abs/2409.17141v1 |
-|updated| 2024-09-25 17:58:35 UTC |
-|summary| While the language modeling objective has been shown to be deeply connectedwith compression it is surprising that modern LLMs are not employed inpractical text compression systems. In this paper we provide an in-depthanalysis of neural network and transformer-based compression techniques toanswer this question. We compare traditional text compression systems withneural network and LLM-based text compression methods. Although LLM-basedsystems significantly outperform conventional compression methods they arehighly impractical. Specifically LLMZip a recent text compression systemusing Llama3-8B requires 9.5 days to compress just 10 MB of text although withhuge improvements in compression ratios. To overcome this we present FineZip -a novel LLM-based text compression system that combines ideas of onlinememorization and dynamic context to reduce the compression time immensely.FineZip can compress the above corpus in approximately 4 hours compared to 9.5days a 54 times improvement over LLMZip and comparable performance. FineZipoutperforms traditional algorithmic compression methods with a large marginimproving compression ratios by approximately 50. With this work we take thefirst step towards making lossless text compression with LLMs a reality. WhileFineZip presents a significant step in that direction LLMs are still not aviable solution for large-scale text compression. We hope our work paves theway for future research and innovation to solve this problem. |
+|idx| 2409.18100v1 |
+|title| Self-supervised Pretraining for Cardiovascular Magnetic Resonance Cine Segmentation |
+|authors| Rob A. J. de MooijJosien P. W. PluimCian M. Scannell
+|links| http://arxiv.org/abs/2409.18100v1 |
+|updated| 2024-09-26 17:44:29 UTC |
+|summary| Self-supervised pretraining SSP has shown promising results in learningfrom large unlabeled datasets and thus could be useful for automatedcardiovascular magnetic resonance CMR short-axis cine segmentation. Howeverinconsistent reports of the benefits of SSP for segmentation have made itdifficult to apply SSP to CMR. Therefore this study aimed to evaluate SSPmethods for CMR cine segmentation.  To this end short-axis cine stacks of 296 subjects 90618 2D slices wereused for unlabeled pretraining with four SSP methods SimCLR positionalcontrastive learning DINO and masked image modeling MIM. Subsets of varyingnumbers of subjects were used for supervised fine-tuning of 2D models for eachSSP method as well as to train a 2D baseline model from scratch. Thefine-tuned models were compared to the baseline using the 3D Dice similaritycoefficient DSC in a test dataset of 140 subjects.  The SSP methods showed no performance gains with the largest supervisedfine-tuning subset compared to the baseline DSC  0.89. When only 10 subjects231 2D slices are available for supervised training SSP using MIM DSC 0.86 improves over training from scratch DSC  0.82.  This study found that SSP is valuable for CMR cine segmentation when labeledtraining data is scarce but does not aid state-of-the-art deep learningmethods when ample labeled data is available. Moreover the choice of SSPmethod is important. The code is publicly available at:https://github.com/q-cardIA/ssp-cmr-cine-segmentation |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17139v1 |
-|title| Learning with Dynamics: Autonomous Regulation of UAV Based Communication Networks with Dynamic UAV Crew |
-|authors| Ran ZhangBowei LiLiyuan ZhangJiangXieMiao Wang
-|links| http://arxiv.org/abs/2409.17139v1 |
-|updated| 2024-09-25 17:57:04 UTC |
-|summary| Unmanned Aerial Vehicle UAV based communication networks UCNs are a keycomponent in future mobile networking. To handle the dynamic environments inUCNs reinforcement learning RL has been a promising solution attributed toits strong capability of adaptive decision-making free of the environmentmodels. However most existing RL-based research focus on control strategydesign assuming a fixed set of UAVs. Few works have investigated how UCNsshould be adaptively regulated when the serving UAVs change dynamically. Thisarticle discusses RL-based strategy design for adaptive UCN regulation given adynamic UAV set addressing both reactive strategies in general UCNs andproactive strategies in solar-powered UCNs. An overview of the UCN and the RLframework is first provided. Potential research directions with key challengesand possible solutions are then elaborated. Some of our recent works arepresented as case studies to inspire innovative ways to handle dynamic UAV crewwith different RL algorithms. |
+|idx| 2409.18073v1 |
+|title| Infer Human's Intentions Before Following Natural Language Instructions |
+|authors| Yanming WanYue WuYiping WangJiayuan MaoNatasha Jaques
+|links| http://arxiv.org/abs/2409.18073v1 |
+|updated| 2024-09-26 17:19:49 UTC |
+|summary| For AI agents to be helpful to humans they should be able to follow naturallanguage instructions to complete everyday cooperative tasks in humanenvironments. However real human instructions inherently possess ambiguitybecause the human speakers assume sufficient prior knowledge about their hiddengoals and intentions. Standard language grounding and planning methods fail toaddress such ambiguities because they do not model human internal goals asadditional partially observable factors in the environment. We propose a newframework Follow Instructions with Social and Embodied Reasoning FISERaiming for better natural language instruction following in collaborativeembodied tasks. Our framework makes explicit inferences about human goals andintentions as intermediate reasoning steps. We implement a set ofTransformer-based models and evaluate them over a challenging benchmarkHandMeThat. We empirically demonstrate that using social reasoning toexplicitly infer human intentions before making action plans surpasses purelyend-to-end approaches. We also compare our implementation with strongbaselines including Chain of Thought prompting on the largest availablepre-trained language models and find that FISER provides better performance onthe embodied social reasoning tasks under investigation reaching thestate-of-the-art on HandMeThat. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17146v1 |
-|title| Molmo and PixMo: Open Weights and Open Data for State-of-the-Art Multimodal Models |
-|authors| Matt DeitkeChristopher ClarkSangho LeeRohun TripathiYue YangJae Sung ParkMohammadreza SalehiNiklas MuennighoffKyle LoLuca SoldainiJiasen LuTaira AndersonErin BransomKiana EhsaniHuong NgoYenSung ChenAjay PatelMark YatskarChris Callison-BurchAndrew HeadRose HendrixFavyen BastaniEli VanderBiltNathan LambertYvonne ChouArnavi ChhedaJenna SparksSam SkjonsbergMichael SchmitzAaron SarnatByron BischoffPete WalshChris NewellPiper WoltersTanmay GuptaKuo-Hao ZengJon BorchardtDirk GroeneveldJen DumasCrystal NamSophie LebrechtCaitlin WittlifCarissa SchoenickOscar MichelRanjay KrishnaLuca WeihsNoah A. SmithHannaneh HajishirziRoss GirshickAli FarhadiAniruddha Kembhavi
-|links| http://arxiv.org/abs/2409.17146v1 |
-|updated| 2024-09-25 17:59:51 UTC |
-|summary| Todays most advanced multimodal models remain proprietary. The strongestopen-weight models rely heavily on synthetic data from proprietary VLMs toachieve good performance effectively distilling these closed models into openones. As a result the community is still missing foundational knowledge abouthow to build performant VLMs from scratch. We present Molmo a new family ofVLMs that are state-of-the-art in their class of openness. Our key innovationis a novel highly detailed image caption dataset collected entirely from humanannotators using speech-based descriptions. To enable a wide array of userinteractions we also introduce a diverse dataset mixture for fine-tuning thatincludes in-the-wild QA and innovative 2D pointing data. The success of ourapproach relies on careful choices for the model architecture details awell-tuned training pipeline and most critically the quality of our newlycollected datasets all of which will be released. The best-in-class 72B modelwithin the Molmo family not only outperforms others in the class of open weightand data models but also compares favorably against proprietary systems likeGPT-4o Claude 3.5 and Gemini 1.5 on both academic benchmarks and humanevaluation.  We will be releasing all of our model weights captioning and fine-tuningdata and source code in the near future. Select model weights inference codeand demo are available at https://molmo.allenai.org. |
+|idx| 2409.18128v1 |
+|title| FlowTurbo: Towards Real-time Flow-Based Image Generation with Velocity Refiner |
+|authors| Wenliang ZhaoMinglei ShiXumin YuJie ZhouJiwen Lu
+|links| http://arxiv.org/abs/2409.18128v1 |
+|updated| 2024-09-26 17:59:51 UTC |
+|summary| Building on the success of diffusion models in visual generation flow-basedmodels reemerge as another prominent family of generative models that haveachieved competitive or better performance in terms of both visual quality andinference speed. By learning the velocity field through flow-matchingflow-based models tend to produce a straighter sampling trajectory which isadvantageous during the sampling process. However unlike diffusion models forwhich fast samplers are well-developed efficient sampling of flow-basedgenerative models has been rarely explored. In this paper we propose aframework called FlowTurbo to accelerate the sampling of flow-based modelswhile still enhancing the sampling quality. Our primary observation is that thevelocity predictors outputs in the flow-based models will become stable duringthe sampling enabling the estimation of velocity via a lightweight velocityrefiner. Additionally we introduce several techniques including a pseudocorrector and sample-aware compilation to further reduce inference time. SinceFlowTurbo does not change the multi-step sampling paradigm it can beeffectively applied for various tasks such as image editing inpainting etc.By integrating FlowTurbo into different flow-based models we obtain anacceleration ratio of 53.1sim58.3 on class-conditional generation and29.8sim38.5 on text-to-image generation. Notably FlowTurbo reaches an FIDof 2.12 on ImageNet with 100 ms / img and FID of 3.93 with 38 ms / imgachieving the real-time image generation and establishing the newstate-of-the-art. Code is available at https://github.com/shiml20/FlowTurbo. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17145v1 |
-|title| DreamWaltz-G: Expressive 3D Gaussian Avatars from Skeleton-Guided 2D Diffusion |
-|authors| Yukun HuangJianan WangAiling ZengZheng-Jun ZhaLei ZhangXihui Liu
-|links| http://arxiv.org/abs/2409.17145v1 |
-|updated| 2024-09-25 17:59:45 UTC |
-|summary| Leveraging pretrained 2D diffusion models and score distillation samplingSDS recent methods have shown promising results for text-to-3D avatargeneration. However generating high-quality 3D avatars capable of expressiveanimation remains challenging. In this work we present DreamWaltz-G a novellearning framework for animatable 3D avatar generation from text. The core ofthis framework lies in Skeleton-guided Score Distillation and Hybrid 3DGaussian Avatar representation. Specifically the proposed skeleton-guidedscore distillation integrates skeleton controls from 3D human templates into 2Ddiffusion models enhancing the consistency of SDS supervision in terms of viewand human pose. This facilitates the generation of high-quality avatarsmitigating issues such as multiple faces extra limbs and blurring. Theproposed hybrid 3D Gaussian avatar representation builds on the efficient 3DGaussians combining neural implicit fields and parameterized 3D meshes toenable real-time rendering stable SDS optimization and expressive animation.Extensive experiments demonstrate that DreamWaltz-G is highly effective ingenerating and animating 3D avatars outperforming existing methods in bothvisual quality and animation expressiveness. Our framework further supportsdiverse applications including human video reenactment and multi-subject scenecomposition. |
+|idx| 2409.18127v1 |
+|title| EgoLM: Multi-Modal Language Model of Egocentric Motions |
+|authors| Fangzhou HongVladimir GuzovHyo Jin KimYuting YeRichard NewcombeZiwei LiuLingni Ma
+|links| http://arxiv.org/abs/2409.18127v1 |
+|updated| 2024-09-26 17:59:31 UTC |
+|summary| As the prevalence of wearable devices learning egocentric motions becomesessential to develop contextual AI. In this work we present EgoLM a versatileframework that tracks and understands egocentric motions from multi-modalinputs e.g. egocentric videos and motion sensors. EgoLM exploits richcontexts for the disambiguation of egomotion tracking and understanding whichare ill-posed under single modality conditions. To facilitate the versatile andmulti-modal framework our key insight is to model the joint distribution ofegocentric motions and natural languages using large language models LLM.Multi-modal sensor inputs are encoded and projected to the joint latent spaceof language models and used to prompt motion generation or text generation foregomotion tracking or understanding respectively. Extensive experiments onlarge-scale multi-modal human motion dataset validate the effectiveness ofEgoLM as a generalist model for universal egocentric learning. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17143v1 |
-|title| Attention Prompting on Image for Large Vision-Language Models |
-|authors| Runpeng YuWeihao YuXinchao Wang
-|links| http://arxiv.org/abs/2409.17143v1 |
-|updated| 2024-09-25 17:59:13 UTC |
-|summary| Compared with Large Language Models LLMs Large Vision-Language ModelsLVLMs can also accept images as input thus showcasing more interestingemergent capabilities and demonstrating impressive performance on variousvision-language tasks. Motivated by text prompting in LLMs visual promptinghas been explored to enhance LVLMs capabilities of perceiving visualinformation. However previous visual prompting techniques solely processvisual inputs without considering text queries limiting the models ability tofollow text instructions to complete tasks. To fill this gap in this work wepropose a new prompting technique named Attention Prompting on Image whichjust simply overlays a text-query-guided attention heatmap on the originalinput image and effectively enhances LVLM on various tasks. Specifically wegenerate an attention heatmap for the input image dependent on the text querywith an auxiliary model like CLIP. Then the heatmap simply multiplies the pixelvalues of the original image to obtain the actual input image for the LVLM.Extensive experiments on various vison-language benchmarks verify theeffectiveness of our technique. For example Attention Prompting on Imageimproves LLaVA-1.5 by 3.8 and 2.9 on MM-Vet and LLaVA-Wild benchmarksrespectively. |
+|idx| 2409.18125v1 |
+|title| LLaVA-3D: A Simple yet Effective Pathway to Empowering LMMs with 3D-awareness |
+|authors| Chenming ZhuTai WangWenwei ZhangJiangmiao PangXihui Liu
+|links| http://arxiv.org/abs/2409.18125v1 |
+|updated| 2024-09-26 17:59:11 UTC |
+|summary| Recent advancements in Large Multimodal Models LMMs have greatly enhancedtheir proficiency in 2D visual understanding tasks enabling them toeffectively process and understand images and videos. However the developmentof LMMs with 3D-awareness for 3D scene understanding has been hindered by thelack of large-scale 3D vision-language datasets and powerful 3D encoders. Inthis paper we introduce a simple yet effective framework called LLaVA-3D.Leveraging the strong 2D understanding priors from LLaVA our LLaVA-3Defficiently adapts LLaVA for 3D scene understanding without compromising 2Dunderstanding capabilities. To achieve this we employ a simple yet effectiverepresentation 3D Patch which connects 2D CLIP patch features with theircorresponding positions in 3D space. By integrating the 3D Patches into 2D LMMsand employing joint 2D and 3D vision-language instruction tuning we establisha unified architecture for both 2D image understanding and 3D sceneunderstanding. Experimental results show that LLaVA-3D converges 3.5x fasterthan existing 3D LMMs when trained on 3D vision-language datasets. MoreoverLLaVA-3D not only achieves state-of-the-art performance across various 3D tasksbut also maintains comparable 2D image understanding and vision-languageconversation capabilities with LLaVA. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17137v1 |
-|title| PACE: marrying generalization in PArameter-efficient fine-tuning with Consistency rEgularization |
-|authors| Yao NiShan ZhangPiotr Koniusz
-|links| http://arxiv.org/abs/2409.17137v1 |
-|updated| 2024-09-25 17:56:00 UTC |
-|summary| Parameter-Efficient Fine-Tuning PEFT effectively adapts pre-trained visiontransformers to downstream tasks. However the optimization for tasksperformance often comes at the cost of generalizability in fine-tuned models.To address this issue we theoretically connect smaller weight gradient normsduring training and larger datasets to the improved model generalization.Motivated by this connection we propose reducing gradient norms for enhancedgeneralization and aligning fine-tuned model with the pre-trained counterpartto retain knowledge from large-scale pre-training data. Yet naive alignmentdoes not guarantee gradient reduction and can potentially cause gradientexplosion complicating efforts to manage gradients. To address such issues wepropose PACE marrying generalization of PArameter-efficient fine-tuning withConsistency rEgularization. We perturb features learned from the adapter withthe multiplicative noise and ensure the fine-tuned model remains consistent forsame sample under different perturbations. Theoretical analysis shows that PACEnot only implicitly regularizes gradients for enhanced generalization but alsoimplicitly aligns the fine-tuned and pre-trained models to retain knowledge.Experimental evidence supports our theories. PACE outperforms existing PEFTmethods in four visual adaptation tasks: VTAB-1k FGVC few-shot learning anddomain adaptation. Code will be available athttps://github.com/MaxwellYaoNi/PACE |
+|idx| 2409.18124v1 |
+|title| Lotus: Diffusion-based Visual Foundation Model for High-quality Dense Prediction |
+|authors| Jing HeHaodong LiWei YinYixun LiangLeheng LiKaiqiang ZhouHongbo LiuBingbing LiuYing-Cong Chen
+|links| http://arxiv.org/abs/2409.18124v1 |
+|updated| 2024-09-26 17:58:55 UTC |
+|summary| Leveraging the visual priors of pre-trained text-to-image diffusion modelsoffers a promising solution to enhance zero-shot generalization in denseprediction tasks. However existing methods often uncritically use the originaldiffusion formulation which may not be optimal due to the fundamentaldifferences between dense prediction and image generation. In this paper weprovide a systemic analysis of the diffusion formulation for the denseprediction focusing on both quality and efficiency. And we find that theoriginal parameterization type for image generation which learns to predictnoise is harmful for dense prediction the multi-step noising/denoisingdiffusion process is also unnecessary and challenging to optimize. Based onthese insights we introduce Lotus a diffusion-based visual foundation modelwith a simple yet effective adaptation protocol for dense prediction.Specifically Lotus is trained to directly predict annotations instead ofnoise thereby avoiding harmful variance. We also reformulate the diffusionprocess into a single-step procedure simplifying optimization andsignificantly boosting inference speed. Additionally we introduce a noveltuning strategy called detail preserver which achieves more accurate andfine-grained predictions. Without scaling up the training data or modelcapacity Lotus achieves SoTA performance in zero-shot depth and normalestimation across various datasets. It also significantly enhances efficiencybeing hundreds of times faster than most existing diffusion-based methods. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17134v1 |
-|title| Streaming Neural Images |
-|authors| Marcos V. CondeAndy BigosRadu Timofte
-|links| http://arxiv.org/abs/2409.17134v1 |
-|updated| 2024-09-25 17:51:20 UTC |
-|summary| Implicit Neural Representations INRs are a novel paradigm for signalrepresentation that have attracted considerable interest for image compression.INRs offer unprecedented advantages in signal resolution and memory efficiencyenabling new possibilities for compression techniques. However the existinglimitations of INRs for image compression have not been sufficiently addressedin the literature. In this work we explore the critical yet overlookedlimiting factors of INRs such as computational cost unstable performance androbustness. Through extensive experiments and empirical analysis we provide adeeper and more nuanced understanding of implicit neural image compressionmethods such as Fourier Feature Networks and Siren. Our work also offersvaluable insights for future research in this area. |
+|idx| 2409.18121v1 |
+|title| Robot See Robot Do: Imitating Articulated Object Manipulation with Monocular 4D Reconstruction |
+|authors| Justin KerrChung Min KimMingxuan WuBrent YiQianqian WangKen GoldbergAngjoo Kanazawa
+|links| http://arxiv.org/abs/2409.18121v1 |
+|updated| 2024-09-26 17:57:16 UTC |
+|summary| Humans can learn to manipulate new objects by simply watching othersproviding robots with the ability to learn from such demonstrations wouldenable a natural interface specifying new behaviors. This work develops RobotSee Robot Do RSRD a method for imitating articulated object manipulationfrom a single monocular RGB human demonstration given a single staticmulti-view object scan. We first propose 4D Differentiable Part Models4D-DPM a method for recovering 3D part motion from a monocular video withdifferentiable rendering. This analysis-by-synthesis approach uses part-centricfeature fields in an iterative optimization which enables the use of geometricregularizers to recover 3D motions from only a single video. Given this 4Dreconstruction the robot replicates object trajectories by planning bimanualarm motions that induce the demonstrated object part motion. By representingdemonstrations as part-centric trajectories RSRD focuses on replicating thedemonstrations intended behavior while considering the robots ownmorphological limits rather than attempting to reproduce the hands motion. Weevaluate 4D-DPMs 3D tracking accuracy on ground truth annotated 3D parttrajectories and RSRDs physical execution performance on 9 objects across 10trials each on a bimanual YuMi robot. Each phase of RSRD achieves an average of87 success rate for a total end-to-end success rate of 60 across 90 trials.Notably this is accomplished using only feature fields distilled from largepretrained vision models -- without any task-specific training fine-tuningdataset collection or annotation. Project page:https://robot-see-robot-do.github.io |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17107v1 |
-|title| Non-asymptotic convergence analysis of the stochastic gradient Hamiltonian Monte Carlo algorithm with discontinuous stochastic gradient with applications to training of ReLU neural networks |
-|authors| Luxu LiangAriel NeufeldYing Zhang
-|links| http://arxiv.org/abs/2409.17107v1 |
-|updated| 2024-09-25 17:21:09 UTC |
-|summary| In this paper we provide a non-asymptotic analysis of the convergence of thestochastic gradient Hamiltonian Monte Carlo SGHMC algorithm to a targetmeasure in Wasserstein-1 and Wasserstein-2 distance. Crucially compared to theexisting literature on SGHMC we allow its stochastic gradient to bediscontinuous. This allows us to provide explicit upper bounds which can becontrolled to be arbitrarily small for the expected excess risk of non-convexstochastic optimization problems with discontinuous stochastic gradientsincluding among others the training of neural networks with ReLU activationfunction. To illustrate the applicability of our main results we considernumerical experiments on quantile estimation and on several optimizationproblems involving ReLU neural networks relevant in finance and artificialintelligence. |
+|idx| 2409.18010v1 |
+|title| End-to-end guarantees for indirect data-driven control of bilinear systems with finite stochastic data |
+|authors| Nicolas ChatzikiriakosRobin SträsserFrank AllgöwerAndrea Iannelli
+|links| http://arxiv.org/abs/2409.18010v1 |
+|updated| 2024-09-26 16:19:49 UTC |
+|summary| In this paper we propose an end-to-end algorithm for indirect data-drivencontrol for bilinear systems with stability guarantees. We consider the casewhere the collected i.i.d. data is affected by probabilistic noise withpossibly unbounded support and leverage tools from statistical learning theoryto derive finite sample identification error bounds. To this end we solve thebilinear identification problem by solving a set of linear and affineidentification problems by a particular choice of a control input during thedata collection phase. We provide a priori as well as data-dependent finitesample identification error bounds on the individual matrices as well asellipsoidal bounds both of which are structurally suitable for control.Further we integrate the structure of the derived identification error boundsin a robust controller design to obtain an exponentially stable closed-loop. Bymeans of an extensive numerical study we showcase the interplay between thecontroller design and the derived identification error bounds. Moreover wenote appealing connections of our results to indirect data-driven control ofgeneral nonlinear systems through Koopman operator theory and discuss how ourresults may be applied in this setup. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17085v1 |
-|title| Parameter-efficient Bayesian Neural Networks for Uncertainty-aware Depth Estimation |
-|authors| Richard D. PaulAlessio QuerciaVincent FortuinKatharina NöhHanno Scharr
-|links| http://arxiv.org/abs/2409.17085v1 |
-|updated| 2024-09-25 16:49:25 UTC |
-|summary| State-of-the-art computer vision tasks like monocular depth estimationMDE rely heavily on large modern Transformer-based architectures. Howevertheir application in safety-critical domains demands reliable predictiveperformance and uncertainty quantification. While Bayesian neural networksprovide a conceptually simple approach to serve those requirements they sufferfrom the high dimensionality of the parameter space. Parameter-efficientfine-tuning PEFT methods in particular low-rank adaptations LoRA haveemerged as a popular strategy for adapting large-scale models to down-streamtasks by performing parameter inference on lower-dimensional subspaces. In thiswork we investigate the suitability of PEFT methods for subspace Bayesianinference in large-scale Transformer-based vision models. We show that indeedcombining BitFit DiffFit LoRA and CoLoRA a novel LoRA-inspired PEFT methodwith Bayesian inference enables more robust and reliable predictive performancein MDE. |
+|idx| 2409.17991v1 |
+|title| Dimension-independent learning rates for high-dimensional classification problems |
+|authors| Andres Felipe Lerma-PinedaPhilipp PetersenSimon FriederThomas Lukasiewicz
+|links| http://arxiv.org/abs/2409.17991v1 |
+|updated| 2024-09-26 16:02:13 UTC |
+|summary| We study the problem of approximating and estimating classification functionsthat have their decision boundary in the RBV2 space. Functions of RBV2type arise naturally as solutions of regularized neural network learningproblems and neural networks can approximate these functions without the curseof dimensionality. We modify existing results to show that every RBV2function can be approximated by a neural network with bounded weights.Thereafter we prove the existence of a neural network with bounded weightsapproximating a classification function. And we leverage these bounds toquantify the estimation rates. Finally we present a numerical study thatanalyzes the effect of different regularity conditions on the decisionboundaries. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16963v1 |
-|title| Dimension reduction and the gradient flow of relative entropy |
-|authors| Ben Weinkove
-|links| http://arxiv.org/abs/2409.16963v1 |
-|updated| 2024-09-25 14:23:04 UTC |
-|summary| Dimension reduction widely used in science maps high-dimensional data intolow-dimensional space. We investigate a basic mathematical model underlying thetechniques of stochastic neighborhood embedding SNE and its popular variantt-SNE. Distances between points in high dimensions are used to define aprobability distribution on pairs of points measuring how similar the pointsare. The aim is to map these points to low dimensions in an optimal way so thatsimilar points are closer together. This is carried out by minimizing therelative entropy between two probability distributions.  We consider the gradient flow of the relative entropy and analyze itslong-time behavior. This is a self-contained mathematical problem about thebehavior of a system of nonlinear ordinary differential equations. We findoptimal bounds for the diameter of the evolving sets as time tends to infinity.In particular the diameter may blow up for the t-SNE version but remainsbounded for SNE. |
+|idx| 2409.17858v1 |
+|title| How Feature Learning Can Improve Neural Scaling Laws |
+|authors| Blake BordelonAlexander AtanasovCengiz Pehlevan
+|links| http://arxiv.org/abs/2409.17858v1 |
+|updated| 2024-09-26 14:05:32 UTC |
+|summary| We develop a solvable model of neural scaling laws beyond the kernel limit.Theoretical analysis of this model shows how performance scales with modelsize training time and the total amount of available data. We identify threescaling regimes corresponding to varying task difficulties: hard easy andsuper easy tasks. For easy and super-easy target functions which lie in thereproducing kernel Hilbert space RKHS defined by the initial infinite-widthNeural Tangent Kernel NTK the scaling exponents remain unchanged betweenfeature learning and kernel regime models. For hard tasks defined as thoseoutside the RKHS of the initial NTK we demonstrate both analytically andempirically that feature learning can improve scaling with training time andcompute nearly doubling the exponent for hard tasks. This leads to a differentcompute optimal strategy to scale parameters and training time in the featurelearning regime. We support our finding that feature learning improves thescaling law for hard tasks but not for easy and super-easy tasks withexperiments of nonlinear MLPs fitting functions with power-law Fourier spectraon the circle and CNNs learning vision tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16859v1 |
-|title| Revisiting Extragradient-Type Methods -- Part 1: Generalizations and Sublinear Convergence Rates |
-|authors| Quoc Tran-DinhNghia Nguyen-Trung
-|links| http://arxiv.org/abs/2409.16859v1 |
-|updated| 2024-09-25 12:14:05 UTC |
-|summary| This paper presents a comprehensive analysis of the well-known extragradientEG method for solving both equations and inclusions. First we unify andgeneralize EG for nonlinear equations to a wider class of algorithmsencompassing various existing schemes and potentially new variants. Next weanalyze both sublinear best-iterate and last-iterate convergence ratesfor the entire class of algorithms and derive new convergence results for twowell-known instances. Second we extend our EG framework above to monotoneinclusions introducing a new class of algorithms and its correspondingconvergence results. Third we also unify and generalize Tsengsforward-backward-forward splitting FBFS method to a broader class ofalgorithms to solve nonlinear inclusions when a weak-Minty solution existsand establish its best-iterate convergence rate. Fourth to complete ourpicture we also investigate sublinear rates of two other common variants of EGusing our EG analysis framework developed here: the reflected forward-backwardsplitting and the golden ratio methods. Finally we conduct an extensivenumerical experiment to validate our theoretical findings. Our resultsdemonstrate that several new variants of our proposed algorithms outperformexisting schemes in the majority of examples. |
+|idx| 2409.17804v1 |
+|title| Enriched Functional Tree-Based Classifiers: A Novel Approach Leveraging Derivatives and Geometric Features |
+|authors| Fabrizio MaturoAnnamaria Porreca
+|links| http://arxiv.org/abs/2409.17804v1 |
+|updated| 2024-09-26 12:57:47 UTC |
+|summary| The positioning of this research falls within the scalar-on-functionclassification literature a field of significant interest across variousdomains particularly in statistics mathematics and computer science. Thisstudy introduces an advanced methodology for supervised classification byintegrating Functional Data Analysis FDA with tree-based ensemble techniquesfor classifying high-dimensional time series. The proposed framework EnrichedFunctional Tree-Based Classifiers EFTCs leverages derivative and geometricfeatures benefiting from the diversity inherent in ensemble methods to furtherenhance predictive performance and reduce variance. While our approach has beentested on the enrichment of Functional Classification Trees FCTs FunctionalK-NN FKNN Functional Random Forest FRF Functional XGBoost FXGB andFunctional LightGBM FLGBM it could be extended to other tree-based andnon-tree-based classifiers with appropriate considerations emerging from thisinvestigation. Through extensive experimental evaluations on seven real-worlddatasets and six simulated scenarios this proposal demonstrates fascinatingimprovements over traditional approaches providing new insights into theapplication of FDA in complex high-dimensional learning problems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16829v1 |
-|title| Conditional Testing based on Localized Conformal p-values |
-|authors| Xiaoyang WuLin LuZhaojun WangChangliang Zou
-|links| http://arxiv.org/abs/2409.16829v1 |
-|updated| 2024-09-25 11:30:14 UTC |
-|summary| In this paper we address conditional testing problems through the conformalinference framework. We define the localized conformal p-values by invertingprediction intervals and prove their theoretical properties. These definedp-values are then applied to several conditional testing problems to illustratetheir practicality. Firstly we propose a conditional outlier detectionprocedure to test for outliers in the conditional distribution withfinite-sample false discovery rate FDR control. We also introduce a novelconditional label screening problem with the goal of screening multivariateresponse variables and propose a screening procedure to control the family-wiseerror rate FWER. Finally we consider the two-sample conditional distributiontest and define a weighted U-statistic through the aggregation of localizedp-values. Numerical simulations and real-data examples validate the superiorperformance of our proposed strategies. |
+|idx| 2409.17704v1 |
+|title| Transfer Learning in $\ell_1$ Regularized Regression: Hyperparameter Selection Strategy based on Sharp Asymptotic Analysis |
+|authors| Koki OkajimaTomoyuki Obuchi
+|links| http://arxiv.org/abs/2409.17704v1 |
+|updated| 2024-09-26 10:20:59 UTC |
+|summary| Transfer learning techniques aim to leverage information from multiplerelated datasets to enhance prediction quality against a target dataset. Suchmethods have been adopted in the context of high-dimensional sparse regressionand some Lasso-based algorithms have been invented: Trans-Lasso and PretrainingLasso are such examples. These algorithms require the statistician to selecthyperparameters that control the extent and type of information transfer fromrelated datasets. However selection strategies for these hyperparameters aswell as the impact of these choices on the algorithms performance have beenlargely unexplored. To address this we conduct a thorough precise study ofthe algorithm in a high-dimensional setting via an asymptotic analysis usingthe replica method. Our approach reveals a surprisingly simple behavior of thealgorithm: Ignoring one of the two types of information transferred to thefine-tuning stage has little effect on generalization performance implyingthat efforts for hyperparameter selection can be significantly reduced. Ourtheoretical findings are also empirically supported by real-world applicationson the IMDb dataset. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.17088v1 |
-|title| Textoshop: Interactions Inspired by Drawing Software to Facilitate Text Editing |
-|authors| Damien MassonYoung-Ho KimFanny Chevalier
-|links| http://arxiv.org/abs/2409.17088v1 |
-|updated| 2024-09-25 16:51:49 UTC |
-|summary| We explore how interactions inspired by drawing software can help edit text.Making an analogy between visual and text editing we consider words as pixelssentences as regions and tones as colours. For instance direct manipulationsmove shorten expand and reorder text tools change number tense andgrammar colours map to tones explored along three dimensions in a tone pickerand layers help organize and version text. This analogy also leads to newworkflows such as boolean operations on text fragments to construct moreelaborated text. A study shows participants were more successful at editingtext and preferred using the proposed interface over existing solutions.Broadly our work highlights the potential of interaction analogies to rethinkexisting workflows while capitalizing on familiar features. |
+|idx| 2409.18060v1 |
+|title| Infering Alt-text For UI Icons With Large Language Models During App Development |
+|authors| Sabrina HaqueChristoph Csallner
+|links| http://arxiv.org/abs/2409.18060v1 |
+|updated| 2024-09-26 17:01:33 UTC |
+|summary| Ensuring accessibility in mobile applications remains a significantchallenge particularly for visually impaired users who rely on screen readers.User interface icons are essential for navigation and interaction and oftenlack meaningful alt-text creating barriers to effective use. Traditional deeplearning approaches for generating alt-text require extensive datasets andstruggle with the diversity and imbalance of icon types. More recent VisionLanguage Models VLMs require complete UI screens which can be impracticalduring the iterative phases of app development. To address these issues weintroduce a novel method using Large Language Models LLMs to autonomouslygenerate informative alt-text for mobile UI icons with partial UI data. Byincorporating icon context that include class resource ID boundsOCR-detected text and contextual information from parent and sibling nodes wefine-tune an off-the-shelf LLM on a small dataset of approximately 1.4k iconsyielding IconDesc. In an empirical evaluation and a user study IconDescdemonstrates significant improvements in generating relevant alt-text. Thisability makes IconDesc an invaluable tool for developers aiding in the rapiditeration and enhancement of UI accessibility. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16978v1 |
-|title| Towards User-Focused Research in Training Data Attribution for Human-Centered Explainable AI |
-|authors| Elisa NguyenJohannes BertramEvgenii KortukovJean Y. SongSeong Joon Oh
-|links| http://arxiv.org/abs/2409.16978v1 |
-|updated| 2024-09-25 14:40:26 UTC |
-|summary| While Explainable AI XAI aims to make AI understandable and useful tohumans it has been criticised for relying too much on formalism andsolutionism focusing more on mathematical soundness than user needs. Wepropose an alternative to this bottom-up approach inspired by design thinking:the XAI research community should adopt a top-down user-focused perspective toensure user relevance. We illustrate this with a relatively young subfield ofXAI Training Data Attribution TDA. With the surge in TDA research andgrowing competition the field risks repeating the same patterns ofsolutionism. We conducted a needfinding study with a diverse group of AIpractitioners to identify potential user needs related to TDA. Throughinterviews N10 and a systematic survey N31 we uncovered new TDA tasksthat are currently largely overlooked. We invite the TDA and XAI communities toconsider these novel tasks and improve the user relevance of their researchoutcomes. |
+|idx| 2409.18037v1 |
+|title| HARMONIC: A Framework for Explanatory Cognitive Robots |
+|authors| Sanjay OrugantiSergei NirenburgMarjorie McShaneJesse EnglishMichael K. RobertsChristian Arndt
+|links| http://arxiv.org/abs/2409.18037v1 |
+|updated| 2024-09-26 16:42:13 UTC |
+|summary| We present HARMONIC a framework for implementing cognitive robots thattransforms general-purpose robots into trusted teammates capable of complexdecision-making natural communication and human-level explanation. Theframework supports interoperability between a strategic cognitive layer forhigh-level decision-making and a tactical robot layer for low-level controland execution. We describe the core features of the framework and our initialimplementation in which HARMONIC was deployed on a simulated UGV and droneinvolved in a multi-robot search and retrieval task. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16936v1 |
-|title| Tactile Perception of Electroadhesion: Effect of DC versus AC Stimulation and Finger Moisture |
-|authors| Easa AliAbbasiMuhammad MuzammilOmer SirinPhilippe LefèvreØrjan Grøttem MartinsenCagatay Basdogan
-|links| http://dx.doi.org/10.1109/TOH.2024.3441670 |
-|updated| 2024-09-25 13:49:56 UTC |
-|summary| Electroadhesion has emerged as a viable technique for displaying tactilefeedback on touch surfaces particularly capacitive touchscreens found insmartphones and tablets. This involves applying a voltage signal to theconductive layer of the touchscreen to generate tactile sensations on thefingerpads of users. In our investigation we explore the tactile perception ofelectroadhesion under DC and AC stimulations. Our tactile perceptionexperiments with 10 participants demonstrate a significantly lower voltagedetection threshold for AC signals compared to their DC counterparts. Thisdiscrepancy is elucidated by the underlying electro-mechanical interactionsbetween the finger and the voltage-induced touchscreen and considering theresponse of mechanoreceptors in the fingerpad to electrostatic forces generatedby electroadhesion. Additionally our study highlights the impact of moistureon electroadhesive tactile perception. Participants with moist fingersexhibited markedly higher threshold levels. Our electrical impedancemeasurements show a substantial reduction in impedance magnitude when sweat ispresent at the finger-touchscreen interface indicating increased conductivity.These findings not only contribute to our understanding of tactile perceptionunder electroadhesion but also shed light on the underlying physics. In thisregard the results of this study extend beyond mobile devices to encompassother applications of this technology including robotics automation spacemissions and textiles. |
+|idx| 2409.18009v1 |
+|title| Control Industrial Automation System with Large Language Models |
+|authors| Yuchen XiaNasser JazdiJize ZhangChaitanya ShahMichael Weyrich
+|links| http://arxiv.org/abs/2409.18009v1 |
+|updated| 2024-09-26 16:19:37 UTC |
+|summary| Traditional industrial automation systems require specialized expertise tooperate and complex reprogramming to adapt to new processes. Large languagemodels offer the intelligence to make them more flexible and easier to use.However LLMs application in industrial settings is underexplored. This paperintroduces a framework for integrating LLMs to achieve end-to-end control ofindustrial automation systems. At the core of the framework are an agent systemdesigned for industrial tasks a structured prompting method and anevent-driven information modeling mechanism that provides real-time data forLLM inference. The framework supplies LLMs with real-time events on differentcontext semantic levels allowing them to interpret the information generateproduction plans and control operations on the automation system. It alsosupports structured dataset creation for fine-tuning on this downstreamapplication of LLMs. Our contribution includes a formal system designproof-of-concept implementation and a method for generating task-specificdatasets for LLM fine-tuning and testing. This approach enables a more adaptiveautomation system that can respond to spontaneous events while allowing easieroperation and configuration through natural language for more intuitivehuman-machine interaction. We provide demo videos and detailed data on GitHub:https://github.com/YuchenXia/LLM4IAS |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16923v1 |
-|title| AI-assisted Gaze Detection for Proctoring Online Exams |
-|authors| Yong-Siang ShihZach ZhaoChenhao NiuBruce IbergJames SharpnackMirza Basim Baig
-|links| http://arxiv.org/abs/2409.16923v1 |
-|updated| 2024-09-25 13:31:37 UTC |
-|summary| For high-stakes online exams it is important to detect potential ruleviolations to ensure the security of the test. In this study we investigatethe task of detecting whether test takers are looking away from the screen assuch behavior could be an indication that the test taker is consulting externalresources. For asynchronous proctoring the exam videos are recorded andreviewed by the proctors. However when the length of the exam is long itcould be tedious for proctors to watch entire exam videos to determine theexact moments when test takers look away. We present an AI-assisted gazedetection system which allows proctors to navigate between different videoframes and discover video frames where the test taker is looking in similardirections. The system enables proctors to work more effectively to identifysuspicious moments in videos. An evaluation framework is proposed to evaluatethe system against human-only and ML-only proctoring and a user study isconducted to gather feedback from proctors aiming to demonstrate theeffectiveness of the system. |
+|idx| 2409.17987v1 |
+|title| LLM4Brain: Training a Large Language Model for Brain Video Understanding |
+|authors| Ruizhe ZhengLichao Sun
+|links| http://arxiv.org/abs/2409.17987v1 |
+|updated| 2024-09-26 15:57:08 UTC |
+|summary| Decoding visual-semantic information from brain signals such as functionalMRI fMRI across different subjects poses significant challenges includinglow signal-to-noise ratio limited data availability and cross-subjectvariability. Recent advancements in large language models LLMs showremarkable effectiveness in processing multimodal information. In this studywe introduce an LLM-based approach for reconstructing visual-semanticinformation from fMRI signals elicited by video stimuli. Specifically weemploy fine-tuning techniques on an fMRI encoder equipped with adaptors totransform brain responses into latent representations aligned with the videostimuli. Subsequently these representations are mapped to textual modality byLLM. In particular we integrate self-supervised domain adaptation methods toenhance the alignment between visual-semantic information and brain responses.Our proposed method achieves good results using various quantitative semanticmetrics while yielding similarity with ground-truth information. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16920v1 |
-|title| Cross-lingual Speech Emotion Recognition: Humans vs. Self-Supervised Models |
-|authors| Zhichen HanTianqi GengHui FengJiahong YuanKorin RichmondYuanchao Li
-|links| http://arxiv.org/abs/2409.16920v1 |
-|updated| 2024-09-25 13:27:17 UTC |
-|summary| Utilizing Self-Supervised Learning SSL models for Speech EmotionRecognition SER has proven effective yet limited research has exploredcross-lingual scenarios. This study presents a comparative analysis betweenhuman performance and SSL models beginning with a layer-wise analysis and anexploration of parameter-efficient fine-tuning strategies in monolingualcross-lingual and transfer learning contexts. We further compare the SERability of models and humans at both utterance- and segment-levels.Additionally we investigate the impact of dialect on cross-lingual SER throughhuman evaluation. Our findings reveal that models with appropriate knowledgetransfer can adapt to the target language and achieve performance comparableto native speakers. We also demonstrate the significant effect of dialect onSER for individuals without prior linguistic and paralinguistic background.Moreover both humans and models exhibit distinct behaviors across differentemotions. These results offer new insights into the cross-lingual SERcapabilities of SSL models underscoring both their similarities to anddifferences from human emotion perception. |
+|idx| 2409.17952v1 |
+|title| Participatory design: A systematic review and insights for future practice |
+|authors| Peter WacnikShanna DalyAditi Verma
+|links| http://arxiv.org/abs/2409.17952v1 |
+|updated| 2024-09-26 15:29:34 UTC |
+|summary| Participatory Design -- an iterative flexible design process that uses theclose involvement of stakeholders most often end users -- is growing in useacross design disciplines. As an increasing number of practitioners turn toParticipatory Design PD it has become less rigidly defined withstakeholders engaged to varying degrees through the use of disjointedtechniques. This ambiguous understanding can be counterproductive whendiscussing PD processes. Our findings synthesize key decisions and approachesfrom design peers that can support others in engaging in PD practice. Weinvestigated how scholars report the use of Participatory Design in the fieldthrough a systematic literature review. We found that a majority of PDliterature examined specific case studies of PD 53 of 88 articles with thedesign of intangible systems representing the most common design context 61 of88 articles. Stakeholders most often participated throughout multiple stagesof a design process 65 of 88 articles recruited in a variety of ways andengaged in several of the 14 specific participatory techniques identified. Thissystematic review provides todays practitioners synthesized learnings frompast Participatory Design processes to inform and improve future use of PDattempting to remedy inequitable design by engaging directly with stakeholdersand users. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16764v1 |
-|title| Offline and Distributional Reinforcement Learning for Radio Resource Management |
-|authors| Eslam EldeebHirley Alves
-|links| http://arxiv.org/abs/2409.16764v1 |
-|updated| 2024-09-25 09:22:23 UTC |
-|summary| Reinforcement learning RL has proved to have a promising role in futureintelligent wireless networks. Online RL has been adopted for radio resourcemanagement RRM taking over traditional schemes. However due to its relianceon online interaction with the environment its role becomes limited inpractical real-world problems where online interaction is not feasible. Inaddition traditional RL stands short in front of the uncertainties and risksin real-world stochastic environments. In this manner we propose an offlineand distributional RL scheme for the RRM problem enabling offline trainingusing a static dataset without any interaction with the environment andconsidering the sources of uncertainties using the distributions of the return.Simulation results demonstrate that the proposed scheme outperformsconventional resource management models. In addition it is the only schemethat surpasses online RL and achieves a 16  gain over online RL. |
+|idx| 2409.18052v1 |
+|title| Explaining Explaining |
+|authors| Sergei NirenburgMarjorie McShaneKenneth W. GoodmanSanjay Oruganti
+|links| http://arxiv.org/abs/2409.18052v1 |
+|updated| 2024-09-26 16:55:44 UTC |
+|summary| Explanation is key to people having confidence in high-stakes AI systems.However machine-learning-based systems - which account for almost all currentAI - cant explain because they are usually black boxes. The explainable AIXAI movement hedges this problem by redefining explanation. Thehuman-centered explainable AI HCXAI movement identifies theexplanation-oriented needs of users but cant fulfill them because of itscommitment to machine learning. In order to achieve the kinds of explanationsneeded by real people operating in critical domains we must rethink how toapproach AI. We describe a hybrid approach to developing cognitive agents thatuses a knowledge-based infrastructure supplemented by data obtained throughmachine learning when applicable. These agents will serve as assistants tohumans who will bear ultimate responsibility for the decisions and actions ofthe human-robot team. We illustrate the explanatory potential of such agentsusing the under-the-hood panels of a demonstration system in which a team ofsimulated robots collaborates on a search task assigned by a human. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.16173v2 |
-|title| Extending Stable and Popular Matching Algorithms from Bipartite to Arbitrary Instances |
-|authors| Gergely Csáji
-|links| http://arxiv.org/abs/2409.16173v2 |
-|updated| 2024-09-25 07:16:36 UTC |
-|summary| We consider stable and popular matching problems in arbitrary graphs whichare referred to as stable roommates instances. We extend the 3/2-approximationalgorithm for the maximum size weakly stable matching problem to the roommatescase which solves a more than 20 year old open question of Irving and Manloveabout the approximability of maximum size weakly stable matchings in roommatesinstances with ties Irving and Manlove 2002 and has nice applications for theproblem of matching residents to hospitals in the presence of couples. We alsoextend the algorithm that finds a maximum size popular matching in bipartitegraphs in the case of strict preferences and the algorithm to find a popularmatching among maximum weight matchings. While previous attempts to extend theidea of promoting the agents or duplicating the edges from bipartite instancesto arbitrary ones failed these results show that with the help of a simpleobservation we can indeed bridge the gap and extend these algorithms |
+|idx| 2409.18047v1 |
+|title| HARMONIC: Cognitive and Control Collaboration in Human-Robotic Teams |
+|authors| Sanjay OrugantiSergei NirenburgMarjorie McShaneJesse EnglishMichael K. RobertsChristian Arndt
+|links| http://arxiv.org/abs/2409.18047v1 |
+|updated| 2024-09-26 16:48:21 UTC |
+|summary| This paper presents a novel approach to multi-robot planning andcollaboration. We demonstrate a cognitive strategy for robots in human-robotteams that incorporates metacognition natural language communication andexplainability. The system is embodied using the HARMONIC architecture thatflexibly integrates cognitive and control capabilities across the team. Weevaluate our approach through simulation experiments involving a joint searchtask by a team of heterogeneous robots a UGV and a drone and a human. Wedetail the systems handling of complex real-world scenarios effective actioncoordination between robots with different capabilities and naturalhuman-robot communication. This work demonstrates that the robots ability toreason about plans goals and attitudes and to provide explanations foractions and decisions are essential prerequisites for realistic human-robotteaming. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.15831v1 |
-|title| Introducing Anisotropic Fields for Enhanced Diversity in Crowd Simulation |
-|authors| Yihao LiJunyu LiuXiaoyu GuanHanming HouTianyu Huang
-|links| http://arxiv.org/abs/2409.15831v1 |
-|updated| 2024-09-24 07:54:11 UTC |
-|summary| Large crowds exhibit intricate behaviors and significant emergent propertiesyet existing crowd simulation systems often lack behavioral diversityresulting in homogeneous simulation outcomes. To address this limitation wepropose incorporating anisotropic fields AFs as a fundamental structure fordepicting the uncertainty in crowd movement. By leveraging AFs our method canrapidly generate crowd simulations with intricate behavioral patterns thatbetter reflect the inherent complexity of real crowds. The AFs are generatedeither through intuitive sketching or extracted from real crowd videosenabling flexible and efficient crowd simulation systems. We demonstrate theeffectiveness of our approach through several representative scenariosshowcasing a significant improvement in behavioral diversity compared toclassical methods. Our findings indicate that by incorporating AFs crowdsimulation systems can achieve a much higher similarity to real-world crowdsystems. Our code is publicly available athttps://github.com/tomblack2014/AF_Generation. |
+|idx| 2409.18037v1 |
+|title| HARMONIC: A Framework for Explanatory Cognitive Robots |
+|authors| Sanjay OrugantiSergei NirenburgMarjorie McShaneJesse EnglishMichael K. RobertsChristian Arndt
+|links| http://arxiv.org/abs/2409.18037v1 |
+|updated| 2024-09-26 16:42:13 UTC |
+|summary| We present HARMONIC a framework for implementing cognitive robots thattransforms general-purpose robots into trusted teammates capable of complexdecision-making natural communication and human-level explanation. Theframework supports interoperability between a strategic cognitive layer forhigh-level decision-making and a tactical robot layer for low-level controland execution. We describe the core features of the framework and our initialimplementation in which HARMONIC was deployed on a simulated UGV and droneinvolved in a multi-robot search and retrieval task. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.15105v1 |
-|title| SPformer: A Transformer Based DRL Decision Making Method for Connected Automated Vehicles |
-|authors| Ye HanLijun ZhangDejian MengXingyu HuYixia Lu
-|links| http://arxiv.org/abs/2409.15105v1 |
-|updated| 2024-09-23 15:16:35 UTC |
-|summary| In mixed autonomy traffic environment every decision made by anautonomous-driving car may have a great impact on the transportation system.Because of the complex interaction between vehicles it is challenging to makedecisions that can ensure both high traffic efficiency and safety now andfuther. Connected automated vehicles CAVs have great potential to improve thequality of decision-making in this continuous highly dynamic and interactiveenvironment because of their stronger sensing and communicating ability. Formulti-vehicle collaborative decision-making algorithms based on deepreinforcement learning DRL we need to represent the interactions betweenvehicles to obtain interactive features. The representation in this aspectdirectly affects the learning efficiency and the quality of the learned policy.To this end we propose a CAV decision-making architecture based on transformerand reinforcement learning algorithms. A learnable policy token is used as thelearning medium of the multi-vehicle joint policy the states of all vehiclesin the area of interest can be adaptively noticed in order to extractinteractive features among agents. We also design an intuitive physicalpositional encodings the redundant location information of which optimizes theperformance of the network. Simulations show that our model can make good useof all the state information of vehicles in traffic scenario so as to obtainhigh-quality driving decisions that meet efficiency and safety objectives. Thecomparison shows that our method significantly improves existing DRL-basedmulti-vehicle cooperative decision-making algorithms. |
+|idx| 2409.18009v1 |
+|title| Control Industrial Automation System with Large Language Models |
+|authors| Yuchen XiaNasser JazdiJize ZhangChaitanya ShahMichael Weyrich
+|links| http://arxiv.org/abs/2409.18009v1 |
+|updated| 2024-09-26 16:19:37 UTC |
+|summary| Traditional industrial automation systems require specialized expertise tooperate and complex reprogramming to adapt to new processes. Large languagemodels offer the intelligence to make them more flexible and easier to use.However LLMs application in industrial settings is underexplored. This paperintroduces a framework for integrating LLMs to achieve end-to-end control ofindustrial automation systems. At the core of the framework are an agent systemdesigned for industrial tasks a structured prompting method and anevent-driven information modeling mechanism that provides real-time data forLLM inference. The framework supplies LLMs with real-time events on differentcontext semantic levels allowing them to interpret the information generateproduction plans and control operations on the automation system. It alsosupports structured dataset creation for fine-tuning on this downstreamapplication of LLMs. Our contribution includes a formal system designproof-of-concept implementation and a method for generating task-specificdatasets for LLM fine-tuning and testing. This approach enables a more adaptiveautomation system that can respond to spontaneous events while allowing easieroperation and configuration through natural language for more intuitivehuman-machine interaction. We provide demo videos and detailed data on GitHub:https://github.com/YuchenXia/LLM4IAS |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2409.15005v1 |
-|title| Method of Equal Shares with Bounded Overspending |
-|authors| Georgios PapasotiropoulosSeyedeh Zeinab PishbinOskar SkibskiPiotr SkowronTomasz Wąs
-|links| http://arxiv.org/abs/2409.15005v1 |
-|updated| 2024-09-23 13:30:25 UTC |
-|summary| In participatory budgeting PB voters decide through voting which subset ofprojects to fund within a given budget. Proportionality in the context of PB iscrucial to ensure equal treatment of all groups of voters. However pureproportional rules can sometimes lead to suboptimal outcomes. We introduce theMethod of Equal Shares with Bounded Overspending BOS Equal Shares a robustvariant of Equal Shares that balances proportionality and efficiency. BOS EqualShares addresses inefficiencies inherent in strict proportionality guaranteesyet still provides good proportionality similar to the original Method of EqualShares. In the course of the analysis we also discuss a fractional variant ofthe method which allows for partial funding of projects. |
+|idx| 2409.17945v1 |
+|title| Modular Autonomous Vehicle in Heterogeneous Traffic Flow: Modeling, Simulation, and Implication |
+|authors| Lanhang YeToshiyuki Yamamoto
+|links| http://arxiv.org/abs/2409.17945v1 |
+|updated| 2024-09-26 15:20:21 UTC |
+|summary| Modular autonomous vehicles MAVs represent a groundbreaking concept thatintegrates modularity into the ongoing development of autonomous vehicles. Thisinnovative design introduces unique features to traffic flow allowing multiplemodules to seamlessly join together and operate collectively. To understand thetraffic flow characteristics involving these vehicles and their collectiveoperations this study established a modeling framework specifically designedto simulate their behavior within traffic flow. The mixed traffic flowincorporating arbitrarily formed trains of various modular sizes is modeledand studied. Simulations are conducted under varying levels of traffic demandand penetration rates to examine the traffic flow dynamics in the presence ofthese vehicles and their operations. The microscopic trajectories MAV traincompositions and macroscopic fundamental diagrams of the mixed traffic floware analyzed. The simulation findings indicate that integrating MAVs and theircollective operations can substantially enhance capacity with the extent ofimprovement depending on the penetration rate in mixed traffic flow. Notablythe capacity nearly doubles when the penetration rate exceeds 75. Furthermoretheir presence significantly influences and regulates the free-flow speed ofthe mixed traffic. Particularly when variations in operational speed limitsexist between the MAVs and the background traffic the mixed traffic adjusts tothe operating velocity of these vehicles. This study provides insights intopotential future traffic flow systems incorporating emerging MAV technologies. |
 
 
