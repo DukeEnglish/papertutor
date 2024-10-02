@@ -1,0 +1,1448 @@
+Annealing Flow Generative Models Towards Sampling
+High-Dimensional and Multi-Modal Distributions
+Dongze Wu, Yao Xie∗
+October 1, 2024
+Abstract
+Sampling from high-dimensional, multi-modal distributions remains a fundamental challenge across
+domains such as statistical Bayesian inference and physics-based machine learning. In this paper, we
+propose Annealing Flow (AF), a continuous normalizing flow-based approach designed to sample from
+high-dimensionalandmulti-modaldistributions. Thekeyideaistolearnacontinuousnormalizingflow-
+based transport map, guided by annealing, to transition samples from an easy-to-sample distribution
+to the target distribution, facilitating effective exploration of modes in high-dimensional spaces. Unlike
+many existing methods, AF training does not rely on samples from the target distribution. AF ensures
+effective and balanced mode exploration, achieves linear complexity in sample size and dimensions, and
+circumventsinefficientmixingtimes. WedemonstratethesuperiorperformanceofAFcomparedtostate-
+of-the-art methods through extensive experiments on various challenging distributions and real-world
+datasets,particularlyinhigh-dimensionalandmulti-modalsettings. WealsohighlightAF’spotentialfor
+sampling the least favorable distributions.
+1 Introduction
+Samplingfromhigh-dimensionalandmulti-modaldistributionsiscrucialforvariousfields,includingphysics-
+based machine learning like molecular dynamics (Miao et al., 2015; Salo-Ahen et al., 2020), quantum
+physics (Carlson et al., 2015; Lynn et al., 2019), and lattice field theory (Jay & Neil, 2021; Lozanovski
+et al., 2020). With modern datasets, it also plays a key role in Bayesian areas, including Bayesian mod-
+eling (Balandat et al., 2020; Kandasamy et al., 2018; Stephan et al., 2017) with applications in areas like
+computational biology (Overstall et al., 2020; Stanton et al., 2022), and Bayesian Neural Network sam-
+pling (Cobb & Jalaian, 2021; Izmailov et al., 2021).
+Numerous MCMC methods have been developed over the past 50 years, including Metropolis-Hastings
+(MH)anditsvariants(Choi,2020;Cornishetal.,2019;Griffin&Walker,2013;Haarioetal.,2001),Hamilto-
+nian Monte Carlo (HMC) schemes (Bou-Rabee & Sanz-Serna, 2017; Girolami & Calderhead, 2011; Hoffman
+et al., 2021; Li et al., 2015; Shahbaba et al., 2014). HMC variants are still considered state-of-the-art
+methods. However, they require exponentially many steps in the dimension for mixing, even with just two
+modes (Hackett et al., 2021).
+Annealing methods (Gelfand et al., 1990; Neal, 2001; Sorkin, 1991; Van Groenigen & Stein, 1998) are
+widelyusedtodevelopMCMCtechniqueslikeParallelTempering(PT)anditsvariants(Chandraetal.,2019;
+Earl & Deem, 2005; Syed et al., 2022). In annealing, sampling gradually shifts from an easy distribution to
+the target by lowering temperature. Annealed Importance Sampling (Neal, 2001) and its variants(Chehab
+et al., 2024; Karagiannis & Andrieu, 2013; Zhang et al., 2021) are developed for estimating normalizing
+constants with low variance using MCMC samples from intermediate distributions. Recent score-based
+annealingmethods(Arbeletal.,2021;Doucetetal.,2022)optimizeintermediatedensitiesforlower-variance
+estimates, but still rely on MCMC for sampling. However, MCMC struggles with slow mixing, local mode
+trapping, mode imbalance, and correlated samples issues. These limitations are particularly pronounced in
+high-dimensional, multi-modal settings (Hackett et al., 2021; Van Ravenzwaaij et al., 2018).
+∗H. Milton Stewart School of Industrial and Systems Engineering (ISyE), Georgia Institute of Technology, Atlanta, GA
+30332,USA.Email: dwu381@gatech.edu,yao.xie@isye.gatech.edu.
+1
+4202
+peS
+03
+]LM.tats[
+1v74502.9042:viXraRecently, particle-based optimization methods have emerged for sampling, including Stein Variational
+Gradient Descent (SVGD) (Liu & Wang, 2016), and stochastic approaches such as (Dai et al., 2016; Detom-
+maso et al., 2018; Li et al., 2023; Liu, 2017; Maddison et al., 2018; Nitanda & Suzuki, 2017; Pulido & van
+Leeuwen, 2019). However, many of these methods rely on kernel computations, which scale polynomially
+with sample size and dimensions, and are sensitive to hyperparameters.
+More recently, Neural network (NN)-based sampling algorithms (Bonati et al., 2019; Egorov et al., 2024;
+Gu & Sun, 2020; Hackett et al., 2021; Li et al., 2021; Wolniewicz et al., 2024) have been developed to
+leverageNNexpressivenessforimprovingMCMC,buttheystillinheritsomelimitationslikeslowmixingand
+imbalancedmodeexploration. Normalizingflowmodelshavealsobeenexplored,withseveralworks(Albergo
+& Vanden-Eijnden, 2023; Brofos et al., 2022; Gabri´e et al., 2021, 2022; Hackett et al., 2021) combining
+them with MCMC, though their performance depends heavily on the quality of MCMC samples, which
+can struggle in high dimensions. In contrast, Chen et al. (2022, 2024); Koehler & Vuong (2023); Wu et al.
+(2024) introduced score-based learning for sampling that do not rely on neural networks. These papers offer
+strong theoretical guarantees for sampling from specific distributions, primarily Gaussian Mixture Models.
+However, these methods do not generalize well to arbitrary distributions, as the score functions are derived
+analytically.
+Challenges persist with multi-modal distributions in high-dimensional spaces. This paper introduces
+Annealing Flow (AF), a new sampling scheme that learns a continuous normalizing flow map from an easy-
+to-sample distribution π (x) to the target q(x), guided by annealing principles. Unlike diffusion sampling
+0
+(Bruna&Han,2024;Chungetal.,2022;Shihetal.,2024;Zhouetal.,2023)whichrequirespre-learningfrom
+a dataset of unknown distribution, AF training does not require preliminary samples from the target q(x).
+AF is not based on MCMC, thus avoiding issues like slow mixing, sample correlation, and mode imbalance.
+And unlike particle-based optimization methods, AF scales linearly with sample size and dimensions. Once
+trained,onesimplysamplesfromπ (x),andthelearnedtransportmapdirectlypushesthesesamplestowards
+0
+the target distribution.
+2 Preliminaries
+Neural ODE and Continuous Normalizing Flow. A Neural ODE is a continuous model where the trajectory
+of data is modeled as the solution of an ordinary differential equation (ODE). Formally, in Rd, given an
+input x(t )=x at time t , the transformation to the output x(T) is governed by:
+0 0 0
+dx(t)
+=v(x(t),t), (1)
+dt
+where v(x(t),t) represents the velocity field, which is of the same dimension as x(t) and is parameterized by
+a neural network with input x(t) and t.
+A Continuous Normalizing Flow (CNF) is a class of normalizing flows where the transformation of a
+probability density from a base distribution p(x) (at t = 0) to a target distribution q(x) (at t = T) is
+governed by a Neural ODE. The marginal density of x(t), denoted as ρ(x,t), evolves according to the
+continuity equation derived from the ODE in Eq. (1). This continuity equation is written as:
+∂ ρ(x,t)+∇·(ρ(x,t)v(x,t))=0, ρ(x,0)=p(x) (2)
+t
+where the divergence ∇·(ρv) accounts for the change in density as the flow evolves over time.
+Dynamic Optimal Transport. The Benamou-Brenier equation (Benamou & Brenier, 2000) below provides
+the dynamic formulation of Optimal Transport T.
+(cid:90) 1
+infT := E ∥v(x(t),t)∥2dt
+ρ,v x(t)∼ρ(·,t) (3)
+0
+s.t. ∂ ρ+∇·(ρv)=0, ρ(·,0)=p, ρ(·,1)=q,
+t
+The optimization problem seeks to find the optimal transport map that moves mass from the base density
+p to the target density q, subject to the continuity equation (2) to ensure that ρ(·,t) evolves as a valid
+probability density over time. Additionally, the constraint ρ(·,1) = q ensures that the target density is
+reached by the end of the time horizon, which is scaled to [0,1].
+23 Annealing Flow Model
+The annealing philosophy (Gelfand et al., 1990; Neal, 2001; Sorkin, 1991; Van Groenigen & Stein, 1998)
+referstograduallytransitioninganinitialflatteneddistributiontothetargetdistributionasthetemperature
+decreases. Building on this idea, we introduce Annealing Flow (AF), a sampling algorithm that learns a
+continuous normalizing flow to gradually map an initial easy-to-sample density π (x) to the target density
+0
+q˜(x) through a set of intermediate distributions.
+We first define a sequence of unnormalized intermediate distributions f˜(x), which interpolate between
+k
+aneasy-to-sampleinitialdistributionπ (x)(e.g.,aGaussian)andtheunnormalizedtargetdistributionq˜(x).
+0
+These intermediate distributions are formulated as:
+f˜ k(x)=π 0(x)1−βkq˜(x)βk, (4)
+where β is an increasing sequence with β = 0 and β = 1. This formulation ensures that f˜(x) = π (x)
+k 0 K 0 0
+and f˜ (x) = q˜(x). The sequence 0 = β < β < ··· < β = 1 controls the gradual transition between the
+K 0 1 K
+two distributions.
+The above construction aligns with the annealing philosophy. As β increases, f˜(x) gradually sharpens
+k k
+toward the target q˜(x), starting from the initially flattened distribution around π (x). These annealed
+0
+densities serve as a bridge, providing a gradual flow path from the easy-to-sample distribution π (x) to the
+0
+target density q(x). Figure 1 provides an intuitive illustration of this process, where π (x) is a standard
+0
+Gaussian, and q(x) is a Gaussian mixture model with six modes.
+T T T
+0 1 2
+[0,t ] [t ,t ] [t ,1]
+1 1 2 2
+(a)β0=0 (b)β1=1/3 (c)β2=2/3 (d)β3=1
+Figure 1: Illustration of the Annealing Flow Map, with a set of intermediate distributions from π (x) =
+0
+N(0,I ) to q(x), a GMM with 6 modes.
+2
+3.1 Optimal transport map
+We aim to learn a continuous optimal transport map between an easy-to-sample distribution π (x) and the
+0
+target distribution q(x). Once trained, users simply sample {x(i)(0)}n ∼ π (x), and the transport map
+i=1 0
+pushes them to {x(i)(T = 1)}n ∼ q(x). The transport map T evolves x(t) according to the ODE (1).
+i=1
+Specifically,
+(cid:90) t
+T(x )=x(0)+ v(x(s),s)ds, t∈[0,1]. (5)
+t
+0
+We divide the time horizon [0,1] of T into K intervals [t ,t ] for k = 1,2,...,K, where t = 0 and
+k−1 k 0
+t =1. Guided by the annealing flow path defined in (4), the continuous flow map T gradually transforms
+K
+the distribution from f (x) to f (x) over [0,t ], and continues this process until f (x) is transformed
+0 1 1 K−1
+into f (x) = q(x) over [t ,t ]. Figure 1 shows this progression with two intermediate densities. For
+K K−1 K
+clarity, we denote T (x) as the segment of the continuous normalizing flow during [t ,t ], which pushes
+k k−1 k
+the distribution from f (x) to f (x).
+k−1 k
+3.2 Objective of annealing flow net
+Annealing Flow aims to learn each transport map T based on dynamic optimal transport (3) over the time
+k
+horizon[t ,t ],wherethevelocityfieldv (x(t),t)islearnedusinganeuralnetwork. Theterminalcondition
+k−1 k k
+ρ(·,1) = q in (3) can be relaxed by introducing a KL divergence term (see, for instance, Ruthotto et al.
+(2020)). Consequently, minimizing the objective (3) of dynamic optimal transport T : f (x) → f (x) is
+k k−1 k
+3equivalent to solving the following problem:
+(cid:40) (cid:41)
+(cid:90) tk
+T =argmin KL(T f˜ ∥f˜)+γ E ∥v (x(t),t)∥2dt , (6)
+k
+T
+# k−1 k
+tk−1
+x(t)∼ρk(·,t) k
+subject to v (x(t),t) evolving according to (2). Here, γ > 0 is a weight parameter, v (x(t),t) denotes
+k k
+the velocity field during the k-th time interval [t ,t ], and KL(T f˜ ∥f˜) represents the KL divergence
+k−1 k # k−1 k
+betweenthepush-forwarddensityT f˜ andtheunnormalizedintermediatetargetdensityf˜. Additionally,
+# k−1 k
+the constraint (2) ensures that x(t) follows the ODE trajectory defined by (1) during t∈[t ,t ], which is
+k−1 k
+given by:
+(cid:90) t
+x(t)=x(t )+ v (x(s),s)ds, t∈[t ,t ]. (7)
+k−1 k k−1 k
+tk−1
+We can rewrite the density f k(x) in terms of energy function: f k(x) = Z · f˜ k(x) = Z · e−E˜ k(x), where
+E˜ (x) = −logf˜ is the unnormalized energy function associated with f (x). The following proposition
+k k k
+shows that once we have obtained samples from f˜ (x), the KL divergence in (6) can be computed exactly
+k−1
+based on v (x(t),t) and E˜ (x). Therefore, learning an optimal transport map T f˜ reduces to learning
+k k # k−1
+the optimal v (x(t),t). The proof is provided in A.1.
+k
+Proposition 1 Given the unnormalized density f˜ , the KL-Divergence between T f˜ and f˜ is equiv-
+k−1 # k−1 k
+alent to:
+(cid:34) (cid:35)
+(cid:90) tk
+KL(T f˜ ∥f˜)=c+E E˜ (x(t ))− ∇·v (x(s),s)ds , (8)
+# k−1 k x(tk−1)∼fk−1 k k k
+tk−1
+up to a constant c that is independent of v (x(s),s).
+k
+Given x(t ) from f (x), the value of x(t ) inside the energy function E˜ in (8) can be calculated as
+k−1 k−1 k k
+shown in equation (7). Additionally, according to the proposition below, the second term in the objective
+(6) can be relaxed to a dynamic W regularization. The proof is provided in A.1.
+2
+Proposition 2 Let x(t) be particle trajectories driven by a smooth velocity field v (x(t),t) over the time
+k
+interval [t ,t ], where h = t −t . Assume that v (x,t) is Lipschitz continuous in both x and t. By
+k−1 k k k k−1 k
+dividing [t ,t ] into S equal mini-intervals with grid points t (where s=0,1,...,S and t =t ,
+k−1 k k−1,s k−1,0 k−1
+t =t ), the following approximation holds:
+k−1,S k
+(cid:90) tk E (cid:2) ∥v (x(t),t)∥2(cid:3) dt= S S (cid:88)−1 E(cid:2) ∥x(t )−x(t )∥2(cid:3) +O(cid:18) h2 k(cid:19) . (9)
+x(t) k h k−1,s+1 k−1,s S
+tk−1 k s=0
+As h
+k
+→0 or S →∞, the error term O(cid:16) h S2 k(cid:17) becomes negligible.
+OnecanobservethattheRHSof(9)canbeinterpretedasthediscretizedsumofthesquaredWasserstein-
+2 distance. The dynamic W regularization encourages smooth transitions from f to f with minimal
+2 k−1 k
+transport cost, promoting efficient mode exploration.
+Therefore, by incorporating Propositions 1 and 2 into objective (6), the final objective becomes:
+min E
+(cid:34)
+E˜ (x(t
+))−(cid:90) tk
+∇·v
+(x(s),s)ds+αS (cid:88)−1
+∥x(t )−x(t
+)∥2(cid:35)
+. (10)
+vk(·,t)
+x(tk−1)∼fk−1 k k
+tk−1
+k
+s=0
+k−1,s+1 k−1,s
+Here, α=γ·S/h and v (x(s),s) is learned by a neural network. We break the time interval [t ,t ] into
+k k k−1 k
+S mini-intervals, and x(t ) is computed as in equation (7).
+k−1,s+1
+After learning, connecting the Annealing Flow nets together yields a smooth flow map T : T → T →
+1 2
+···T , which transforms samples from π (x) to the target q(x). Please see Section 4.2 for efficient sampling
+K 0
+of Annealing Flow and its comparisons with other sampling methods.
+43.3 Properties of learned velocity field
+Proposition 3 By Taylor’s expansions, and assume that h =t −t , we have:
+k k k−1
+1. x(t )−x(t )=(cid:82)tk v (x(s),s)ds=h v (x(t ),t )+O(h2)
+k k−1 tk−1 k k k k−1 k−1 k
+2. E˜ (x(t ))=E˜ (x(t ))+h ∇E˜ (x(t ))·v (x(t ),t )+O(h2)
+k k k k−1 k k k−1 k k−1 k−1 k
+Therefore,ifh →0,thenO(h2)inProposition3vanishes,andwenolongerneedtodividethetimeinterval,
+k k
+i.e., S =1. By defining the score function as s =∇logf , the objective function (10) can be approximated
+k k
+as:
+1
+E [E˜ (x(t ))+h (−s (x)·v (x,t )−∇·v (x,t )+ ∥v (x,t )∥2)+O(h2)] (11)
+x∼fk−1 k k−1 k k k k−1 k k−1 2 k k−1 k
+Since E [E˜ (x(t ))] is independent of v (x,t), as h →0, the minimization of the leading term
+x(tk−1)∼fk−1 k k−1 k k
+is equivalent to:
+(cid:20) (cid:21)
+1
+min E −T v + ∥v ∥2 , T v :=s ·v +∇·v . (12)
+vk=vk(·,0) x∼fk−1 fk k 2 k fk k k k k
+Here, T is referred to as the Stein operator. The term T v reflects the fact that the derivative of the KL
+fk fk k
+divergence with respect to the transport map yields the Stein operator (Liu & Wang, 2016). Therefore, if
+E [∥v ∥2]<∞, and both s and s belong to L2(f ), one can verify that the minimizer of (12) is:
+x∼fk−1 k k−1 k k
+v∗ =s −s . (13)
+k k k−1
+Therefore, the infinitesimal optimal v∗ is equal to the difference between score function of the next density,
+k
+f , and the current density, f . This suggests that when the two intermediate densities are sufficiently
+k k−1
+close,i.e.,whenthenumberofβ islargeenough,theoptimalvelocityfieldequalsthedifferencebetweenthe
+k
+score functions. By adding more intermediate densities, one can construct a sufficiently smooth transport
+map T that exactly learns the mapping between each pair of densities.
+Additionally, one can observe that when each f˜(x) is set to the target q(x), i.e., when all β are set to
+k k
+1, and the second term in the objective (6) is relaxed to static W regularization, the objective of Annealing
+2
+Flow becomes equivalent to Wasserstein gradient flow. This is detailed in A.2.
+4 Training and Sampling of Annealing Flow Net
+In this section, we describe the training process for each block and provide an explanation of the sampling
+process in our algorithm.
+4.1 Block-wise training
+Training of the k-th flow map in Annealing Flow begins once the (k−1)-th block has completed training.
+Given the samples {x(i)(t )}n ∼ f (x) produced after the (k−1)-th block, we can replace E
+k−1 i=1 k−1 x∼fk−1
+with the empirical average. The divergence of the velocity field can be computed either by brute force or
+via the Hutchinson trace estimator (Hutchinson, 1989; Xu et al., 2024a):
+(cid:20) (cid:21)
+v (x+σϵ,t)−v (x,t)
+∇·v (x,t)≈E ϵT k k . (14)
+k ϵ∼N(0,Id) σ
+This approximation becomes exact as σ →0. Further details are provided in A.3.2. Additionally, we apply
+the Runge-Kutta method for numerical integration, with details provided in A.3.3.
+Our algorithm uses a block-wise training of the continuous normalizing flow map. Specifically, the
+training of Annealing Flow is summarized in Algorithm 1. The block-wise training approach of Annealing
+Flow significantly reduces memory and computational requirements, as only one neural network is trained
+at a time, independent of the other flow networks.
+5Algorithm 1 Block-wise Training of Annealing Flow Net
+Require: Unnormalized target density q˜(x); an easy-to-sample π (x); {β ,β ,··· ,β }; Total number
+0 1 2 K−1
+of blocks K.
+1: Set β =0 and β =1
+0 K
+2: For k =1,2,··· ,K:
+3: Set f˜ k(x)=π 0(x)1−βkq˜(x)βk;
+4: Sample {x(i)(t )}n from π (x);
+0 i=1 0
+5: Compute the pushed samples x(i)(t ) from the trained (k−1) blocks via (15);
+k−1
+6: Optimize v (·,t) upon minimizing the objective function.
+k
+(Optional Refinement Blocks)
+7: For k =K+1,K+2,··· ,L:
+8: Set β =1 and optimize v (·,t) following the procedures outlined above.
+k k
+4.2 Efficient sampling and comparisons with other methods
+Once the continuous normalizing flow map T is learned, the sampling process of the target q(x) can be
+very efficient. Users can simply sample {x(i)(t =0)}n from π (x), and then directly calculate {x(i)(t =
+0 i=1 0 K
+1)}n ∼q(x) through Annealing Flow nets:
+i=1
+(cid:90) tk
+x(i)(t )=T (x(i)(t ))=x(i)(t )+ v (x(i)(s),s)ds, k =1,2,··· ,K. (15)
+k k k−1 k−1 k
+tk−1
+MCMC methods require long mixing times when sampling from complex distributions. In contrast,
+Annealing Flow (AF) pushes samples directly from π (x) through the learned transport map, enabling
+0
+faster sampling, especially for large sample sizes. MCMC also generates correlated samples, as each new
+sample depends on the previous one, reducing the effective sample size (ESS) and efficiency. AF avoids this
+by producing independent samples, improving overall sample quality.
+Additionally,MCMCstruggleswithmultimodaldistributions,aschainsoftengettrappedinlocalmodes.
+While methods like Parallel Tempering (PT) may attempt to explore all modes, they do not ensure propor-
+tionaltimeacrossthem,leadingtoimbalancedsampling. Incontrast,AFgeneratedbalancedsamplesacross
+all modes in line with the target distribution, as illustrated in the below figure.
+(a)AF (b)MH (c)HMC (d)PT
+NN-based MCMC algorithms still struggle with issues like slow mixing and correlated samples. Particle-
+based optimization methods, such as SVGD and MIED, avoid the need for a burn-in period and produce
+less correlated samples, but their reliance on kernel computations leads to polynomial scaling with sample
+size and dimensions, and they are sensitive to kernel hyperparameters. In contrast, AF computes samples
+independently through (15), allowing the sampling process to scale linearly with both sample size and
+dimensions.
+We comment that Annealing Flow indeed needs more expensive pre-training than MCMC, which, how-
+ever, can be done offline and only needs to be done once and then deployed for sampling. Once trained, AF
+samplers are highly efficient, generating 10,000 samples in an average of 1.5 seconds in our experiments. In
+contrast, MCMC takes around 1 minute to sample 10,000, while particle-based methods take significantly
+longer—over20minutes. AFalsoperformswellonmulti-modalandhigh-dimensionaldensities,whereother
+methods often struggle. Detailed comparisons of algorithms, including the training and sampling times, are
+provided in A.5.
+65 Importance Flow
+Sampling from complex distributions is fundamental, which can benefit tasks like normalizing constant
+estimation, Bayesian analysis, and various machine learning problems. Here, we briefly discuss another
+aspect: using Annealing Flow to sample from the Least-Favorite-Distribution (LFD) and obtain a low-
+variance Importance Sampling (IS) estimator, referred to as Importance Flow.
+5.1 Settings
+SupposewewanttoestimateE [h(X)],whichcannotbecomputedinclosedform. Anaturalapproach
+X∼π0(x)
+istouseMonteCarloestimationbysampling{x }n fromπ (x). However, ifx consistentlyfallsinregions
+i i=1 0 i
+whereh(x)hasextremevalues,theestimatormayexhibithighvariance. Forexample,withπ (x)=N(0,I )
+0 d
+and h(x)=1 , almost no samples will satisfy ∥x∥≥6, resulting in a zero estimate.
+∥x∥≥6
+To address this situation, we can select an appropriate proposal distribution q(x) and rewrite the expec-
+tation and MC estimator as:
+(cid:20) (cid:21) n
+E [h(x)]=E
+π 0(x)
+·h(x) ≈
+1 (cid:88)π 0(x i)
+·h(x ), x ∼q(x). (16)
+x∼π0(x) x∼q(x) q(x) n q(x ) i i
+i
+i=1
+Itiswell-knownthatthetheoreticallyoptimalproposalfortheimportancesampleris: q∗(x)∝π (x)·|h(x)|:=
+0
+q˜∗(x). However,giventhedefinitionofq˜∗(x),itisoftendifficulttosamplefrom,especiallywhenπ (x)orh(x)
+0
+is complex. Consequently, people typically choose a distribution that is similar in shape to the theoretically
+optimal proposal but easier to sample from.
+Annealing Flow enables sampling from q∗(x), allowing the construction of an IS estimator. A common
+choice can be the Normalized IS Estimator: Iˆ =(cid:80)n π0(xi)h(x )/(cid:80)n π0(xi). However, this estimator is
+N i=1 q˜(xi) i i=1 q˜(xi)
+often biased, as can be seen from Jensen’s Inequality.
+5.2 Density ratio estimation
+Usingsamplesfromq∗(x)andthosealongthetrajectoryobtainedviaAnnealingFlow,wecantrainaneural
+network for Density Ratio Estimation (DRE) of π0(x). Inspired by works Choi et al. (2022); Rhodes et al.
+q∗(x)
+(2020); Xu et al. (2023), we can train a continuous-time neural network r(x)=r (x;θ )◦r (x;θ )◦
+K K K−1 K−1
+···◦r (x;θ ), where samples x ∼ f = q∗(x) are inputs and the output is the density ratio π0(xi). Each
+1 1 i K q∗(xi)
+r (x;θ ) is trained using the following loss:
+k k
+(cid:104) (cid:105) (cid:104) (cid:105)
+L k(θ k)=E
+x(tk−1)∼fk−1
+log(1+e−rk(xi(tk−1))) +E
+x(tk)∼fk
+log(1+erk(xi(tk))) .
+After successful training, r∗(x) = logfk−1(x), and thus r∗(x) = (cid:80)K r∗(x) = logπ0(x). Please refer to A.1
+k fk(x) k=1 k q∗(x)
+and A.3.5 for the proof and further details. To obtain the optimal importance sampling estimator, we can
+then directly use samples {x }n ∼ q∗(x) from Annealing Flow and apply (16) together with the DRE:
+i i=1
+1 (cid:80)n exp(r∗(x ))·h(x ). The estimator is unbiased and can achieve zero variance theoretically.
+n i=1 i i
+6 Numerical Experiments
+Inthissection,wepresentnumericalexperimentscomparingAnnealingFlow(AF)withwidely-usedMCMC
+algorithms,includingHamiltonianMonteCarlo(HMC)andParallelTempering(PT),aswellasotherSOTA
+techniques, including particle-based methods: Stein Variational Gradient Descent (SVGD) (Liu & Wang,
+2016) and Mollified Interaction Energy Descent (MIED) (Li et al., 2023), alongside NN-based MCMC
+approaches: AI-Sampler (AIS) (Egorov et al., 2024). The experimental details can be found in A.3.3. Our
+code is publicly available on https://github.com/StatFusion/Annealing-Flow-For-Sampling.
+We test these algorithms on challenging distributions, including Exponential-Weighted Gaussian, Gaus-
+sianMixtureModels(GMM),funneldistributions, andTruncatedNormalwithextremeradiiacrossvarying
+dimensions. Maximum Mean Discrepancy (MMD) and Wasserstein Distance are used as evaluation metrics,
+7but only reported for the GMM due to the need for true samples. For other experiments, we provide sample
+and density plots for easier comparison, as shown in A.4.
+In addition, we compare our algorithm with others on Hierarchical Bayesian Logistic Regression across
+a range of datasets. We also report the preliminary results of the Importance Flow (discussed in Section 5)
+for estimating E (cid:2) 1 (cid:3) with varying c and dimensions.
+x∼N(0,I) ∥x∥≥c
+GaussianMixtureModels(GMM).Figure3presentsthesamplingresultsofdifferentmethodsona2DGMM,
+where the modes are distributed across circles with varying radii. We also experimented on a GMM with
+modes aligned on the vertices of a cube in higher dimensions, with the number of modes ranging from 8 to
+64. Evaluation metrics and additional figures for these experiments are provided in Table 4 in A.4.
+(a)True (b)AF (c)HMC (d)PT (e)SVGD (f)MIED (g)AIS
+Figure 3: SamplingmethodsforGaussianMixtureModels(GMM)with8and10modesdistributedoncircleswith
+radii r=10,12. The acronyms of the methods we compared are listed in the first paragraph of this section.
+Truncated Normal Distribution. Figure 4 shows the sampling results for q˜(x) = 1 N(0,I ), based on
+∥x∥≥c d
+5000samplesforeachmethod. SVGD,MIED,andAI-Sampleraredesignedforcontinuousdensities. SVGD
+(cid:0) (cid:1)
+and MIED specifically require the gradient of the log-probability, given by ∇log 1 ∗N(0,I ) in this
+∥x∥≥c d
+experiment. Despite relaxing the indicator function to 1 for large k, the algorithms failed to
+1+exp(−k(∥x∥−c))
+yield meaningful results (See Figure 8 in A.4 for the results of their algorithms). Therefore, we compare AF
+with MH, HMC, and PT. We also tested our algorithm on 10D space. Additional figures and tables are
+given in A.4.
+(a)True (b)AF (c)MH (d)HMC (e)PT
+Figure 4: Sampling methods for truncated normal distributions with radii c = 6 and c = 8 in 2D space for
+the first two rows. The last row presents sampling results in 5D with a radius of 8, projected onto a 3D
+space.
+Funnel Distribution. A well-known challenging distribution for sampling is the funnel distribution, defined
+8as:
+d−1
+(cid:89)
+P(x ,x ,...,x )∝N(x |0,σ2) N(x |0,exp(x )),
+1 2 d 1 i 1
+i=2
+In this setup, x ,i = 2,··· ,d has a variance that depends exponentially on x , forming a funnel-shaped
+i 1
+distribution. Sampling is challenging due to this exponential dependence, causing extreme concentration for
+negative x and wide dispersion for positive x , making exploration difficult, especially in high dimensions.
+1 1
+We tested our Annealing Flow together with other algorithms on d = 5 case. Here, we present the
+sampling result projected onto a 3D space for a funnel distribution in a 5D space, with σ2 =0.81:
+(a)AF (b)HMC (c)PT (d)SVGD (e)MIED (f)AIS
+Figure 5: Sampling Methods for Funnel Distribution in d=5, projected onto d=3.
+Exp-Weighted Gaussian with an extreme number of modes in high-dimensional spaces. We tested each
+algorithm on sampling from an extreme distribution:
+p(x 1,x 2,··· ,x 10)∝e10(cid:80)1 i=0 1|xi|−1 2∥x∥2 ,
+which has 210 =1024 modes arranged at the vertices of a 10-Dimension cube. The L2-distance be-
+tween two horizontally or vertically adjacent modes is 10, while the diagonal modes are separated by up to
+√
+10·202 ≈63.25. We also tested on the extreme distribution:
+p(x 1,x 2,··· ,x 50)∝e10(cid:80)1 i=0 1|xi|+10(cid:80)5 i=0 11xi−1 2∥x∥2 ,
+which has 210 =1024 modes arranged at the vertices of a 50-Dimension space.
+Giventhechallengeofvisualizingresultsinhigh-dimensionalspace,wepresenttheprojectedresultsonto
+the first 3 dimensions in Figure 6. For comparisons in 10D space, please refer to Figure 12 in A.4. The
+performance of SVGD, MIED, and AIS is inferior to AF, as compared in Figures 13 and 14 in A.4.
+(a)AF (b)HMC (c)PT (d)SVGD (e)MIED (f)AIS
+Figure 6: Sampling Methods for an Exp-Weighted Gaussian Distribution with 1024 modes in Dimension
+d=50, projected onto a d=3 Space.
+Table 1: The number of modes successfully explored by each algorithm across various dimensions.
+d=2 d=5 d=10 d=50 d=2 d=5 d=10 d=50
+True 4 32 1024 1024
+AF 4 32 1024 1024 SVGD 3.9 28.5 917.3 882.4
+HMC 3.1 24.3 213.5 <10 MIED 3.8 28.0 823.4 790.6
+PT 3.4 25.2 233.7 <10 AIS 3.8 28.3 707.4 235.6
+Table1presentsthenumberofmodessuccessfullyexploredbydifferentalgorithmsacrossvaryingdimen-
+sions. Each algorithm was run 10 times, sampling 10,000 points per run, and the average number of modes
+explored by each algorithm was then calculated.
+9Bayesian logistic regression. We use the same Bayesian logistic regression setting as in Liu & Wang (2016),
+where a hierarchical structure is assigned to the model parameters. The weights β follow a Gaussian prior
+p (β|α) = N(β;0,α−1), and α follows a Gamma prior p (α) = Gamma(α;1,0.01). Sampling is performed
+0 0
+on the posterior p(β,α|D), where D = {x ,y }n . The performance comparisons are shown in Table 2.
+i i i=1
+Detailed settings are given in A.3.4.
+Table2: BayesianLogisticRegression: comparisonofdifferentalgorithmsacrossdatasets. Inthetable·±·/·
+represents Accuracy(%)±std(%)/log-posterior
+Dataset Annealing SVGD MEID(ICLR2023) AI-Sampler(ICML2024)
+Diabetes(d=8) 76.30±2.12/−0.496 76.10±2.5/−0.502 75.80±2.32/−0.503 76.30±2.18/−0.493
+BreastCancer(d=10) 97.85±1.12/−0.017 98.83±3.10/−0.008 98.89±2.12/−0.008 97.83±2.80/−0.019
+Heart(d=13) 88.46±2.73/−0.316 79.36±3.78/−0.588 86.70±2.24/−0.321 84.23±2.54/−0.458
+Australian(d=14) 86.59±1.20/−0.361 84.56±2.87/−0.365 85.17±1.34/−0.369 84.62±2.30/−0.375
+Ijcnn1(d=22) 91.96±0.05/−0.195 89.44±0.34/−0.209 91.84±0.15/−0.198 88.32±0.25/−0.334
+Svmguide3(d=22) 80.04±0.70/−0.472 78.89±1.20/−0.479 80.12±1.04/−0.472 80.12±0.98/−0.468
+German(d=24) 78.04±1.70/−0.473 76.43±1.70/−0.483 77.21±1.80/−0.479 76.89±1.84/−0.484
+Importance flow. Here we also report the preliminary results of the importance flow (discussed in Section
+5) for estimating E (cid:2) 1 (cid:3) with varying c and dimensions. This estimation uses samples from the
+x∼N(0,I) ∥x∥≥c
+experiment on the Truncated Normal Distribution, and thus the results for SVGD, MIED, and AIS cannot
+be reported. Please refer to A.3.5 for experimental settings. Additionally, we discussed a possible extension
+of the Importance Flow framework in A.6.
+Table 3: Comparison of Methods and Results for different radii (r) and dimensions (d).
+Methods Radius d=2 d=3 d=4 d=5
+r=4 3.35E-04 1.13E-03 3.02E-03 6.84E-03
+TrueProbability
+r=6 1.52E-08 7.49E-08 2.89E-07 9.50E-07
+r=4 4.04e-04(1.0e-04) 1.30e-03(2.3e-04) 3.36e-03(4.23e-04) 7.86e-03(8.21e-04)
+ImportanceFlow
+r=6 9.81e-08(4.02e-07) 1.51e-07(1.23e-07) 2.13e-07(8.71e-08) 2.38e-07(3.48e-06)
+r=4 7.56e-04(4.99e-04) 2.52e-03(6.33e-04) 8.97e-03(9.05e-04) 1.12e-02(1.55e-03)
+DREwithHMCSamples
+r=6 4.35e-07(7.21e-07) 9.01e-07(2.79e-06) 1.82e-07(2.89e-06) 2.31e-06(6.21e-06)
+r=4 6.79e-04(3.58e-04) 2.38e-03(5.40e-04) 5.78e-03(7.98e-03) 9.94e-03(1.13e-03)
+DREwithPTSamples
+r=6 5.37e-07(9.56e-07) 8.78e-07(2.32e-06) 9.23e-07(2.51e-06) 1.98e-06(7.73e-06)
+r=4 2.75e-04(6.0e-04) 1.18e-03(1.1e-03) 2.71e-03(1.7e-03) 7.44e-03(2.6e-03)
+Na¨ıveMC
+r=6 0 0 0 0
+7 Discussions
+In this paper, we have proposed the Annealing Flow (AF) framework, a novel and flexible approach for
+sampling from high-dimensional and multi-modal distributions. AF offers several advantages over existing
+methods, as thoroughly discussed in A.5. Additionally, we have also compared the training and sampling
+times in A.5. Extensive experiments demonstrate that AF performs well across a variety of challenging
+distributions and real-world datasets.
+TheAnnealingFlowframeworkpresentedinthispaperishighlyflexibleandaccommodatesvariouschal-
+lenging distributions. The concept of ‘Annealing’ in sampling can be interpreted as gradually transitioning
+from an easy-to-sample distribution to the target distribution. Therefore, each intermediate distribution f
+k
+can be defined flexibly without adhering to (4), as long as the transitions between f and f are smooth
+k−1 k
+andthesequenceconvergestothetargetq(x). Ifthedensitymodesarecloseenough,allf˜(x)cansimplybe
+k
+set to the target density q(x), making the Annealing Flow objective equivalent to the Wasserstein gradient
+flow, as discussed in A.2. Additionally, we believe that by adding more intermediate distributions, one can
+obtainintermediatesamplesatvarioustimepointstoconstructalow-varianceestimatorforthenormalizing
+constant. Finally, the importance flow discussed in Section 5 may be extended to a distribution-free model,
+allowingonetolearnanimportanceflowfromadatasetforsamplingitsLeast-FavorableDistribution(LFD)
+with minimal variance, as further detailed in A.6.
+10A Appendix
+A.1 Propositions and proofs
+Proposition 1. Given the unnormalized density f˜ , the KL-Divergence between T f˜ and f˜ is equiv-
+k−1 # k−1 k
+alent to:
+(cid:34) (cid:35)
+(cid:90) tk
+KL(T f˜ ∥f˜)=c+E E˜ (x(t ))− ∇·v (x(s),s)ds ,
+# k−1 k x∼fk−1 k k k
+tk−1
+up to a constant c that is independent of v (x(s),s).
+k
+Proof:
+The expression for KL-divergence is given by:
+(cid:34) (cid:35)
+T f˜ (x) (cid:104) (cid:105)
+KL(T f˜ ∥f˜)=E log # k−1 =E logT f˜ (x)−logf˜(x) .
+# k−1 k x∼f˜ k−1 f˜(x) x∼f˜ k−1 # k−1 k
+k
+Now, recall that logf˜(x) corresponds to the energy term E˜ (x(t )) up to an additive constant, so we
+k k k
+substitute:
+(cid:104) (cid:105)
+KL(T f˜ ∥f˜)=E logT f˜ (x)+E˜ (x(t ))+c ,
+# k−1 k x∼f˜
+k−1
+# k−1 k k
+where c is a constant that is independent of v (x(s),s). This constant c is omitted for now since it doesn’t
+k
+affect the gradient descent calculations.
+Next, to compute logT f˜ (x), we use the fact that the dynamics of the pushforward density are
+# k−1
+governed by the velocity field v (x(s),s):
+k
+d ∇ρ (x(s),s)·∂ x(s)+∂ ρ (x(s),s)
+logρ (x(s),s)= k s s k
+ds k ρ (x(s),s)
+k
+∇ρ ·v −∇·(ρ v )(cid:12)
+= k k k k (cid:12) (by (1) and (2))
+ρ k (cid:12) (x(s),s)
+=−∇·v (x(s),s).
+k
+Integrating this equation over the interval s∈[t ,t ], we find:
+k−1 k
+(cid:90) tk
+logT f˜ (x)=logρ (x(t ))=logρ (x(t ))− ∇·v (x(s),s)ds.
+# k−1 k k k k−1 k
+tk−1
+We now substitute this result back into the KL-divergence expression:
+(cid:34) (cid:35)
+(cid:90) tk
+KL(T f˜ ∥f˜)=E logρ (x(t ))− ∇·v (x(s),s)ds+E˜ (x(t ))+c .
+# k−1 k x∼f˜
+k−1
+k k−1 k k k
+tk−1
+Notice that logρ (x(t )) is independent of v (x(s),s) and acts as another constant term that can be
+k k−1 k
+absorbed into c. Therefore, the relevant terms for the KL-divergence are:
+(cid:34) (cid:35)
+(cid:90) tk
+KL(T f˜ ∥f˜)=c+E E˜ (x(t ))− ∇·v (x(s),s)ds .
+# k−1 k x∼f˜
+k−1
+k k k
+tk−1
+11Proposition 2. Let x(t) be particle trajectories driven by a smooth velocity field v (x(t),t) over the time
+k
+interval [t ,t ], where h = t −t . Assume that v (x,t) is Lipschitz continuous in both x and t. By
+k−1 k k k k−1 k
+dividing [t ,t ] into S equal mini-intervals with grid points t (where s=0,1,...,S and t =t ,
+k−1 k k−1,s k−1,0 k−1
+t =t ), the following approximation holds:
+k−1,S k
+(cid:90) tk E (cid:2) ∥v (x(t),t)∥2(cid:3) dt= S S (cid:88)−1 E(cid:2) ∥x(t )−x(t )∥2(cid:3) +O(cid:18) h2 k(cid:19) .
+x(t) k h k−1,s+1 k−1,s S
+tk−1 k s=0
+As h
+k
+→0 or S →∞, the error term O(cid:16) h S2 k(cid:17) becomes negligible.
+Proof:
+Consider particle trajectories x(t) driven by a sufficiently smooth velocity field v (x(t),t) over the time
+k
+interval[t k−1,t k],whereh
+k
+=t k−t k−1. WedividethisintervalintoS equalmini-intervalsoflengthδt= h Sk,
+resulting in grid points t =t +sδt for s=0,1,...,S, where δt= tk−tk−1.
+k−1,s k−1 S
+Within each mini-interval [t ,t ], we perform a Taylor expansion of x(t) around t :
+k−1,s k−1,s+1 k−1,s
+1dv
+x(t )=x(t )+v (x(t ),t )δt+ kδt2+O(δt3),
+k−1,s+1 k−1,s k k−1,s k−1,s 2 dt
+where d dv tk denotes the total derivative of v k with respect to time.
+The squared displacement over the mini-interval [t ,t ] is given by:
+k−1,s k−1,s+1
+∥x(t k−1,s+1)−x(t k−1,s)∥2 =(cid:13) (cid:13) (cid:13) (cid:13)v k(x(t k−1,s),t k−1,s)δt+ 21d dv tkδt2+O(δt3)(cid:13) (cid:13) (cid:13) (cid:13)2
+=∥v (x(t ),t )∥2δt2+O(δt3),
+k k−1,s k−1,s
+asweassumethatv
+k
+isL-Lipschitzcontinuousanditfollowsthat|d dv tk|≤L. Thehigher-ordertermsO(δt3)
+become negligible as δt→0.
+Summing the expected squared displacements over all mini-intervals, we obtain:
+S−1 S−1
+(cid:88) E(cid:2)
+∥x(t )−x(t
+)∥2(cid:3) =δt2(cid:88) E(cid:2)
+∥v (x(t ),t
+)∥2(cid:3) +O(cid:0) S·δt3(cid:1)
+.
+k−1,s+1 k−1,s k k−1,s k−1,s
+s=0 s=0
+Now,weexaminetheL.H.S.ofProposition2byapproximatingtheintegraloftheexpectedsquaredvelocity
+using a Riemann sum:
+(cid:90) tk
+E (cid:2) ∥v (x(t),t)∥2(cid:3)
+dt=δtS (cid:88)−1
+E(cid:2) ∥v (x(t ),t )∥2(cid:3) +O(cid:0) S·δt2(cid:1)
+x(t) k k k−1,s k−1,s
+tk−1 s=0
+(cid:34) S−1 (cid:35)
+=δt 1 (cid:88) E(cid:2) ∥x(t )−x(t )∥2(cid:3) +O(S·δt) +O(S·δt2)
+δt2 k−1,s+1 k−1,s
+s=0
+S−1
+= 1 (cid:88) E(cid:2) ∥x(t )−x(t )∥2(cid:3) +O(cid:0) S·δt2(cid:1) , □
+δt k−1,s+1 k−1,s
+s=0
+where the Riemann sum error term O(S·δt2) arises from a well-known result (for instance, see Chapter 1 of
+Axler (2020)), given the assumption that v is L−Lipschitz continuous.
+k
+12Proposition 3. By Taylor’s expansions, and assume that h =t −t , we have:
+k k k−1
+1. x(t )−x(t )=(cid:82)tk v (x(s),s)ds=h v (x(t ),t )+O(h2)
+k k−1 tk−1 k k k k−1 k−1 k
+2. E˜ (x(t ))=E˜ (X(t ))+h ∇E˜ (X(t ))·v (x(t ),t )+O(h2)
+k k k k−1 k k k−1 k k−1 k−1 k
+Proof:
+The first equation directly follows from a simple Taylor expansion around time t . Similarly, by
+k−1
+performing Taylor expansion around t :
+k−1
+E˜ (x(t ))=E˜ (X(t ))+(x(t )−x(t ))·∇E˜ (X(t ))+O(h2)
+k k k k−1 k k−1 k k−1 k
+=E˜ (X(t ))+(h v (x(t ),t )+O(h2))·∇E˜ (X(t ))+O(h2)
+k k−1 k k k−1 k−1 k k k−1 k
+=E˜ (X(t ))+h ∇E˜ (X(t ))·v (x(t ),t )+O(h2)
+k k−1 k k k−1 k k−1 k−1 k
+Density Ratio Estimation (DRE) By optimizing the following loss function:
+(cid:104) (cid:105) (cid:104) (cid:105)
+L k(θ k)=E
+x(tk−1)∼fk−1
+log(1+e−rk(xi(tk−1))) +E
+x(tk)∼fk
+log(1+erk(xi(tk))) ,
+the model learns an optimal r∗(x;θ )=logfk−1(x).
+k fk(x)
+Proof:
+Express the loss function as integrals over x:
+(cid:90) (cid:16) (cid:17) (cid:90) (cid:16) (cid:17) (cid:90)
+L
+k
+= f k−1(x)log 1+e−rk(x) dx+ f k(x)log 1+erk(x) dx≜ l k(x)dx.
+Compute the functional derivative of l (x) with respect to r (x):
+k k
+δl
+k =−f (x)·
+e−rk(x)
++f (x)·
+erk(x)
+.
+δr k(x) k−1 1+e−rk(x) k 1+erk(x)
+Next, we can set the derivative δlk to zero to find the minimizer r∗(x):
+δrk(x) k
+(cid:18) (cid:19)
+f (x)
+r∗(x)=ln k−1 .
+k f (x)
+k
+Therefore, by concatenating each r∗(x), we obtain
+k
+K
+r∗(x)=(cid:88) r∗(x)=logf K−1(x)
+·
+f K−2(x) ···f 0(x)
+=log
+f 0(x) =logπ 0(x)
+,
+k f (x) f (x) f (x) f (x) q∗(x)
+K K−1 1 K
+k=1
+the log density ratio between π (x) and q∗(x).
+0
+A.2 Equivalence to Wasserstein gradient flow when β = 1 and static Wasserstein
+regularization is used
+Inthissection,wedemonstratetheequivalenceofAnnealingFlowtotheWassersteinGradientFlowwhenall
+β ,k =1,2,...,K, are set to 1, and when using a static Wasserstein regularization, instead of the dynamic
+k
+Wasserstein regularization derived in Proposition 9.
+Langevin Dynamics and Fokker-Planck Equation: Langevin Dynamics is represented by the following SDE:
+√
+dX =−∇E(X )dt+ 2dW , (17)
+t t t
+whereE istheenergyfunctionoftheequilibriumdensityf(x,T)=q(x). Standardgenerativemodeltraining
+typically focuses on the case of a normal equilibrium, i.e., E(x)= x2 and q(x)∝e−E(x). Let X ∼p and
+2 0 X
+13denotethedensityofX byρ(x,t). TheLangevinDynamicsalsocorrespondstotheFokker-PlanckEquation
+t
+(FPE), which describes the evolution of ρ(x,t) towards the equilibrium ρ(x,T)=q(x), as follows:
+∂ ρ=∇·(ρ∇E+∇ρ), ρ(x,0)=p (x). (18)
+t X
+In our algorithm, we focus on sampling from any distribution using its energy function, requiring only
+theunnormalizeddensity. Therefore,E(X )representsthepotentialofanytargetdensityq(x). Weinitialize
+t
+samplesfromaneasy-to-sampledistribution,ρ(x,0)=π (x),suchasN(0,I ),andaimtolearnthetrajectory
+0 d
+between π (x) and the target q(x). Therefore, sampling from q(x) boils down to first drawing x(0) from
+0
+π (x) and then moving x(0) along the learned trajectory to finally obtain x(T)∼q(x).
+0
+JKO Scheme: The Jordan-Kinderlehrer-Otto (JKO) scheme (Jordan et al., 1998) is a time discretization
+schemeforgradientflowstominimizeKL(ρ∥q)undertheWasserstein-2metric. Givenatargetdensityq and
+afunctionalF(ρ)=KL(ρ∥q),theJKOschemeapproximatesthecontinuousgradientflowofρ(x,t)bysolving
+a sequence of minimization problems. Assume there are K steps with time stamps 0 = t ,t ,··· ,t = T,
+0 1 K
+at each time stamp t , the scheme updates ρ at each time step by minimizing the functional
+k k
+(cid:18) (cid:19)
+1
+ρ =argmin F(ρ)+ W2(ρ,ρ ) , (19)
+k ρ 2τ 2 k−1
+where W (ρ,ρ ) denotes the squared 2-Wasserstein distance between the probability measures ρ and ρ .
+2 k−1 k
+It was proven in Jordan et al. (1998) that as h = t −t approaches 0, the solution ρ(·,kh) provided by
+k k−1
+the JKO scheme converges to the solution of (18), at each step k.
+The later works Xu et al. (2024a) have further proved that solving for the transport density ρ by (19)
+k
+is equivalent to solving for the transport map T by:
+k
+(cid:18) (cid:19)
+1
+T =arg min KL(T ρ ∥q)+ E ∥x−T (x)∥2 (20)
+k T:Rd→Rd # k−1 2τ x∼ρk−1 k
+Therefore, we immediately see that the Wasserstein gradient flow based on the discretized JKO scheme
+is equivalent to (6) when we set each f˜(x) as the target distribution q(x), i.e., when all the β are set to 1,
+k k
+and when the second term in the objective (6) is relaxed to a static W regularization.
+2
+This suggests that when the modes of the densities are not too far apart, and it is difficult to find a
+proper sequence of β , one can simply set all f˜(x) in our algorithm as the target density q(x), to construct
+k k
+a discretized sequence of transport maps based on Wasserstein gradient descent.
+A.3 Experimental Details
+A.3.1 Evaluation metrics
+To assess the performance of our model, we utilized two key metrics: Maximum Mean Discrepancy (MMD)
+and Wasserstein Distance, both of which measure the divergence between the true samples and the samples
+generated by the algorithms.
+Maximum Mean Discrepancy (MMD)
+MMD is a non-parametric metric used to quantify the difference between two distributions based on
+samples. GiventwosetsofsamplesX
+1
+∈Rn1×d andX
+2
+∈Rn2×d,MMDcomputesthekernel-baseddistances
+between these sets. Specifically, we employed a Gaussian kernel:
+k(x,y)=exp{−α∥x−y∥2},
+2
+parameterized by a bandwidth α. The MMD is computed as follows:
+1 (cid:88) 1 (cid:88) 2 (cid:88)
+MMD(X ,X )= k(Xi,Xj)+ k(Xi,Xj)− k(Xi,Xj),
+1 2 n2 1 1 n2 2 2 n n 1 2
+1 i,j 2 i,j 1 2 i,j
+14where k(·,·) represents the Gaussian kernel. In our experiments, we set α=1/γ2 and γ =0.1·median dist,
+where median dist denotes the median of the pairwise distances between the two datasets.
+Wasserstein Distance
+In addition to MMD, we used the Wasserstein distance, which measures the cost of transporting mass
+between distributions. Given two point sets X ∈ Rd and Y ∈ Rd, we compute the pairwise Euclidean
+distance between the points. The Wasserstein distance is then computed using the optimal transport plan
+via the linear sum assignment method (from scipy.optimize package):
+n
+1 (cid:88)
+W(X,Y)= ∥X −Y ∥ ,
+n r(i) c(i) 2
+i=1
+wherer(i)andc(i)aretheoptimalrowandcolumnassignmentsdeterminedthroughlinearsumassignment.
+In all experiments, we sample 10,000 points from each model and generate 10,000 true samples from the
+GMM to calculate and report both MMD and Wasserstein distance. Note that the smaller the two metrics
+mentioned above, the better the sampling performance.
+A.3.2 Hutchinson trace estimator
+The objective functions in (10) and (12) involve the calculation of ∇·v (x,t), i.e., the divergence of the
+k
+velocity field represented by a neural network. This may be computed by brute force using reverse-mode
+automatic differentiation, which is much slower and less stable in high dimensions.
+We can express ∇·v (x,t)=E (cid:2) ϵTJ (x)ϵ(cid:3) , where J (x) is the Jacobian of v (x,t) at x. Given a
+k ϵ∼N(0,Id) v v k
+fixed ϵ, we have J (x)ϵ=lim vk(x+σϵ)−vk(x), which is the directional derivative of v along the direction
+v σ→0 σ k
+ϵ. Thus, for a sufficiently small σ >0, we can propose the following estimator (Hutchinson, 1989; Xu et al.,
+2024a):
+(cid:20) (cid:21)
+v (x+σϵ,t)−v (x,t)
+∇·v (x,t)≈E ϵT k k . (21)
+k ϵ∼N(0,Id) σ
+√
+This approximation becomes exact as σ →0. In our experiments, we set σ =σ / d with σ =0.02.
+0 0
+A.3.3 Other Annealing Flow settings
+Time stamps and numerical integration
+By selecting K values of β, we divide the original time scale [0,1] of the Continuous Normalizing Flow
+(2) and (3) into K intervals: [t ,t ] for k = 1,2,...,K. Notice that the learning of each velocity field
+k−1 k
+v depends only on the samples from the (k−1)-th block, not on the specific time stamp. Therefore, we
+k
+can re-scale each block’s time interval to [0,1], knowing that using the time stamps [(k −1)h,kh] yields
+the same results as using [0,1] for the neural network v (x,t). For example, the neural network will learn
+k
+v (x,0)=v (x,(k−1)h) and v (x,1)=v (x,kh), regardless of the time stamps.
+k k k k
+RecallthatwerelaxedtheshortesttransportmappathintoadynamicW regularizationlossviaPropo-
+2
+sition 2. This requires calculating intermediate points x(t ), where s=0,1,...,S. We set S =3, evenly
+k−1,s
+spacing the points on [t ,t ], resulting in the path points x(t ),x(t +h /3),x(t +2h /3),x(t ).
+k−1 k k−1 k−1 k k−1 k k
+Tocomputeeachx(t ),weintegratethevelocityfieldv betweent andt ,usingtheRunge-Kutta
+k−1,s k k−1 k−1,s
+method for numerical integration. Additionally, for each x(t ), we calculate the velocity field at an in-
+k−1,s
+termediate time step between t and t to enable accurate numerical integration. Specifically, to
+k−1,s−1 k−1,s
+calculate x(t+h) based on x(t) and an intermediate time stamp t+ h:
+2
+h
+x(t+h)=x(t)+ (k +2k +2k +k ),
+6 1 2 3 4
+(cid:18) (cid:19)
+h h
+k =v(x(t),t), k =v x(t)+ k ,t+
+1 2 2 1 2
+15(cid:18) (cid:19)
+h h
+k =v x(t)+ k ,t+ , k =v(x(t)+hk ,t+h)
+3 2 2 2 4 3
+Here, h is the step size, and v(x,t) represents the velocity field.
+The choice of β
+k
+In the experiments on Gaussian Mixture Models (GMM) and Exp-Weighted Gaussians with various
+dimensions and radii, we set the number of intermediate β values to 8, equally spaced such that β = 0,
+k 0
+β = 1/8, β = 2/8, ..., β = 1. We chose the easy-to-sample distribution π (x) as N(0,I ). Finally, we
+1 2 8 0 d
+added 2 refinement blocks. The intermediate distributions are defined as:
+f˜ k(x)=π 0(x)1−βkq˜(x)βk.
+In the experiment on the Truncated Normal Distribution, we did not select β in the same manner as for
+k
+the GMM and Exp-Weighted Gaussian distributions. Instead, following the same Annealing philosophy, we
+construct a gradually transforming bridge from π (x) to q˜(x)=1 N(0,I ) by setting each intermediate
+0 |x|≥c d
+density as:
+f˜(x)=1 N(0,I ).
+k ∥x∥≥c/(k+1) d
+This choice also demonstrates that our Annealing Flow is highly flexible and capable of handling a wide
+range of challenging distributions.
+Intheexperimentonfunneldistributions,wesetallβ =1. Therefore,asdiscussedinAppendixA.2,the
+k
+algorithm becomes equivalent to a Wasserstein gradient descent problem. We also set the number of blocks
+to 8, consistent with the other experiments. This indicates that when the densities are largely concentrated
+in one region, one can simply set β to 1 and use a few blocks to find the optimal transport path based on
+k
+Wasserstein gradient descent.
+The objective
+During the experiments, we found that using the Taylor approximation (as described in Proposition 3,
+with a slight modification such that the expansion is around x(t ), allowing the loss to include the velocity
+k
+fieldterm): E˜ (x )−E˜ (x )=(−h )∇E(x )·v ,andreplacingtheenergyfunctionE˜ (x )generallyledto
+k k−1 k k k k k k k
+better performance. In our experiments on the GMM, Funnel distribution, and Exp-weighted Gaussian, we
+consistentlyusedthisform. FortheexperimentsontheTruncatedNormalandBayesianLogisticRegression,
+the original E˜ (x ) was used.
+k k
+Neural networks and selection of other hyperparameters
+The neural network structure in our experiments is consistently set with hidden layers of size 32-32-32.
+During implementation, we observed that when d ≤ 5, even a neural network with a single hidden layer of
+size 32 can perform well for sampling. However, for consistency across all experiments, we uniformly set the
+structure to 32-32-32.
+Wesample100,000datapointsfromN(0,I )fortraining,withabatchsizeof1,000. TheAdamoptimizer
+d
+is used with a learning rate of 0.0001, and the maximum number of iterations for each block v is set to
+k
+1,000. An additional two blocks are added for refinement after β =1.
+K
+Differentnumbersoftestsamplesareusedforreportingtheexperimentalresults: 5,000pointsaresampled
+and plotted for the experiment on Gaussian Mixture Models, 5,000 points for the experiment on Truncated
+Normal Distributions, 10,000 points for the experiment on Funnel Distributions, and 10,000 points for the
+experiment on Exp-Weighted Gaussian with 1,024 modes in 10D space.
+A.3.4 Bayesian logistic regression
+We use a hierarchical Bayesian structure for logistic regression across a range of datasets provided by LIB-
+SVM. The detailed setting of the Bayesian Logistic Regression is as follows.
+16We adopt the same Bayesian logistic regression setting as described in Liu & Wang (2016), where a
+hierarchicalstructureisassignedtothemodelparameters. Theweightsβ followaGaussianprior,p (β|α)=
+0
+N(β;0,α−1),andαfollowsaGammaprior,p (α)=Gamma(α;1,0.01). Thedatasetsusedarebinary,where
+0
+x has a varying number of features, and y ∈ {+1,−1} across different datasets. Sampling is performed
+i i
+from the posterior distribution:
+D n
+(cid:89) (cid:89) 1
+p(β,α|D)∝Gamma(α;1,0.01)· N(β ;0,α−1)· ,
+d 1+exp(−y βTx )
+i i
+d=1 i=1
+We set β =1 and use 8 blocks to train the Annealing Flow.
+k
+During testing, we use all algorithms to sample 1,000 particles of β and α jointly, and use {β(i)}1000
+i=1
+to construct 1,000 classifiers. The mean accuracy and standard deviation are then reported in Table 2.
+Additionally, the average log posterior in Table 2 is reported as:
+1 (cid:88) 1 (cid:88)
+log p(y|x,θ).
+|D | |C|
+test
+x,y∈Dtest θ∈C
+A.3.5 Importance flow
+We report the results of the importance sampler (discussed in 16) for estimating E (cid:2) 1 (cid:3) with
+x∼N(0,I) ∥x∥≥c
+varying c and dimensions, based on our Annealing Flow. To estimate E (cid:2) 1 (cid:3) , we know that the
+x∼N(0,I) ∥x∥≥c
+theoretically optimal proposal distribution which can achieve 0 variance is q˜∗(x)=1 N(0,I). Then the
+∥x∥≥c
+estimator becomes:
+(cid:20) (cid:21) n
+E [h(X)]=E
+π 0(x)
+·h(x) ≈
+1 (cid:88)π 0(x i)
+·h(x ), x ∼q∗(x),
+X∼π0(x) X∼q∗(x) q∗(x) n q∗(x ) i i
+i
+i=1
+where π (x)=N(0,I ), h(x)=1 and q∗(x)=Z·q˜∗(x).
+0 d ∥x∥≥c
+Therefore, theImportanceFlowconsistsoftwoparts: First, usingAnnealingFlowtosamplefromq˜∗(x);
+second, constructing a Density Ratio Estimation (DRE) neural network using samples from {x }n ∼q˜∗(x)
+i i=1
+and {y }n ∼N(0,I ), as discussed in Section 5.2. After successful training, the estimator becomes
+i i=1 d
+n
+1 (cid:88)
+DRE(x )·h(x ).
+n i i
+i=1
+The Naive MC results comes from directly using {y }n ∼N(0,I ) to construct estimator 1 (cid:80)n 1 .
+i i=1 d n i=1 ∥yi∥≥c
+It can be observed that when c≥6, the Naive MC methods consistently output 0 as the result.
+In our experiment, we use a single DRE neural network to construct the density ratio between π (x)
+0
+and q∗(x) = Z ·1 N(0,I) directly. The neural network structure consists of hidden layers with sizes
+∥x∥≥c
+64-64-64. The size of the training data is set to 100,000, and the batch size is set to 10,000. We use 30 to
+70 epochs for different distributions, depending on the values of c and dimension d. The Adam optimizer
+is used, with a learning rate of 0.0001. The test data size is set to 1,000, and all results are based on 200
+estimation rounds, each using 500 samples.
+A.3.6 Details of other algorithms
+The Algorithm 2, 3, and 4 introduce the algorithmic framework of Metropolis-Hastings (MH), Hamiltonian
+Monte Carlo (HMC), and Parallel Tempering (PT) compared in our experiments.
+In our experiments, we set the proposal density as q(x′|x) = N(x;0,I ). We use 5 replicas in Parallel
+d
+Tempering(PT),withalineartemperatureprogressionrangingfromT =1.0toT =2.0,andanexchange
+1 max
+interval of 100 iterations. For HMC, we set the number of leapfrog steps to 10, with a step size (ϵ) of 0.01,
+and the mass matrix M is set as the identity matrix. Additionally, we use the default hyperparameters as
+specified in SVGD (Liu & Wang, 2016), MIED (Li et al., 2023), and AI-Sampler (Egorov et al., 2024).
+In the actual implementation, we found that the time required for SVGD to converge increases significantly
+with the number of samples. Therefore, in most experiments, we sample 1000 data points at a time using
+SVGD, aggregate the samples, and then generate the final plot.
+17Algorithm 2 Metropolis-Hastings Algorithm
+1: Initializex 0
+2: fort=1toN do
+3: Proposex∗∼q(x∗|x t−1)
+4:
+Computeacceptanceratioα=min(cid:16)
+1,
+π(x∗)q(xt−1|x∗) (cid:17)
+π(xt−1)q(x∗|xt−1)
+5: Sampleu∼Uniform(0,1)
+6: if u<αthen
+7: x t=x∗
+8: else
+9: x t=x t−1
+10: endif
+11: endfor
+12: return{x t}N t=0
+Algorithm 3 Hamiltonian Monte Carlo (HMC)
+1: Initializex 0
+2: fort=1toN do
+3: Samplep∼N(0,M)
+4: Set(x,p)←(x t−1,p)
+5: fori=1toLdo
+6: p←p−ϵ∇U(x)
+2
+7: x←x+ϵM−1p
+8: p←p−ϵ∇U(x)
+2
+9: endfor
+10: Computeacceptanceratioα=min(1,exp(H(x t−1,p t−1)−H(x,p)))
+11: Sampleu∼Uniform(0,1)
+12: if u<αthen
+13: x t=x
+14: else
+15: x t=x t−1
+16: endif
+17: endfor
+18: return{x t}N t=0
+Algorithm 4 Parallel Tempering Algorithm
+1: Initializereplicas{x 1,x 2,...,x numreplicas}withGaussiannoise
+2: Initializetemperatures{T 1,T 2,...,T numreplicas}
+3: fori=1toiterationsdo
+4: forj=1tonumreplicasdo
+5: Proposex∗ j ∼q(x∗ j|x j){UsingMetropolis-Hastingsstepforeachreplica}
+6: Computeacceptanceratioα j= π π( (x x∗ j j))
+7: Sampleu∼Uniform(0,1)
+8: if u<α j then
+9: x j=x∗ j
+10: endif
+11: Storex j insamplesforreplicaj
+12: endfor
+13: if i modexchangeinterval=0then
+14: forj=1tonumreplicas−1do
+15: ComputeenergiesE j=−log(π(x j)+ϵ),E j+1=−log(π(x j+1)+ϵ)
+(cid:16) (cid:17)
+16: Compute∆= T1
+j
+− Tj1
++1
+(E j+1−E j)
+17: Sampleu∼Uniform(0,1)
+18: if u<exp(∆)then
+19: Swapx j↔x j+1
+20: endif
+21: endfor
+22: endif
+23: endfor
+24: returnsamplesfromallreplicas
+18A.4 More Results
+We adopt the standard Annealing Flow framework discussed in this paper for experiments on Gaussian
+Mixture Models (GMM), Truncated Normal distributions, and Exp-Weighted Gaussian distributions. For
+experiments on funnel distributions, we set each f˜(x) as the target q(x), under which the Annealing Flow
+k
+objective becomes equivalent to the Wasserstein Gradient Flow based on the JKO scheme, as discussed in
+A.2. Please refer to A.3.3 for β selections.
+k
+Gaussian Mixture Models (GMM)
+(a)True (b)AF (c)HMC (d)PT (e)SVGD (f)MIED (g)AIS
+Figure 7: Sampling methods for Gaussian Mixture Models (GMM) with 6, 8, and 10 modes distributed on circles
+with radii r=8,10,12.
+Evaluation Metrics: Wereport1)theMaximumMeanDiscrepancy(MMD)and2)theWassersteinDistance
+fortheGMMexperiments,asbothmetricsrequireaccesstotruedatasamples. Theresultsforthesemetrics
+are presented in Table 4. Please refer to A.3.1 for more details.
+Table4: MMDandWassersteinDistanceresults: ·/·representsMMD/Wasserstein. Thefirstrowcorresponds
+to d={dimension} GMM-{Number of Modes}.
+d=2GMM-8 d=2GMM-12 d=3GMM-8 d=4GMM-16 d=5GMM-32 d=6GMM-64
+AF 2.32E-03/7.38E-01 3.01E-03/8.05E-01 5.82E-03/1.97E+00 1.25E-03/3.33E+00 1.57E-03/2.82E+00 4.31E-03/3.53E+00
+HMC 7.33E-02/6.28E+00 9.06E-02/8.73E+00 9.92E-02/1.12E+01 9.76E-02/1.98E+01 2.14E-01/2.53E+01 2.15E-01/3.03E+01
+PT 6.27E-02/5.71E+00 9.01E-02/7.91E+00 8.83E-02/1.07E+01 8.98E-02/1.53E+01 1.18E-01/1.83E+01 1.05E-01/2.13E+01
+SVGD 9.35E-02/9.97E+00 1.85E-01/1.82E+01 9.81E-02/1.13E+01 9.63E-02/2.07E+01 1.98E-01/2.45E+01 1.32E-01/2.34E+01
+MIED 2.34E-03/8.01E-01 6.28E-03/9.35E-01 8.01E-03/2.52E+00 3.88E-02/0.89E+01 9.88E-03/7.89E+00 2.03E-02/1.13E+01
+AIS 2.33E-03/7.92E-01 4.02E-03/8.13E-01 7.55E-02/2.38E+00 5.26E-03/5.53E+00 6.37E-03/3.83E+00 1.87E-02/9.73E+00
+Truncated Normal Distribution
+Relaxations are applied to the Truncated Normal Distribution in all experiments except for MH, HMC,
+and PT. Specifically, we relax the indicator function 1 to 1 . We set k = 20 for all
+∥x∥≥c 1+exp(−k(∥x∥−c))
+experiments. AIS is designed for continuous densities, and we similarly relax the densities in SVGD and
+MIED, following the approach used in AF. The resulting plots are as follows:
+19(a)True (b)AF (c)HMC (d)PT (e)SVGD (f)MIED
+Figure 8: Sampling Methods for Truncated Normal Distributions with Radius c = 6, together with the
+failure cases of SVGD and MIED.
+Each algorithm draws 5,000 samples. It can be observed that MCMC-based methods, including HMC
+and PT, produce many overlapping samples. This occurs because when a new proposal is rejected, the
+algorithms retain the previous sample, leading to highly correlated sample sets.
+Table 5: Proportion of Annealing Flow Samples Within c, Across Different Dimensions
+Proportion Within c c=4 c=6 c=8
+D =2 0.17% 0.18% 1.78%
+D =3 0.20% 0.23% 3.23%
+D =4 0.68% 1.48% 3.68%
+D =5 1.46% 3.37% 4.12%
+D =10 2.13% 4.68% 7.13%
+(a)True (b)AF (c)MH (d)HMC (e)PT
+Fordimensionsd>2,visualizingtheresultsbycomparingthesamplepositionsusingaredspheresurface
+becomes challenging. Therefore, we calculate the proportion of samples within radius c. A lower proportion
+indicates better sampling performance. Table 5 presents these results. We also calculate the proportion
+of the surface ∥x∥ = c covered by the samples for AF, MH, HMC, and PT. In all experiments with the
+Truncated Normal distribution, AF covers more than 95% of the surface area. However, when d ≥ 3 and
+c≥6, all other methods cover less than 70% of the surface area.
+Funnel Distribution
+20In the main paper, we present the sampling methods for the funnel distribution with d = 5, projected
+onto a 3D space. To assess the sample quality, here we present the corresponding results projected onto a
+2D space, plotted alongside the density heat map.
+(a)AF (b)HMC (c)PT (d)SVGD (e)MIED (f)AIS
+(a)True (b)AF (c)HMC (d)PT (e)SVGD (f)MIED (g)AIS
+Figure 11: Sampling Methods for Funnel Distribution with σ2 =0.81 in Dimension d=5, projected onto a
+d=3 Space.
+As seen from both figures, our AF method achieves the best sampling performance on the funnel dis-
+tribution, while other methods, such as MIED and AIS, fail to capture the full spread of the funnel’s tail.
+Additionally, PT, SVGD, and AIS all fail to capture the sharp part of the funnel’s shape.
+Exp-Weighted Gaussian
+In the main paper, we present the sampling methods for the Exp-Weighted Gaussian distribution with
+1024 modes in a 50D space, projected onto a 3D space. To better assess the sample quality, we now present
+the corresponding results projected onto 2D and 1D spaces, plotted alongside the heat map and the true
+density, respectively.
+(a)AF (b)HMC (c)PT (d)SVGD (e)MIED (f)AIS
+Figure 12: Sampling Methods for an Exp-Weighted Gaussian Distribution with 1024 modes in 10D (Top)
+and 50D (Bottom), projected onto a 3D Space.
+21(a)True (b)AF (c)HMC (d)PT (e)SVGD (f)MIED (g)AIS
+(h)True (i)AF (j)HMC (k)PT (l)SVGD (m)MIED (n)AIS
+Figure 13: Sampling Methods for an Exp-Weighted Gaussian Distribution with 1024 modes in 10D (Top)
+and 50D (Bottom), projected onto a 2D Space.
+(a)AF (b)HMC (c)PT (d)SVGD (e)MIED (f)AIS
+Figure 14: Sampling Methods for an Exp-Weighted Gaussian Distribution with 1024 modes in 10D (Top)
+and 50D (Bottom), projected onto a 1D Space.
+As seen in Figures 13 and 14, AF produces balanced samples, and its 1D projection closely matches the
+true density. While both SVGD and MIED captured around 800 to 900 modes, their samples across the
+modes are imbalanced, as observed in the figures.
+22A.5 Comparisons
+Table 6: Comparison of Different Sampling Methods
+Method Key Characteristics Advantages Disadvantages
+- Continuous Normalizing
+Flow-basedapproach. -Independentsampling.
+- Leverages annealing princi- -Balancedmodeexploration.
+ples for sampling challenging -Handlesmulti-modaldistri-
+-Requirespre-training,which
+Annealing high-dimensional, multi- butionseffectively.
+can be computationally ex-
+Flow (AF) modaldistributions. - Once trained, the sampling
+pensive.
+- Uses transport maps to processisveryfast
+transform samples from a - Scales linearly with sample
+base distribution to the sizeanddimensionality.
+targetdistribution.
+- Metropolis-Hastings, Paral- -Slowmixingtime.
+lel Tempering, Hamiltonian - Struggles with multi-modal
+MonteCarlo(HMC)variants. -Flexible,general-purpose. distributions.
+MCMC - Samples sequentially from - Doesn’t require pre- - Sample correlation reduces
+the target distribution, with training. effectivesamplesize(ESS).
+eachsampledependingonthe - Imbalanced mode explo-
+previousone. ration.
+Particle- - Kernel computations scale
+-Noburn-inperiod.
+Based -Reliesonparticledynamics polynomially with sample
+-Lesssamplecorrelationthan
+Optimization andkernelmethodstosample sizeanddimensionality.
+MCMC.
+(SVGD, fromthetargetdistribution. -Sensitivetokernelhyperpa-
+-Encouragesglobalsearch.
+MIED) rameters.
+- Uses neural networks to
+accelerate or guide MCMC - Can speed up the explo- -Inheritssomelimitationsof
+NN-Assisted methods. rationsofMCMCmethods. MCMC,suchasslowmixing,
+MCMC - Combines the expressive -LeveragesNNforimproved correlatedsamples,andmode
+power of neural networks samplingefficiency. imbalance.
+withMCMC.
+- Limited generalization to
+-Learnsscorefunctionstoit-
+arbitrary distributions, as
+erativelyperturbsamplesto-
+- Strong theoretical guaran- score functions are analyti-
+Score-based wardsthetargetdistribution.
+teesforsamplingspecificdis- callyderived.
+Diffusion - Combines the expressive
+tributions. - Challenging in complex,
+power of neural networks
+high-dimensional distribu-
+withMCMC.
+tions
+Annealing Flow (AF) requires pre-training, typically taking 10-20 minutes for tasks with dimensions <
+10, and around 30 minutes for tasks around dimension 50. Once trained, AF samplers are very efficient:
+generating10,000samplesinjust1.5seconds. Thesepre-trainedsamplerscanbereusedatanytime,offering
+significant speed advantages. In contrast, MCMC methods, such as Metropolis-Hastings or Hamiltonian
+Monte Carlo, require about 1 minute to sample 10,000 points, and their performance deteriorates in high-
+dimensional, multi-modal settings. Moreover, particle-based methods, like SVGD, struggle significantly
+when generating more than 3,000 samples, requiring about 20 minutes for that many samples. Therefore,
+webelievethatuserscantakeadvantageofAF’sofflinetraining,asitallowsthesamplerstobetrainedonce
+and then efficiently reused for sampling whenever needed.
+A.6 Importance Flow
+The importance flow discussed and experimented with in this paper requires a given form of π (x), and
+0
+thus, a given form of q˜∗(x) = π (x)·|h(x)| for estimating E [h(X)]. In our experimental settings,
+0 X∼π0(x)
+q˜∗(x)=1 N(0,I )canberegardedastheLeast-Favorite-Distribution(LFD).Weconductedaparamet-
+∥x∥≥c d
+ric experiment for the case where q˜∗(x) has the given analytical form.
+However, we believe future research may extend this approach to a distribution-free model. That is,
+given a dataset without prior knowledge of its distribution, one could attempt to learn an importance flow
+23for sampling from its Least-Favorite Distribution (LFD) while minimizing the variance. For example, in the
+caseofsamplingfromtheLFDandobtainingalow-varianceISestimatorforP (∥x∥≥c), onemayuse
+x∼π(x)
+the following distribution-free loss for learning the flow:
+min 1 (cid:88)n (cid:2) 1{T(x ;θ)≤c}·∥T(x ;θ)−c∥2(cid:3) +γ(cid:90) 1 ∥v(x(t),t;θ)∥2, (22)
+θ n i=1 i i 0
+where the first term of the loss pushes the dataset {x }n towards the Least-Favorite tail region, while the
+i i=1
+second term ensures a smooth and cost-optimal transport map. Note that the above loss assumes no prior
+knowledge of the dataset distribution π(x) or the target density q(x).
+Xuetal.(2024b)hasalsoexploredthistosomeextentbydesigningadistributionallyrobustoptimization
+problem to learn a flow model that pushes samples toward the LFD Q∗, which is unknown and learned by
+the model through a risk function R(Q∗,ϕ). Such framework has significant applications in adversarial
+attacks, robust hypothesis testing, and differential privacy. Additionally, the recent paper by Ribera Borrell
+et al. (2024) introduces a dynamic control loss for training a neural network to approximate the importance
+sampling control. We believe that by designing an optimal control loss in line with the approaches of these
+two papers, one can develop a distribution-free Importance Flow for sampling from the LFD of a dataset
+while minimizing the variance of the adversarial loss, which can generate a greater impact on the fields of
+adversarial attacks and differential privacy.
+References
+Michael S. Albergo and Eric Vanden-Eijnden. Learning to sample better, 2023. URL https://arxiv.org/
+abs/2310.11232. Les Houches 2022 Summer School on Statistical Physics and Machine Learning.
+Michael Arbel, Alex Matthews, and Arnaud Doucet. Annealed flow transport monte carlo. In International
+Conference on Machine Learning, pp. 318–330. PMLR, 2021.
+Sheldon Axler. Measure, integration & real analysis. Springer Nature, 2020.
+Maximilian Balandat, Brian Karrer, Daniel Jiang, Samuel Daulton, Ben Letham, Andrew G Wilson, and
+Eytan Bakshy. Botorch: A framework for efficient monte-carlo bayesian optimization. Advances in neural
+information processing systems, 33:21524–21538, 2020.
+Jean-DavidBenamouandYannBrenier. Acomputationalfluidmechanicssolutiontothemonge-kantorovich
+mass transfer problem. Numerische Mathematik, 84(3):375–393, 2000.
+LuigiBonati,Yue-YuZhang,andMicheleParrinello.Neuralnetworks-basedvariationallyenhancedsampling.
+Proceedings of the National Academy of Sciences, 116(36):17641–17647, 2019.
+Nawaf Bou-Rabee and Jesu´s Mar´ıa Sanz-Serna. Randomized hamiltonian monte carlo. 2017.
+James Brofos, Marylou Gabri´e, Marcus A Brubaker, and Roy R Lederman. Adaptation of the independent
+metropolis-hastings sampler with normalizing flow proposals. In International Conference on Artificial
+Intelligence and Statistics, pp. 5949–5986. PMLR, 2022.
+Joan Bruna and Jiequn Han. Posterior sampling with denoising oracles via tilted transport. arXiv preprint
+arXiv:2407.00745, 2024.
+Joseph Carlson, Stefano Gandolfi, Francesco Pederiva, Steven C Pieper, Rocco Schiavilla, Kevin E Schmidt,
+and Robert B Wiringa. Quantum monte carlo methods for nuclear physics. Reviews of modern physics,
+87(3):1067–1118, 2015.
+RohitashChandra,KonarkJain,RatneelVDeo,andSallyCripps. Langevin-gradientparalleltemperingfor
+bayesian neural learning. Neurocomputing, 359:315–326, 2019.
+24Omar Chehab, Aapo Hyvarinen, and Andrej Risteski. Provable benefits of annealing for estimating nor-
+malizing constants: Importance sampling, noise-contrastive estimation, and beyond. Advances in Neural
+Information Processing Systems, 36, 2024.
+SitanChen,SinhoChewi,JerryLi,YuanzhiLi,AdilSalim,andAnruRZhang.Samplingisaseasyaslearning
+the score: theory for diffusion models with minimal data assumptions. arXiv preprint arXiv:2209.11215,
+2022.
+Sitan Chen, Vasilis Kontonis, and Kulin Shah. Learning general gaussian mixtures with efficient score
+matching. arXiv preprint arXiv:2404.18893, 2024.
+Kristy Choi, Chenlin Meng, Yang Song, and Stefano Ermon. Density ratio estimation via infinitesimal
+classification. In International Conference on Artificial Intelligence and Statistics, pp. 2552–2573. PMLR,
+2022.
+MichaelCHChoi.Metropolis–hastingsreversiblizationsofnon-reversiblemarkovchains.StochasticProcesses
+and their Applications, 130(2):1041–1073, 2020.
+Hyungjin Chung, Jeongsol Kim, Michael T Mccann, Marc L Klasky, and Jong Chul Ye. Diffusion posterior
+sampling for general noisy inverse problems. arXiv preprint arXiv:2209.14687, 2022.
+Adam D Cobb and Brian Jalaian. Scaling hamiltonian monte carlo inference for bayesian neural networks
+with symmetric splitting. In Uncertainty in Artificial Intelligence, pp. 675–685. PMLR, 2021.
+Rob Cornish, Paul Vanetti, Alexandre Bouchard-Cˆot´e, George Deligiannidis, and Arnaud Doucet. Scal-
+able metropolis-hastings for exact bayesian inference with large datasets. In International Conference on
+Machine Learning, pp. 1351–1360. PMLR, 2019.
+Bo Dai, Niao He, Hanjun Dai, and Le Song. Provable bayesian inference via particle mirror descent. In
+Artificial Intelligence and Statistics, pp. 985–994. PMLR, 2016.
+Gianluca Detommaso, Tiangang Cui, Youssef Marzouk, Alessio Spantini, and Robert Scheichl. A stein
+variational newton method. Advances in Neural Information Processing Systems, 31, 2018.
+Arnaud Doucet, Will Sussman Grathwohl, Alexander G de G Matthews, and Heiko Strathmann. Annealed
+importance sampling meets score matching. In ICLR Workshop on Deep Generative Models for Highly
+Structured Data, 2022.
+DavidJEarlandMichaelWDeem. Paralleltempering: Theory,applications,andnewperspectives. Physical
+Chemistry Chemical Physics, 7(23):3910–3916, 2005.
+EvgeniiEgorov,RicardoValperga,andEfstratiosGavves.Ai-sampler: Adversariallearningofmarkovkernels
+withinvolutivemaps. InProceedings of the International Conference on Machine Learning (ICML),2024.
+MarylouGabri´e,GrantMRotskoff,andEricVanden-Eijnden. Efficientbayesiansamplingusingnormalizing
+flows to assist markov chain monte carlo methods. arXiv preprint arXiv:2107.08001, 2021.
+Marylou Gabri´e, Grant M Rotskoff, and Eric Vanden-Eijnden. Adaptive monte carlo augmented with nor-
+malizing flows. Proceedings of the National Academy of Sciences, 119(10):e2109420119, 2022.
+Saul Brian Gelfand, Sanjoy K Mitter, et al. On sampling methods and annealing algorithms. 1990.
+Mark Girolami and Ben Calderhead. Riemann manifold langevin and hamiltonian monte carlo methods.
+Journal of the Royal Statistical Society Series B: Statistical Methodology, 73(2):123–214, 2011.
+Jim E Griffin and Stephen G Walker. On adaptive metropolis–hastings methods. Statistics and Computing,
+23:123–134, 2013.
+Minghao Gu and Shiliang Sun. Neural langevin dynamical sampling. IEEE Access, 8:31595–31605, 2020.
+Heikki Haario, Eero Saksman, and Johanna Tamminen. An adaptive metropolis algorithm. 2001.
+25Daniel C Hackett, Chung-Chun Hsieh, Michael S Albergo, Denis Boyda, Jiunn-Wei Chen, Kai-Feng Chen,
+KyleCranmer,GurtejKanwar,andPhialaEShanahan. Flow-basedsamplingformultimodaldistributions
+in lattice field theory. arXiv preprint arXiv:2107.00734, 2021.
+Matthew Hoffman, Alexey Radul, and Pavel Sountsov. An adaptive-mcmc scheme for setting trajectory
+lengths in hamiltonian monte carlo. In International Conference on Artificial Intelligence and Statistics,
+pp. 3907–3915. PMLR, 2021.
+Michael F Hutchinson. A stochastic estimator of the trace of the influence matrix for laplacian smoothing
+splines. Communications in Statistics-Simulation and Computation, 18(3):1059–1076, 1989.
+Pavel Izmailov, Sharad Vikram, Matthew D Hoffman, and Andrew Gordon Gordon Wilson. What are
+bayesian neural network posteriors really like? In International conference on machine learning, pp.
+4629–4640. PMLR, 2021.
+WilliamIJayandEthanTNeil. Bayesianmodelaveragingforanalysisoflatticefieldtheoryresults. Physical
+Review D, 103(11):114502, 2021.
+Richard Jordan, David Kinderlehrer, and Felix Otto. The variational formulation of the fokker–planck
+equation. SIAM journal on mathematical analysis, 29(1):1–17, 1998.
+KirthevasanKandasamy,AkshayKrishnamurthy,JeffSchneider,andBarnab´asP´oczos. Parallelisedbayesian
+optimisation via thompson sampling. In International conference on artificial intelligence and statistics,
+pp. 133–142. PMLR, 2018.
+Georgios Karagiannis and Christophe Andrieu. Annealed importance sampling reversible jump mcmc algo-
+rithms. Journal of Computational and Graphical Statistics, 22(3):623–648, 2013.
+FredericKoehlerandThuy-DuongVuong.Samplingmultimodaldistributionswiththevanillascore: Benefits
+of data-based initialization. arXiv preprint arXiv:2310.01762, 2023.
+Lingxiao Li, Qiang Liu, Anna Korba, Mikhail Yurochkin, and Justin Solomon. Sampling with mollified
+interaction energy descent. In Proceedings of the International Conference on Learning Representations
+(ICLR), 2023.
+Tzu-Mao Li, Jaakko Lehtinen, Ravi Ramamoorthi, Wenzel Jakob, and Fr´edo Durand. Anisotropic gaussian
+mutations for metropolis light transport through hessian-hamiltonian dynamics. ACM Transactions on
+Graphics (TOG), 34(6):1–13, 2015.
+Zengyi Li, Yubei Chen, and Friedrich T Sommer. A neural network mcmc sampler that maximizes proposal
+entropy. Entropy, 23(3):269, 2021.
+Qiang Liu. Stein variational gradient descent as gradient flow. Advances in neural information processing
+systems, 30, 2017.
+Qiang Liu and Dilin Wang. Stein variational gradient descent: A general purpose bayesian inference algo-
+rithm. Advances in neural information processing systems, 29, 2016.
+Bill Lozanovski, David Downing, Phuong Tran, Darpan Shidid, Ma Qian, Peter Choong, Milan Brandt, and
+Martin Leary. A monte carlo simulation-based approach to realistic modelling of additively manufactured
+lattice structures. Additive Manufacturing, 32:101092, 2020.
+Joel E Lynn, I Tews, Stefano Gandolfi, and A Lovato. Quantum monte carlo methods in nuclear physics:
+recent advances. Annual Review of Nuclear and Particle Science, 69(1):279–305, 2019.
+Chris J Maddison, Daniel Paulin, Yee Whye Teh, Brendan O’Donoghue, and Arnaud Doucet. Hamiltonian
+descent methods. arXiv preprint arXiv:1809.05042, 2018.
+Yinglong Miao, Victoria A Feher, and J Andrew McCammon. Gaussian accelerated molecular dynamics:
+unconstrainedenhancedsamplingandfreeenergycalculation.Journalofchemicaltheoryandcomputation,
+11(8):3584–3595, 2015.
+26Radford M Neal. Annealed importance sampling. Statistics and computing, 11:125–139, 2001.
+AtsushiNitandaandTaijiSuzuki. Stochasticparticlegradientdescentforinfiniteensembles. arXiv preprint
+arXiv:1712.05438, 2017.
+Antony M Overstall, David C Woods, and Ben M Parker. Bayesian optimal design for ordinary differential
+equation models with application in biological science. Journal of the American Statistical Association,
+2020.
+Manuel Pulido and Peter Jan van Leeuwen. Sequential monte carlo with kernel embedded mappings: The
+mapping particle filter. Journal of Computational Physics, 396:400–415, 2019.
+Benjamin Rhodes, Kai Xu, and Michael U Gutmann. Telescoping density-ratio estimation. Advances in
+neural information processing systems, 33:4905–4916, 2020.
+Enric Ribera Borrell, Jannes Quer, Lorenz Richter, and Christof Schu¨tte. Improving control based impor-
+tancesamplingstrategiesformetastablediffusionsviaadaptedmetadynamics. SIAMJournalonScientific
+Computing, 46(2):S298–S323, 2024.
+Lars Ruthotto, Stanley J Osher, Wuchen Li, Levon Nurbekyan, and Samy Wu Fung. A machine learning
+framework for solving high-dimensional mean field game and mean field control problems. Proceedings of
+the National Academy of Sciences, 117(17):9183–9193, 2020.
+Outi MH Salo-Ahen, Ida Alanko, Rajendra Bhadane, Alexandre MJJ Bonvin, Rodrigo Vargas Honorato,
+ShakhawathHossain,Andr´eHJuffer,AlekseiKabedev,MaijaLahtela-Kakkonen,AndersStøttrupLarsen,
+et al. Molecular dynamics simulations in drug discovery and pharmaceutical development. Processes, 9
+(1):71, 2020.
+Babak Shahbaba, Shiwei Lan, Wesley O Johnson, and Radford M Neal. Split hamiltonian monte carlo.
+Statistics and Computing, 24:339–349, 2014.
+Andy Shih, Suneel Belkhale, Stefano Ermon, Dorsa Sadigh, and Nima Anari. Parallel sampling of diffusion
+models. Advances in Neural Information Processing Systems, 36, 2024.
+GregoryBSorkin. Efficientsimulatedannealingonfractalenergylandscapes. Algorithmica,6:367–418,1991.
+Samuel Stanton, Wesley Maddox, Nate Gruver, Phillip Maffettone, Emily Delaney, Peyton Greenside, and
+Andrew Gordon Wilson. Accelerating bayesian optimization for biological sequence design with denoising
+autoencoders. In International Conference on Machine Learning, pp. 20459–20478. PMLR, 2022.
+Mandt Stephan, Matthew D Hoffman, David M Blei, et al. Stochastic gradient descent as approximate
+bayesian inference. Journal of Machine Learning Research, 18(134):1–35, 2017.
+SaifuddinSyed,AlexandreBouchard-Cˆot´e,GeorgeDeligiannidis,andArnaudDoucet.Non-reversibleparallel
+tempering: a scalable highly parallel mcmc scheme. Journal of the Royal Statistical Society Series B:
+Statistical Methodology, 84(2):321–350, 2022.
+JW Van Groenigen and A Stein. Constrained optimization of spatial sampling using continuous simulated
+annealing. Technical report, Wiley Online Library, 1998.
+DonVanRavenzwaaij,PeteCassey,andScottDBrown. Asimpleintroductiontomarkovchainmonte–carlo
+sampling. Psychonomic bulletin & review, 25(1):143–154, 2018.
+Linnea M Wolniewicz, Peter Sadowski, and Claudio Corti. Neural surrogate hmc: Accelerated hamiltonian
+monte carlo with a neural network surrogate likelihood. arXiv preprint arXiv:2407.20432, 2024.
+Yuchen Wu, Minshuo Chen, Zihao Li, Mengdi Wang, and Yuting Wei. Theoretical insights for diffusion
+guidance: A case study for gaussian mixture models. arXiv preprint arXiv:2403.01639, 2024.
+Chen Xu, Xiuyuan Cheng, and Yao Xie. Computing high-dimensional optimal transport by flow neural
+networks. arXiv preprint arXiv:2305.11857, 2023.
+27Chen Xu, Xiuyuan Cheng, and Yao Xie. Normalizing flow neural networks by jko scheme. Advances in
+Neural Information Processing Systems, 36, 2024a.
+Chen Xu, Jonghyeok Lee, Xiuyuan Cheng, and Yao Xie. Flow-based distributionally robust optimization.
+IEEE Journal on Selected Areas in Information Theory, 2024b.
+GuodongZhang,KyleHsu,JianingLi,ChelseaFinn,andRogerBGrosse.Differentiableannealedimportance
+sampling and the perils of gradient noise. Advances in Neural Information Processing Systems, 34:19398–
+19410, 2021.
+Xingyu Zhou, Yuling Jiao, Jin Liu, and Jian Huang. A deep generative approach to conditional sampling.
+Journal of the American Statistical Association, 118(543):1837–1848, 2023.
+28
