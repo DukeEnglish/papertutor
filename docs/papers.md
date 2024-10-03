@@ -250,11 +250,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2409.20423v1 |
+|idx| 2409.20423v2 |
 |title| Stream-level flow matching from a Bayesian decision theoretic perspective |
 |authors| Ganchao WeiLi Ma
-|links| http://arxiv.org/abs/2409.20423v1 |
-|updated| 2024-09-30 15:47:22 UTC |
+|links| http://arxiv.org/abs/2409.20423v2 |
+|updated| 2024-10-01 19:05:37 UTC |
 |summary| Flow matching FM is a family of training algorithms for fitting continuousnormalizing flows CNFs. A standard approach to FM called conditional flowmatching CFM exploits the fact that the marginal vector field of a CNF canbe learned by fitting least-square regression to the so-called conditionalvector field specified given one or both ends of the flow path. We show thatviewing CFM training from a Bayesian decision theoretic perspective onparameter estimation opens the door to generalizations of CFM algorithms. Wepropose one such extension by introducing a CFM algorithm based on definingconditional probability paths given what we refer to as streams instancesof latent stochastic paths that connect pairs of noise and observed data.Further we advocates the modeling of these latent streams using Gaussianprocesses GPs. The unique distributional properties of GPs and in particularthe fact that the velocities of a GP is still a GP allows drawing samples fromthe resulting stream-augmented conditional probability path without simulatingthe actual streams and hence the simulation-free nature of CFM training ispreserved. We show that this generalization of the CFM can substantially reducethe variance in the estimated marginal vector field at a moderate computationalcost thereby improving the quality of the generated samples under commonmetrics. Additionally we show that adopting the GP on the streams allows forflexibly linking multiple related training data points e.g. time series andincorporating additional prior information. We empirically validate our claimthrough both simulations and applications to two hand-written image datasets. |
 
 
