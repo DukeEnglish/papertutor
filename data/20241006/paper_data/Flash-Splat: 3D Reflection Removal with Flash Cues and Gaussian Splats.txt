@@ -1,0 +1,872 @@
+Flash-Splat: 3D Reflection Removal with
+Flash Cues and Gaussian Splats
+Mingyang Xie1⋆ Haoming Cai1⋆ Sachin Shah1 Yiran Xu1
+Brandon Y. Feng2 Jia-Bin Huang1 Christopher A. Metzler1
+1University of Maryland 2Massachusetts Institute of Technology
+https://flash-splat.github.io/
+Abstract. We introduce a simple yet effective approach for separating
+transmittedandreflectedlight.Ourkeyinsightisthatthepowerfulnovel
+view synthesis capabilities provided by modern inverse rendering meth-
+ods (e.g., 3D Gaussian splatting) allow one to perform flash/no-flash
+reflection separation using unpaired measurements—this relaxation dra-
+maticallysimplifiesimageacquisitionoverconventionalpairedflash/no-
+flashreflectionseparationmethods.Throughextensivereal-worldexperi-
+ments,wedemonstrateourmethod,Flash-Splat,accuratelyreconstructs
+both transmitted and reflected scenes in 3D. Our method outperforms
+existing3Dreflectionseparationmethods,whichdonotleverageillumi-
+nation control, by a large margin. This paper appears at ECCV 2024.
+1 Introduction
+Weareoftensurroundedbysceneswithtransparentsurfaces,mostnotablyglass,
+which introduce specular reflections. When viewing such scenes, we see a super-
+impositionoftransmittedandreflectedlight.Thisworkfocusesontheunsuper-
+vised separation of a transmitted 3D scene and a reflected 3D scene.
+Reflectionremovalandseparationhavereceivedconsiderableattentioninthe
+computational photography community. In addition to enhancing image quality
+and appeal, effective reflection separation methods can improve the robustness
+of downstream computer vision systems used in various applications, including
+robotnavigation,classification,and3Dsurfacereconstruction.Separatingtrans-
+mitted and reflected 3D scenes is vital for various virtual reality tasks, such as
+3D object extraction or editing.
+Unfortunately, separating transmitted and reflected light from the sum of
+theirintensitiesisahighlyunder-determinedproblem.Toaddressthischallenge,
+priorworkshavereliedonvariousassumptionstoperformsingle-imagereflection
+removal. For instance, they have assumed the reflection is out-of-focus [2,56] or
+thereisanoticeabledoublereflectioncausedbytwosidesoftheglass[42].How-
+ever, these assumptions are not always true in real life. Other works have lever-
+aged videos or multi-view images for reflection removal [1,11,12,15,16,33,54].
+Their advantages over single-image methods are (1) they can get “lucky” where
+⋆ Equal Contribution.
+4202
+tcO
+3
+]VC.sc[
+1v46720.0142:viXra2 M. Xie et al.
+Ours Transmission Ours Reflection
+Flash
+No-Flash Baseline Transmission Baseline Reflection
+3D Scene
+With Reflection
+Cam
+Trajectory Captured Images
+(Unpaired View)
+Unpaired Flash / No-Flash Images Acquisition 3DTransmission/ReflectionSeparation
+Fig.1: Left: We separate the 3D transmitted and reflected scenes by capturing some
+views with camera flash and some views with no flash. Right: Our proposed
+Flash-Splat method achieves much better separation than the state-of-the-art
+unsupervised 3D separation method NeRFReN [13].
+some views have weaker reflections than others, and (2) they can utilize multi-
+viewconsistencytoregularizetheseparation.However,thesemethodsstillstrug-
+gle to overcome the fundamental ill-posed problem, especially under strong re-
+flection.Forexample,inFigure1thestate-of-the-artunsupervised3Dreflection
+separation method, NeRFReN [13], fails to separate reflected and transmitted
+light from a collection of images captured under similar illumination conditions.
+Introducing illumination control, i.e., flash/no-flash photography [24,52,53],
+can make the reflection separation problem significantly easier. Intuitively, the
+camera flash increases the intensities of the transmitted scene while leaving the
+reflectedscenelargelyintact.Therefore,wecanrecoverareflection-freetransmis-
+sionscenebycomparingimagescapturedwithandwithoutflash.Thecorelimita-
+tionisthatitrequirespaired(tightly-aligned)flash/no-flashimagecaptures—the
+camera cannot move between the captures. This paired measurement require-
+ment represents a major barrier to effective in-the-wild reflection separation.
+In this paper, we perform flash-based reflection separation without paired
+measurements by leveraging the powerful novel view synthesis capabilities of
+recently developed inverse differentiable rendering methods. Specifically, dur-
+ing acquisition, a user captures roughly half of the views with flash on and the
+otherhalfwithflashoff.Then,byextendingthepowerfulGaussianSplatting[20]
+technique,wecanconstruct2D“pseudo-paired” flash/no-flashimages,whereone
+image in the pseudo flash/no-flash pair is captured, and the other one is syn-
+thesized with our 3D inverse rendering framework; we can also construct a 3D
+“pseudo-pair” of flash/no-flash 3D representations, where one 3D representation
+is reconstructed from only the flash images, and the other is reconstructed from
+only the no-flash images. The difference between the 2D pseudo-pair and the
+difference between the 3D pseudo-pair both serve as strong priors for the trans-
+mitted 3D scene, which significantly reduce the ill-posedness of the separationFlash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 3
+problem. As a byproduct of our 3D inverse differentiable rendering framework,
+our method, Flash-Splat, is also capable of performing novel view synthesis and
+depth estimation for each transmitted and reflected scene. We validate our pro-
+posed approach in real-world experiments and demonstrate its state-of-the-art
+performance.
+Our contributions are:
+– We propose a robust strategy, Flash-Splat, for 3D transmission-reflection
+separation and scene reconstruction, using flash illumination as a physical
+cue without requiring paired flash/no-flash captures.
+– Weintroducenovelmodificationstomake3DGaussianSplattingillumination-
+aware, enhancing the quality of each separated 3D scene.
+– We show that Flash-Splat excels in separating reflection and transmission,
+even when baseline methods fail, over real-world scenes.
+– We demonstrate that Flash-Splat can perform high-quality novel view syn-
+thesisanddepthestimationforboththetransmittedandreflected3Dscenes.
+2 Related work
+Reflection removal. Existing reflection removal methods can generally be
+divided into three categories: single-frame, multi-frame and polarization-based.
+Single-frameapproaches[2,7,8,14,17–19,21,26–29,31,32,42,44–47,50,51,55–58,
+60]onlytakeasingleimageandremovethereflection.Multi-frameapproaches[1,
+6,9,11,12,15,16,31,33,54] use multiple input frames as cue and produce multi-
+viewconsistentresults.Polarization-basedapproaches[22,23,25,30,34,37]lever-
+age the fact that the transmission is unpolarized while the reflection component
+varieswhenrotatingthepolarizationfilter.However,noneofthosemethodsaim
+to recover a 3D representation of the transmitted or the reflected scene.
+3D neural scene representations. To get more accurate 3D reconstruction
+for decomposition, we consider differentiable 3D neural representations. Neural
+RadianceFields(NeRFs)[4,5,10,36]hasreceivedvastattentionsinthepastfew
+years, for their accurate and consistent novel view synthesis results. Another
+line of works focuses on accurate 3D geometry, so they considers Signed Dis-
+tanceFunction(SDF)[48,49]forbettersurfaceaccuracy.Recently,3DGaussian
+Splatting (3DGS) [20,59] emerges for its fast training and inference speed.
+Reflection removal by inverse rendering. Previousmethodsconsidersolv-
+ing reflection removal using inverse 3D rendering. ReflectionsIBR [43] as a pi-
+oneer proposes to separate each frame into a transmission and reflection layer
+combinedwithabinaryreflectionmask,andtriestoreconstructthesceneusing
+animage-basedrendering.Recently,NeRFReN[13]usesaNeRFtoachievebet-
+ter3Dreconstructionaccuracy.NeuS-HSR[38],insteadoffocusingonreflection
+separation,usesSignedDistanceFunctionstoachievebettersurfacereconstruc-
+tionquality.Distinctfromthese3Dmethods,ourproposedmethoddramatically
+extends these approaches by incorporating variable illumination.4 M. Xie et al.
+No-Flash Flash Difference Zoom-In
+Paired capture with tripod. Wireless shutter control.
+No-Flash Flash Difference Zoom-In
+Paired capture with tripod. Shutter control pressed by finger.
+Fig.2: Flash/No-Flash For Reflection Removal. The difference between paired
+flash and no-flash images is equivalent to taking a photo with flash in a dark
+environment, which gives us a reflection-free image (top). This is because flash
+increases the transmission brightness, but not the reflection brightness. Notice pairs
+must be tightly aligned for this method to work. Even tiny vibrations such as
+pressing the shutter button even when using a tripod produce artifacts (bottom).
+3 Method
+3.1 Paired 2D Flash/No-Flash
+Capturing a pair of flash and no-flash images of a scene from the same camera
+viewpoint allows one to reconstruct a reflection-free image.
+Reflections exist because ambient light illuminates objects in the reflected
+scene and reflects off the glass onto the camera sensor. The captured composite
+scene with no flash I can be modeled as
+N
+I =T +β◦R (1)
+N N
+where T is the transmission scene with no flash, R is the reflection scene and
+N
+β is the reflective fraction factor (in the extreme case where the reflection is
+causedbyamirror,thenβ couldbeinterpretedasthemaskofthemirrorinthe
+scene).Nowconsiderthecasewherethesceneiscapturedwithaflashco-located
+on the camera. If we assume that the scene behind glass is diffuse and that the
+camera flash is uniform, the camera flash will increase the intensity of all pixels
+proportionally. Therefore, we can formulate the flash image I as following:
+F
+I =(1+α)T +(β+β )◦R, (2)
+F N F
+whereαandβ representtheintensityincreaseofthetransmittedandreflected
+F
+scene due to flash, respectively. Assuming the direct reflection of the flash is
+outside the camera’s field of view (i.e., the specular surface is not orthogonalFlash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 5
+to the camera view), the flash will have little effect on the brightness of the
+reflected scene. In common cases like glass, the impact of secondary reflections
+is also usually very low. Therefore, we may approximate β as close to zero,
+F
+I ≈(1+α)T +β◦R. (3)
+F N
+Assuch,onetechniqueusedamongphotographersissubtractingano-flashimage
+I [24] from a flash image I ,
+N F
+I −I ≈αT . (4)
+F N N
+The difference is effectively a reflection-free transmitted scene scaled by some
+constant.Figure2demonstratestheimpressiveperformanceofthissimplemethod.
+Unfortunately,thisprocessonlyworkswhenwecapturepairedflashandno-
+flashimagesatthesamelocationandorientation.Anysmallmovementbetween
+the image pair causes the approach to break down. As illustrated in the bottom
+row of Figure 2, even with a tripod, the slight motion caused by touching the
+exposurebutton(asopposedtousingremotetriggering)canintroducesignificant
+errors in the conventional flash/no-flash reflection separation process.
+3.2 Unpaired 3D Flash/No-Flash
+In this work, we extend the flash/no-flash idea to 3D and thus remove the re-
+quirementofcapturingpairedimages,whichmakesflash-basedreflectionremoval
+significantly easier and more practical. Instead of directly capturing paired
+multi-view images of a scene, we propose to first capture an arbitrary sequence
+of multi-view flash images of the scene, and then capture another sequence of
+multi-viewno-flashimagesofthescene.Thesetwosequencesshouldbecaptured
+such that they approximately cover a similar range of perspectives.
+Our 3D Flash/No-flash formulation is defined as follows. Following previous
+notations, we consider four 3D representations in total: transmission with flash
+T , transmission without flash T , reflection R, and the reflective fraction
+F N
+factor β. To render atarget pixel in acaptured image, we blendthe overlapping
+regions of the transmitted and reflected scenes. We then have,
+I =T +β◦R
+N N
+(5)
+I =T +β◦R
+F F
+forflash(F)imagesandno-flash(N)images.Eventhoughweareonlycapturing
+unpairedflash/no-flashviewsnow,wecanstillassociatethembycreating2types
+of “pseudo-pairs” to aid reflection separation.
+Firstly,wecanconstruct2D “pseudo-pairs” vianovelviewsynthesisofthe
+missing flash/no-flash counterpart, as shown in Figure 3a. Consider a specific
+view where only the flash image is taken. Utilizing inverse rendering techniques,
+we are able to synthesize a no-flash image at this exact same view by using the
+no-flashimagestakenatneighboringviews.Thissynthesizedno-flashimageand
+the captured flash image form a 2D pseudo-pair. The difference image between6 M. Xie et al.
+(a) 2DPseudo-Pair (b) 3DPseudo-Pair
+Flash Reconstructed 3D Scene
+UsingFlashViews
+Synthesized Flash Transmission
+No-Flash at View 2
+View
+1
+-
+Target3D Scene Flash 2D Pseudo Pseudo Pair 3D Pseudo Pair
+With Reflection Pair Difference
+View
+2
+View
+2 View
+2
+View 3
+Intuition of Our Method Reconstructed 3D Scene
+UsingNo-flashViews
+Capture Unpaired Flash/No-Flash Images Synthetic Flash –Captured No-Flash = Transmission
+Fig.3: Our Intuition: Construct 2D and 3D “pseudo-pairs” as Cues for
+Reflection Removal. Flash-Splat does not require paired flash/no-flash data.
+During the data capture stage, we collect unpaired flash/no-flash images from
+different views. In (a), if we captured a no-flash image at View 2, we can learn a 3D
+representation of the captured flash images at other views, and then synthesize a
+novelview ofthe flashimageat View2. Assuch,we havecreated a2D pseudo-pair
+of flash and no-flash images at View 2. If we then take the difference between the
+pseudo-pair as in Figure 2, we get the transmission component of View 2 that is free
+of reflection. In (b), we reconstruct a 3D scene with flash using only the flash images
+(top); we also reconstruct a 3D scene without flash using only the no-flash images
+(bottom). As such, we have created a 3D pseudo-pair of flash/no-flash scenes.
+this2Dpseudo-pairshouldbereflection-free,justlikethedifferencebetweenthe
+2D paired flash/no-flash images, as indicated in Equation (4).
+Secondly,wecanconstructa3D “pseudo-pair” byelevatingtheproblemto
+the 3D space, as shown in Figure 3b. More specifically, we can reconstruct a 3D
+scene with flash and another without flash, using only the views captured with
+flash and only the views captured without flash, respectively. We name these
+tworeconstructedscenesasIRec andIRec,todifferentiatethemwiththeground
+F N
+truth 3D flash/no-flash scenes I and I . IRec and IRec form a 3D pseudo-pair,
+F N F N
+as they are the same scene except that the transmitted part of IRec is brighter
+F
+due to the flash. A 3D pseudo-pair difference can be used as a cue for the
+transmitted scene. Nevertheless, as IRec and IRec are separately reconstructed
+F N
+from 2 unpaired sets of data, they will be misaligned, thus the word “pseudo”.
+As such, we obtain important “flash cues” from the 2D and 3D pseudo-pairs,
+and use them as the high-level intuitions for our proposed method.
+3.3 Proposed Pipeline for 3D Reflection Separation
+In this subsection, we first explain how to incorporate flash cues to guide our
+reconstruction, then describe our overall optimization framework, and finally
+discusshowtoadaptthelossfunctionstoaccommodatetheRAWinputimages.
+Regularizing Reflection Separation using Flash Cues. While our high-
+level intuition is to construct pseudo-pairs as cues for reflection-free images,Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 7
+in this work, we want to reconstruct both the transmitted scene and the re-
+flected scene. Therefore, we do not explicitly calculate the difference between
+the pseudo-pairs, but rather, use it as a regularization term to guide separation
+optimization. As shown in Equation (3), T is expressed as T multiplied by
+F N
+a scalar (1+α), which enforces a linear relationship between them. Therefore,
+we choose to enforce the linearity between T and T , which is equivalent to
+F N
+enforcing the constraint that the flash/no-flash difference is reflection-free.
+Whileintheidealcase,T andT shouldformastrictlylinearrelationship,
+F N
+inreality,thecameraflashmightnotbeperfectlyuniform;thereisalsoachance
+the secondary reflection of the flash does hit the camera sensor. As a result,
+this relationship between T and T should be close to linear, but might not
+F N
+perfectly linear. Therefore, we chose not to use this hard constraint, but use the
+Pearson Coefficient, which measures the linearity between T and T :
+F N
+cov(T ,T )
+L =− N F (6)
+linearity (cid:112)
+var(T )var(T )
+N F
+Byminimizingthislossterm,weencouragethe3DGaussianstolearnareflection-
+free transmission, therefore reducing the ill-posedness of the separation.
+Notably,whiletheanalysisaboveholdstrueforboththe3Dpseudo-pair(see
+Figure 3b)and the 2D pseudo-pairs (seeFigure 3a), we only applythislinearity
+regularization to the 2D pseudo-pairs, as it is more straightforward to measure
+the linearity of images than 3D representations.
+Initializing 3D Representations Using Flash Cues. Nowweshowhowto
+utilizethe3Dpseudo-pairtoaidreflectionseparation.AsillustratedinFigure2b,
+the 3D pseudo-pair, namely IRec and IRec, are 3D representations of the target
+F N
+scene reconstructed from the flash views and no-flash views, respectively. Their
+differenceshouldbethereflection-free3Dtransmittedscene.However,giventhe
+highly ill-posed nature of the 3D scene reconstruction problem, it is very likely
+that the contents in IRec and IRec do not correspond with each other. As such,
+F N
+this differencebetweenIRec and IRec should be viewed asa veryrough estimate
+F N
+of the transmitted scene. Therefore, we decide to only use it to initialize the 3D
+representations T , T , R, and β for better convergence.
+F N
+We use 3DGS [20] as the 3D representation architecture, which is normally
+initializedfromsparsepointclouds.Wefirstusestructurefrommotion,e.g.,[41],
+to obtain the sparse point clouds of the 3D pseudo-pair IRec and IRec. Then we
+F N
+roughly align them via linear transformation to compensate for the difference
+in the camera coordinate systems. Afterwards, we compare these two sets of
+point clouds: for points in regions with increased intensities, we classify them as
+“transmittedpoints”;forpointsinregionswithunchangedintensities,weclassify
+them as “reflected points”. Finally, we initialize the 3DGSs for T , T , and β
+F N
+from the “transmitted points”, and the 3DGS for R from the “reflected points”.
+Notethatthiswayofinitializationreliesonthe3Drepresentation’scompati-
+bilitywithpointclouds.Itdoesnotworkwithimplicitneural3Drepresentations
+like NeRF [36]. When using NeRF as our 3D representations, we just randomly
+initialize the neural network and only rely on the previously discussed linearity8 M. Xie et al.
+3DTransmission Transmission
+Flash From Flash Reflection Beta
+Render + + Composite
+Flash Image
+Render Render L1 & SSIM Loss
+Encourage
+Linear
+Relationship
+3D Reflection (shared) 3D Beta (shared)
+Captured
+Render Render CompositeFlash
+Render + Novel
++ View
+3DTransmission
+Transmission Reflection Beta Synthesized
+No-Flash From No-Flash CompositeNo-Flash
+Fig.4: Method Overview. We use 4 3DGSs [20] as our 3D representations for the
+transmitted scene with flash T , the transmitted scene with no flash T , the
+F N
+reflected scene R and the reflective fraction map β. Based on the Flash/No-flash
+technique, R and β are shared between the flash image and the no-flash image, while
+the relationship of T and T is close to linear. We initialize these 4 3DGSs using
+F N
+cues from the 3D pseudo-pair (see Figure 3b and Section 3.3). In each iteration of
+optimization, our method operates on a single view. This figure, for instance, shows a
+view where we captured a flash image. There is NO no-flash image captured at this
+view. As shown in the top row, we use T , R, and β to render a flash image of this
+F
+particular view and calculate losses with the captured ground truth flash image.
+Additionally, based on the cues from 2D pseudo-pairs, we calculate the Pearson
+linearity loss between T and T to encourage the linearity between them (see
+F N
+Figure 3a and Section 3.3). We then back-propagate the gradients and update the
+weights of the 4 3DGSs.
+regularization using 2D pseudo-pairs, which would still achieve better reflection
+removal performance than baselines, as will be shown in Section 6.
+Overall Optimization Framework. As shown in Figure 4, in each iteration
+of optimization, Flash-Splat operates on a single view. If we captured a flash
+imageatthisview(meaningthatNOno-flashimagewascapturedatthisview),
+wefollowEquation(5)anduseour3DrepresentationsT ,R,andβ torendera
+F
+flash image at this same view. Then we calculate the loss between the rendered
+flashimageandthecapturedgroundtruthflashimage(moreonthisinthenext
+paragraph). Additionally, we also calculate the Pearson linearity loss between
+images rendered from T and T at this view (the 2D pseudo-pair). We then
+F N
+back-propagatethegradientsandupdatetheweightsofthe43Drepresentations
+T ,T ,R,andβ.Inthenextiteration,weperformsimilarcomputationswith
+F N
+flashandno-flashswapped.Bydoingsuchalternativeoptimization,weareusing
+the loss with the captured ground truth images to supervise the novel viewFlash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 9
+synthesisabilityofour3Drepresentations,whileusingthePearsonlinearityloss
+to implicitly enforce the flash/no-flash prior.
+Gamma Corrected Loss Function. Our complete loss function is:
+L=λ L +λ L +λ L +λ L , (7)
+1 1 2 DSSIM 3 linearity 4 depth
+where L and DSSIM [3] are computed between the captured RGB images and
+1
+the rendered images; L is a depth smoothness regularization adopted from
+depth
+NeRFReN [13]; λ are weightings for these 4 loss terms, respectively.
+1−4
+It is imperative to understand that for the difference of the flash/no-flash
+discrepancy to work, Equations 1 through 6 must be operational within the
+RAW image space. Nevertheless, our objective is for the L loss and DSSIM
+1
+loss to be applied to tone-mapped images, as [35] demonstrates that learning
+within the RAW space predisposes the model to bias in favor of brighter pixels
+while neglecting the darker ones. Furthermore, it is our intention for the 3DGS
+model to output tone-mapped images, a decision driven by empirical observa-
+tionsindicatingapotentialunderperformancewhenlearningisconductedinthe
+RAW domain. Consequently, we modify our loss function to incorporate L and
+1
+DSSIM calculations as follows:
+L=L(cid:0) γ(Iraw),γ(cid:0) γ−1(T)+βγ−1(R)(cid:1)(cid:1)
+(8)
+where L can be either L or DSSIM loss, and we chose γ(x)= x0.22 as gamma
+1
+correction to tone-map RAW images.
+4 Experimental Details
+4.1 Dataset Collection
+We captured a flash/no-flash dataset using a Canon Rebel R7 camera. Our
+camera settings included a fixed 0.25-second exposure time, 200 ISO sensitivity,
+an f-number of 5.6, and fixed white balancing. For each scene, we collected 30
+imagesequallysplitintotwocategories:15withthebuilt-inflashand15without.
+The typical distance between a flash view and the closest no-flash view is 5−10
+centimeters,with1−6metersseparatingthecamerafromthetransmissionscene
+objects. For a fair comparison with the baselines, we captured paired flash/no-
+flashdataforafewscenesusingatripod,suchthatourmethodandthebaselines
+useexactlythesameviews,withtheonlydatadifferencebeingourmethoduses
+halfflashandhalfno-flashviews.Notethatourmethoddoesnotseeanypaired
+flash/no-flashviews.Weprocesstherawimagesthroughastandardimagesignal
+processor consisting of white balancing, tone-mapping and gamma correction.
+We run COLMAP [41] on each method’s corresponding input images to obtain
+camera poses and sparse point cloud estimations.10 M. Xie et al.
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.5: The Office scene. Top, middle, and bottom rows are the captured images,
+separated transmissions, and separated reflections, respectively. Our reflection
+separation approach is far more effective than NeRFReN [13] and Dong et al [7].
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.6: The Game Controller Scene. Top, middle, and bottom rows are the
+captured images, separated transmissions, and separated reflections, respectively. Our
+reflection separation approach is far more effective.
+4.2 Baselines
+Wechoose2baselines:NeRFReN[13],anunsupervisedmulti-viewmethodbased
+on3Dinverserendering,andDongetal.[7],asuperviseddeeplearningapproach.
+For fair comparison, we run both baselines twice, once on all flash images, and
+once on all no-flash images. This is to show that our method does not perform
+better because we use flash, but rather, because we use flash/no-flash cues.
+4.3 Architecture and Optimization details.
+Flash-Splat was implemented in PyTorch and run on an NVIDIA A6000 GPU.
+Our43DGSs(T ,T ,R,andβ)havenosharedparametersandareoptimized
+F NFlash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 11
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.7: The Lens Stage Scene. Top, middle, and bottom rows are the captured
+images, separated transmissions, and separated reflections, respectively. Our
+reflection separation approach is far more effective.
+Captured Flash Captured No-Flash(Unpaired) Glass Removed Paired F/nFDiff
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.8: The Outdoor Scene. The captured images, separated transmissions, and
+separated reflections are shown in the top, middle, and bottom rows, respectively. We
+also include two additional reference images in the top row as references. “Paired
+F/nF Diff” denotes the difference between flash and no-flash paired images. “Glass
+Removed” shows true transmission by directly removing the glass.
+withthesamehyperparameters.Ourimplementationof3DGSfollowsFSGS[59],
+a variant of 3DGS that supports feedforward settings (the original 3DGS [20]
+is not intended for feedforward scenes). Each 3DGS is initialized with 350K
+Gaussians and grow up to 500K. We optimize all 3DGSs for 5000 iterations on
+ourflash/no-flashimagessized1200×800pixels.Totalrunningtimeisabout10
+minutesperscene. Asanalternativeto3DGS,wealsoexploredusingNeRFfor
+3D representations, but empirically found that it inferior to 3DGS; see Sec. 6.2.12 M. Xie et al.
+NeRF NeRFReN 3D GS Ours Ground Truth
+Fig.9: Novel View Synthesis (NVS). Our method does not compromise NVS
+quality, even when compared to dedicated NVS methods like NeRF and 3DGS.
+Captured NeRFReN Transmission NeRFReN Reflection Ours Transmission Ours Reflection
+Fig.10: Depth Estimation. The captured image’s depth estimated by
+MiDaS [39,40] is shown in the leftmost column, which cannot differentiate between
+transmitted and reflected scenes. Our depths are much better than NeRFReN’s [13].
+5 Results
+We compare our method’s transmission-reflection separation ability against the
+baselinestate-of-the-artmethods.Wealsodemonstratenovelviewsynthesisand
+depth estimation capabilities through our 3D inverse rendering framework.
+Transmission-Reflection Separation. Our method, Flash-Splat, outper-
+formsbothbaselinesintransmission-reflectionseparationonourreal-worldscenes.
+In fact, the baselines fail completely to produce a reasonable separation. Fig-
+ures 5, 6, 7 show results on indoor scenes. 8 show results on an outdoor scene.
+Scene descriptions and results on 3 more scenes are included in the supplement.
+Novel View Synthesis (NVS). Flash-Splat can perform novel view syn-
+thesis as it is based on inverse rendering. We compare our synthesis quality
+for scenes with reflections against NeRF [36], NeRFReN [13], and 3DGS (our
+implementation of 3DGS still follows FSGS [59], as explained in Section 4.3).
+Figure 9 shows Flash-Splat does not compromise NVS performance, even when
+compared to dedicated NVS methods like NeRF and 3DGS. Rendered videos of
+our separated transmitted and reflected 3D scenes are in our project webpage.
+Depth Estimation. Benefitting from the 3DGS base representation, Flash-
+Splat can also perform depth estimation on both transmitted and reflected
+scenes.Flash-SplatoutperformsNeRFReNforbothcomponents(seeFigure10).Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 13
+withoutFlash Cues with Flash Cues
+(a) Captured (b) Transmission (c) Reflection (d) Transmission (e) Reflection
+Fig.11: With and Without the Flash Cues. (b,c) shows the reflection
+separationresultifwedonotutilizetheflashcuesinourproposedframework,details
+of which are discussed in Section 6.1. (d,e) shows the result using the full version our
+proposed framework — the separated reflection and transmission are significantly
+better. This highlights the importance of our proposed flash cues.
+withoutFlash Cues with Flash Cues
+(a) Captured (b) Transmission (c) Reflection (d) Transmission (e) Reflection
+Fig.12: Equip NeRFReN [13] With Flash Cues from 2D Pseudo-Pairs.
+(b,c) show separation results from the original NeRFReN; (d,e) show separation
+results from NeRFReN incorporated our proposed flash cues. Since NeRFReN is not
+compatible with the point clouds initialization using the 3D pseudo pair, we only
+equip NeRFReN with the Pearson linearity regularization from the 2D pseudo pairs.
+Our 2D pseudo pairs regularization alone can achieve better reflection separation
+performance than the original NeRFReN.
+6 Ablation Studies
+6.1 With and Without Flash Cues
+To demonstrate the importance of flash cues, we design a “flashless” variant of
+our proposed framework where we remove the flash cues from the 2D and 3D
+pseudo-pairs. This “flashless” framework is still a 3DGS-based approach, but
+does not utilize flash/no-flash photography at all. Its detailed architecture is
+illustrated in Figure 19 in the supplement. For a fair comparison, this flashless
+framework is using the same number of total views as our proposed framework.
+Figure 11 shows that this flashless framework achieves significantly worse sepa-
+ration performance than our proposed Flash-Splat framework, which highlights
+the indispensability of the flash cues.
+6.2 Replacing 3DGS with NeRF
+To investigate the flash cues’ impact on other 3D representations, we design
+another framework named Flash-NeRF, where we replace the 3DGS [20] rep-
+resentation with NeRF [36] and keep everything else the same. Since NeRF is
+not compatible with our pseudo pair point clouds initialization, we only utilize14 M. Xie et al.
+the Pearson linearity regularization from the 2D pseudo pairs as the flash cue.
+The Flash-NeRF framework can be seen as NeRFReN [13] plus our 2D pseudo
+pairs regularization. Figure 12 shows that our 2D pseudo pairs regularization
+significantly enhances NeRFReN’s reflection separation performance.
+Nevertheless, while this Flash-NeRF framework obtains an almost perfect
+transmitted scene, we can still notice obvious artifacts and floaters in the re-
+flected scene. We find that using 3DGS as 3D representation can notably miti-
+gate this issue, and thus decide to use 3DGS in our proposed framework.
+6.3 Discussions & Limitations
+Reflections in COLMAP: ByLawofReflection,reflectedobjectsareequiva-
+lently“virtualobjects” superimposedintothetransmittedscene.Weempirically
+verified reflections do not decrease COLMAP’s view matching performance.
+View Coverage: Although Flash-Splat does not need paired flash/no-flash
+images, it does require the flash and no-flash scenes to cover a similar range of
+perspectives. For instance, Flash-Splat would not work if we take flash images
+of the scene from the left and no-flash images from the right, as we would not
+be able to accurately synthesize pseudo-pairs in this case.
+CurvedReflection: Flash-Splatcurrentlycannotdealwithsceneswithcurved
+reflective surfaces, e.g., curved glasses, since curved reflective surfaces will cause
+severe deformation of the reflected scene. We believe this is an important yet
+under-exploredcornercaseforreflectionremoval,whichweleaveforfuturework.
+Double Reflection: Whiledoublereflectionscanbeapowerfulcueforremov-
+ing reflections when dealing with thick or double-pane glass [42], Flash-Splat
+currently does not handle scenes with obvious double reflections. Incorporating
+double-reflection–based cues is an interesting research direction.
+Flash Strength: If the flash is too weak to illuminate the transmission scene,
+Flash-Splat would not have the necessary flash cues to remove the reflection.
+Dynamic Scene: Because our 3D representation is static, objects moving be-
+tween captured images result in blurry reconstructions.
+7 Conclusion
+We present a novel approach for transmission-reflection separation of 3D scenes
+throughflashcues,significantlymitigatingtheill-posednessofthetask.Bysyn-
+thesizing “pseudo-paired” flash/no-flash images within a 3D inverse rendering
+frameworkbasedonGaussianSplatting,wedemonstratesuperiorreflectionsep-
+aration capabilities, particularly under challenging conditions where traditional
+methods falter. We validate our method on a new real-world dataset, show-
+casing its effectiveness and robustness. Our method not only unlocks practical
+reflection-removal but also enables novel view synthesis and depth estimation
+separately for the transmitted and reflected 3D scene.Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 15
+Acknowledgements
+ThisworkwassupportedinpartbyAFOSRYoungInvestigatorProgramAward
+no.FA9550-22-1-0208,ONRAwardno.N00014-23-1-2752,NSFCAREERAward
+no. 2339616, the Joint Directed Energy Transition Office, and a gift from Dolby
+Labs. We thank Kevin Zhang and Yi-Ting Chen for helpful discussions.
+References
+1. Alayrac,J.B.,Carreira,J.,Zisserman,A.:Thevisualcentrifuge:Model-freelayered
+videorepresentations.In:ProceedingsoftheIEEE/CVFConferenceonComputer
+Vision and Pattern Recognition. pp. 2457–2466 (2019)
+2. Arvanitopoulos,N.,Achanta,R.,Susstrunk,S.:Singleimagereflectionsuppression.
+In:ProceedingsoftheIEEEconferenceoncomputervisionandpatternrecognition.
+pp. 4498–4506 (2017)
+3. Baker, A.H., Pinard, A., Hammerling, D.M.: On a structural similarity index ap-
+proachforfloating-pointdata.IEEETransactionsonVisualizationandComputer
+Graphics pp. 1–13 (2023)
+4. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Mip-
+nerf 360: Unbounded anti-aliased neural radiance fields. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5470–
+5479 (2022)
+5. Chen,A., Xu,Z., Geiger, A.,Yu,J., Su,H.: Tensorf: Tensorial radiancefields. In:
+European Conference on Computer Vision. pp. 333–350. Springer (2022)
+6. Chugunov,I.,Shustin,D.,Yan,R.,Lei,C.,Heide,F.:Neuralsplinefieldsforburst
+image fusion and layer separation. CVPR (2024)
+7. Dong,Z.,Xu,K.,Yang,Y.,Bao,H.,Xu,W.,Lau,R.W.:Location-awaresingleim-
+agereflectionremoval.In:ProceedingsoftheIEEE/CVFinternationalconference
+on computer vision. pp. 5017–5026 (2021)
+8. Fan, Q., Yang, J., Hua, G., Chen, B., Wipf, D.: A generic deep architecture for
+singleimagereflectionremovalandimagesmoothing.In:ProceedingsoftheIEEE
+International Conference on Computer Vision. pp. 3238–3247 (2017)
+9. Farid, H., Adelson, E.H.: Separating reflections and lighting using independent
+components analysis. In: Proceedings. 1999 IEEE Computer Society Conference
+onComputerVisionandPatternRecognition(Cat.NoPR00149).vol.1,pp.262–
+267. IEEE (1999)
+10. Fridovich-Keil,S.,Meanti,G.,Warburg,F.R.,Recht,B.,Kanazawa,A.:K-planes:
+Explicit radiance fields in space, time, and appearance. In: Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition.pp.12479–
+12488 (2023)
+11. Gandelsman,Y.,Shocher,A.,Irani,M.:"double-dip":unsupervisedimagedecom-
+positionviacoupleddeep-image-priors.In:ProceedingsoftheIEEE/CVFConfer-
+ence on Computer Vision and Pattern Recognition. pp. 11026–11035 (2019)
+12. Guo,X.,Cao,X.,Ma,Y.:Robustseparationofreflectionfrommultipleimages.In:
+Proceedings of the IEEE conference on computer vision and pattern recognition.
+pp. 2187–2194 (2014)
+13. Guo,Y.C.,Kang,D.,Bao,L.,He,Y.,Zhang,S.H.:Nerfren:Neuralradiancefields
+withreflections.In:ProceedingsoftheIEEE/CVFConferenceonComputerVision
+and Pattern Recognition. pp. 18409–18418 (2022)16 M. Xie et al.
+14. Hariharan, B., Arbeláez, P., Girshick, R., Malik, J.: Hypercolumns for object seg-
+mentation and fine-grained localization. In: Proceedings of the IEEE conference
+on computer vision and pattern recognition. pp. 447–456 (2015)
+15. Hong, Y., Zheng, Q., Zhao, L., Jiang, X., Kot, A.C., Shi, B.: Panoramic image
+reflection removal. In: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. pp. 7762–7771 (2021)
+16. Hong,Y.,Zheng,Q.,Zhao,L.,Jiang,X.,Kot,A.C.,Shi,B.:Par2net:End-to-end
+panoramic image reflection removal. IEEE Transactions on Pattern Analysis and
+Machine Intelligence (2023)
+17. Hu, Q., Guo, X.: Trash or treasure? an interactive dual-stream strategy for single
+image reflection separation. Advances in Neural Information Processing Systems
+34, 24683–24694 (2021)
+18. Hu, Q., Guo, X.: Single image reflection separation via component synergy. In:
+Proceedingsof the IEEE/CVFInternationalConference on ComputerVision. pp.
+13138–13147 (2023)
+19. Kee,E.,Pikielny,A.,Blackburn-Matzen,K.,Levoy,M.:Removingreflectionsfrom
+raw photos. ArXiv abs/2404.14414 (2024)
+20. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for
+real-time radiance field rendering. ACM Transactions on Graphics 42(4) (2023)
+21. Kim,S.,Huo,Y.,Yoon,S.E.:Singleimagereflectionremovalwithphysically-based
+rendering. arXiv preprint arXiv:1904.11934 (2019)
+22. Kong, N., Tai, Y.W., Shin, J.S.: A physically-based approach to reflection sepa-
+ration:fromphysicalmodelingtoconstrainedoptimization.IEEEtransactionson
+pattern analysis and machine intelligence 36(2), 209–221 (2013)
+23. Kong,N.,Tai,Y.W.,Shin,S.Y.:High-qualityreflectionseparationusingpolarized
+images. IEEE Transactions on Image Processing 20(12), 3393–3405 (2011)
+24. Lei, C., Chen, Q.: Robust reflection removal with reflection-free flash-only cues.
+In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 14811–14820 (2021)
+25. Lei, C., Huang, X., Zhang, M., Yan, Q., Sun, W., Chen, Q.: Polarized reflection
+removal with perfect alignment in the wild. In: Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition. pp. 1750–1758 (2020)
+26. Levin, A., Weiss, Y.: User assisted separation of reflections from a single image
+usingasparsityprior.IEEETransactionsonPatternAnalysisandMachineIntel-
+ligence 29(9), 1647–1654 (2007)
+27. Levin,A.,Zomet,A.,Weiss,Y.:Learningtoperceivetransparencyfromthestatis-
+tics of natural scenes. Advances in Neural Information Processing Systems 15
+(2002)
+28. Levin, A., Zomet, A., Weiss, Y.: Separating reflections from a single image using
+localfeatures. In: Proceedings of the2004 IEEE ComputerSociety Conference on
+ComputerVisionandPatternRecognition,2004.CVPR2004.vol.1,pp.I–I.IEEE
+(2004)
+29. Li, C., Yang, Y., He, K., Lin, S., Hopcroft, J.E.: Single image reflection removal
+through cascaded refinement. In: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. pp. 3565–3574 (2020)
+30. Li, R., Qiu, S., Zang, G., Heidrich, W.: Reflection separation via multi-bounce
+polarizationstatetracing.In:ComputerVision–ECCV2020:16thEuropeanCon-
+ference,Glasgow,UK,August23–28,2020,Proceedings,PartXIII16.pp.781–796.
+Springer (2020)
+31. Li,Y.,Brown,M.S.:Exploitingreflectionchangeforautomaticreflectionremoval.
+In:ProceedingsoftheIEEEinternationalconferenceoncomputervision.pp.2432–
+2439 (2013)Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 17
+32. Li,Y.,Liu,M.,Yi,Y.,Li,Q.,Ren,D.,Zuo,W.:Two-stagesingleimagereflection
+removal with reflection-aware guidance. Applied Intelligence pp. 1–16 (2023)
+33. Liu, Y.L., Lai, W.S., Yang, M.H., Chuang, Y.Y., Huang, J.B.: Learning to see
+throughobstructions.In:ProceedingsoftheIEEE/CVFConferenceonComputer
+Vision and Pattern Recognition. pp. 14215–14224 (2020)
+34. Lyu, Y., Cui, Z., Li, S., Pollefeys, M., Shi, B.: Reflection separation using a pair
+of unpolarized and polarized images. Advances in neural information processing
+systems 32 (2019)
+35. Mildenhall, B., Hedman, P., Martin-Brualla, R., Srinivasan, P.P., Barron, J.T.:
+Nerf in the dark: High dynamic range view synthesis from noisy raw images. In:
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecog-
+nition. pp. 16190–16199 (2022)
+36. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng,
+R.:Nerf:Representingscenesasneuralradiancefieldsforviewsynthesis.In:ECCV
+(2020)
+37. Nayar,S.K.,Fang,X.S.,Boult,T.:Separationofreflectioncomponentsusingcolor
+andpolarization.InternationalJournalofComputerVision21(3),163–186(1997)
+38. Qiu,J.,Jiang,P.T.,Zhu,Y.,Yin,Z.X.,Cheng,M.M.,Ren,B.:Lookingthroughthe
+glass:Neuralsurfacereconstructionagainsthighspecularreflections.In:Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+pp. 20823–20833 (2023)
+39. Ranftl, R., Bochkovskiy, A., Koltun, V.: Vision transformers for dense prediction.
+ArXiv preprint (2021)
+40. Ranftl, R., Lasinger, K., Hafner, D., Schindler, K., Koltun, V.: Towards robust
+monocular depth estimation: Mixing datasets for zero-shot cross-dataset transfer.
+IEEETransactionsonPatternAnalysisandMachineIntelligence(TPAMI)(2020)
+41. Schönberger, J.L., Zheng, E., Frahm, J.M., Pollefeys, M.: Pixelwise view selection
+for unstructured multi-view stereo. In: Computer Vision–ECCV 2016: 14th Euro-
+peanConference,Amsterdam,TheNetherlands,October11-14,2016,Proceedings,
+Part III 14. pp. 501–518. Springer (2016)
+42. Shih,Y.,Krishnan,D.,Durand,F.,Freeman,W.T.:Reflectionremovalusingghost-
+ing cues. In: Proceedings of the IEEE conference on computer vision and pattern
+recognition. pp. 3193–3201 (2015)
+43. Sinha, S.N., Kopf, J., Goesele, M., Scharstein, D., Szeliski, R.: Image-based ren-
+dering for scenes with reflections. ACM Transactions on Graphics (TOG) 31(4),
+1–10 (2012)
+44. Wan, R., Shi, B., Duan, L.Y., Tan, A.H., Gao, W., Kot, A.C.: Region-aware re-
+flection removal with unified content and gradient priors. IEEE Transactions on
+Image Processing 27(6), 2927–2941 (2018)
+45. Wan, R., Shi, B., Duan, L.Y., Tan, A.H., Kot, A.C.: Crrn: Multi-scale guided
+concurrentreflectionremovalnetwork.In:ProceedingsoftheIEEEConferenceon
+Computer Vision and Pattern Recognition. pp. 4777–4785 (2018)
+46. Wan, R., Shi, B., Li, H., Duan, L.Y., Kot, A.C.: Reflection scene separation from
+asingleimage.In:ProceedingsoftheIEEE/CVFConferenceonComputerVision
+and Pattern Recognition. pp. 2398–2406 (2020)
+47. Wan, R., Shi, B., Li, H., Duan, L.Y., Kot, A.C.: Face image reflection removal.
+International Journal of Computer Vision 129, 385–399 (2021)
+48. Wang, P., Liu, L., Liu, Y., Theobalt, C., Komura, T., Wang, W.: Neus: Learn-
+ing neural implicit surfaces by volume rendering for multi-view reconstruction.
+NeurIPS (2021)18 M. Xie et al.
+49. Wang, Y., Han, Q., Habermann, M., Daniilidis, K., Theobalt, C., Liu, L.: Neus2:
+Fastlearningofneuralimplicitsurfacesformulti-viewreconstruction.In:Proceed-
+ings of the IEEE/CVF International Conference on Computer Vision. pp. 3295–
+3306 (2023)
+50. Wei, K., Yang, J., Fu, Y., Wipf, D., Huang, H.: Single image reflection removal
+exploiting misaligned training data and network enhancements. In: Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp.
+8178–8187 (2019)
+51. Wen,Q.,Tan,Y.,Qin,J.,Liu,W.,Han,G.,He,S.:Singleimagereflectionremoval
+beyond linearity. In: Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition. pp. 3771–3779 (2019)
+52. Xia, Z., Gharbi, M., Perazzi, F., Sunkavalli, K., Chakrabarti, A.: Deep denois-
+ing of flash and no-flash pairs for photography in low-light environments. 2021
+IEEE/CVFConferenceonComputerVisionandPatternRecognition(CVPR)pp.
+2063–2072 (2020)
+53. Xia, Z., Lawrence, J., Achar, S.: A dark flash normal camera. 2021 IEEE/CVF
+International Conference on Computer Vision (ICCV) pp. 2410–2419 (2020)
+54. Xue, T., Rubinstein, M., Liu, C., Freeman, W.T.: A computational approach for
+obstruction-freephotography.ACMTransactionsonGraphics(TOG)34(4),1–11
+(2015)
+55. Yang,J.,Gong,D.,Liu,L.,Shi,Q.:Seeingdeeplyandbidirectionally:Adeeplearn-
+ing approach for single image reflection removal. In: Proceedings of the european
+conference on computer vision (ECCV). pp. 654–669 (2018)
+56. Yang, Y., Ma, W., Zheng, Y., Cai, J.F., Xu, W.: Fast single image reflection sup-
+pression via convex optimization. In: Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition. pp. 8141–8149 (2019)
+57. Zhang, X., Ng, R., Chen, Q.: Single image reflection separation with perceptual
+losses. In: Proceedings of the IEEE conference on computer vision and pattern
+recognition. pp. 4786–4794 (2018)
+58. Zheng,Q.,Shi,B.,Chen,J.,Jiang,X.,Duan,L.Y.,Kot,A.C.:Singleimagereflec-
+tionremovalwithabsorptioneffect.In:ProceedingsoftheIEEE/CVFConference
+on Computer Vision and Pattern Recognition. pp. 13395–13404 (2021)
+59. Zhu,Z.,Fan,Z.,Jiang,Y.,Wang,Z.:Fsgs:Real-timefew-shotviewsynthesisusing
+gaussian splatting. arXiv preprint arXiv:2312.00451 (2023)
+60. Zou,Z.,Lei,S.,Shi,T.,Shi,Z.,Ye,J.:Deepadversarialdecomposition:Aunified
+frameworkforseparatingsuperimposedimages.In:ProceedingsoftheIEEE/CVF
+conference on computer vision and pattern recognition. pp. 12806–12816 (2020)Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 19
+In this supplementary material, we show results on three additional scenes
+(Sec. 1), describe each scene’s setup (Sec. 2), conduct more comparison exper-
+iments (Sec. 3), report quantitative performance (Sec. 4), and provide more
+details of an ablation study (Sec. 5). Additionally, our project webpage shows
+the rendered videos of the transmitted and reflected 3D scenes separated by
+our proposed method, which outperforms the separation by NeRFReN [13].
+1 Additional Scenes
+In addition to the 4 scenes we presented in Section 5, we show results on three
+additional scenes. We evaluate our proposed method and the baselines on these
+scenes in the same way as described in Section 4. As shown in Figure 15, 16,
+17, our proposed method significantly outperforms the baselines in terms of
+reflection transmission separation.
+2 Scene Descriptions
+Incasesofstrongspecularreflections,suchasthescenesinourcaptureddataset,
+it is challenging even for humans to identify which objects belong to the trans-
+mittedscene,andwhichbelongtothereflectedscene.Therefore,tohelpreaders
+understand the setup of our scenes, we briefly describe the transmitted and re-
+flectedscenesforeachofour7scenes(4inthemainpaper,3inthesupplement).
+– Figure 5, Office (main paper). The transmitted scene is a bookcase in an
+office with a glass wall. We set up our camera in the corridor facing inside
+the office. The reflected scene is a study area at the end of the corridor.
+– Figure 6, Game Controller (main paper). The transmitted scene is a
+gamecontrollerinablackcasewithaglasscover.Notethattheglasssurface
+ishorizontaltotheground.Thereflectedsceneisadoorwithaglasswindow
+(youcanalsoseethecorridorthroughthedoor’swindow).Thedoorisupside
+down due to reflection.
+– Figure 7, Lens Stage (main paper). The transmitted scene is a lens stage
+with several lenses on it. The lens stage is covered with a glass case. The
+reflected scene consists of tables and chairs.
+– Figure 8, Outdoor Scene (main paper). We took photos of a toy and a
+powerbankinsideaglasswindowfromoutdoors.Thereflectedsceneincludes
+some bags on an outdoor table, with plants and another building’s windows
+(mildly defocused) 20 meters away in the background.
+– Figure15,Shelf (supplement).Thetransmittedsceneisashelfwithboxes,
+bags, and batteries on it. The reflected scene consists of tables and chairs.
+– Figure 16, Poster (supplement). The transmitted scene is a poster on the
+wall of a corridor. The reflected scene is the corridor itself.
+– Figure 17, Lab (supplement). The transmitted scene is a cabinet with
+someboxes onitand alamp’spole(black)infront ofit.The reflectedscene
+includes a door, a lamp, and a table with various items on it.20 M. Xie et al.
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.15: Comparison with NeRFReN [13] and Dong et al [7] on Shelf
+scene. Top, middle, and bottom rows are the captured images, separated
+transmissions, and separated reflections, respectively. Our reflection separation
+approach is far more effective.
+3 Additional Comparisons
+Weconduct4morecomparisonexperiments.AsshowninFigure18,ourmethod
+(c) also outperforms (d) DSRNet [18] : ICCV 2023, supervised, single image-
+based; (e) Liu [33] : CVPR 2020, supervised, burst-based; and (f) Neural Spline
+Fields(NSF)[6]:CVPR2024,unsupervised,burst-based.Notethatnoneofthese
+methods can take advantage of our unpaired flash/no-flash data. Our recon-
+structed transmission is close to (b), the paired flash/no-flash difference (Diff),
+which requires paired images captured with a tripod.
+Additionally, as shown in Figure 18 (g), we trained a pure linear representa-
+tionbyenforcingT =cT .Thismodelresultsinimperfectreflectionseparation
+F N
+(notice the right side) compared to our soft-linear system with the Pearson loss,
+since the relationship between T and T is not perfectly linear.
+F N
+4 Quantitative Evaluation
+To compute quantitative metrics, we need to have a ground truth transmission
+scene as a reference. While it is difficult (oftentimes impossible) to remove the
+glassfromascene,wecaninsteadcomputethepairedflash/no-flashdifferenceas
+the reference transmission scene. In Table 1, we report the averaged PSNR and
+LPIPS between the difference image and each method’s separated transmission
+scene. We find that our method performs the best.
+5 Details of the Ablation Study in Section 6.1
+InSection6.1ofthemainpaper,wedesignandtestaflashlessframework,where
+weremovetheflashcuesfromourproposedframeworkandkeepeverythingelse
+the same. Figure 19 shows the detailed architecture of this flashless framework.Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 21
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.16: Comparison with NeRFReN [13] and Dong et al [7] on Poster
+scene. Top, middle, and bottom rows are the captured images, separated
+transmissions, and separated reflections, respectively. Our reflection separation
+approach is far more effective.
+Captured Flash Captured No-Flash(Unpaired)
+Ours NeRFReN Dong et al Ours NeRFReN Dong et al
+T
+R
+Separation of FlashImage Separation of No-Flash Image
+Fig.17: Comparison with NeRFReN [13] and Dong et al [7] on Lab scene.
+Top, middle, and bottom rows are the captured images, separated transmissions, and
+separated reflections, respectively. Our reflection separation approach is far more
+effective.22 M. Xie et al.
+(a) Captured Flash (b) Diff
+(c) Our (d) DSR (e) Liu (f) NSF (g) Linear
+Fig.18: Additional Comparisons. Our method (c) outperforms (d) DSRNet [18] :
+ICCV 2023, supervised, single image-based; (e) Liu [33] : CVPR 2020, supervised,
+burst-based; and (f) Neural Spline Fields (NSF) [6]: CVPR 2024, unsupervised,
+burst-based. Our reconstructed transmission is close to (b), the paired flash/no-flash
+difference (Diff), which requires paired images captured with a tripod. Additionally,
+in (g), we trained a pure linear representation by enforcing T =cT . This model
+F N
+results in imperfect reflection separation (notice the right side) compared to our
+soft-linear system with the Pearson loss.
+Methods
+Metric DSR [18] Liu [33] NSF [6] NeRFReN [13] Ours
+PSNR ↑ 13.02 11.16 9.40 10.09 20.42
+LPIPS ↓ 0.5754 0.6765 0.7452 0.7153 0.2868
+Table 1: Averaged Quantitative Evaluations. We calculate the PSNR and
+LPIPS between each method’s separated transmissions and the paired flash/no-flash
+differences, which serve as references for the ground truth transmissions. Our method
+has a huge quantitative advantage over the other methods, which corresponds with
+our huge qualitative advantage shown in the visual comparisons in Figure 5-8, 15-17.
+Granted, our method’s transmission is not perfect as it exhibits a slightly different
+color tone compared to the difference image, e.g., Figure 18 (b, c). Nevertheless, our
+result successfully obtains structural information that is very close to the reference
+image, outperforming other methods by a large margin.Flash-Splat: 3D Reflection Removal with Flash Cues and Gaussian Splats 23
++ + Co Im mp ao gs eite L1 & SSIM Loss
+Render Render Render
+3D Reflection Reflection 3D Beta Beta 3DTransmission Transmission Captured Composite Image
+Fig.19: Ablation: the flashless version of our proposed framework. To
+demonstrate the importance of flash cues, we design an ablation study where we
+removetheflashcuesfromourproposedframework.This“flashless” frameworkisstill
+a3DGS-basedapproach,butdoesnotutilizeflash/no-flashphotographyatall.Ituses
+3 3DGSs to represent the reflected scene, the transmitted scene, and the reflection
+factor β. The loss is calculated between the captured images and images rendered
+fromthese33DGSs.MoredescriptionscanbefoundinSection6.1inthemainpaper.

@@ -1,0 +1,689 @@
+Neutralresidues: Revisitingadaptersformodelextension
+NEUTRAL RESIDUES:
+REVISITING ADAPTERS FOR MODEL EXTENSION
+FranckSigneTalla Herve´ Je´gou E´douardGrave
+Kyutai,Paris
+ABSTRACT
+Weaddresstheproblemofextendingapretrainedlargelanguagemodeltoanew
+domain that was not seen at training time, like adding a language for which the
+originalmodelhasseennoorlittletrainingdata.Popularsolutionslikefine-tuning
+orlow-rankadaptationaresuccessfulatdomainadaptation,butformallytheydo
+notaddanyextracapacityanddegradetheperformanceintheoriginaldomain.
+Ourpaperanalyzesthisextensionproblemunderthreeangles: data,architecture
+andtrainingprocedure,whichareadvantageouslyconsideredjointly.Inparticular,
+weimproveadaptersandmakeitpossibletolearnanentirenewlanguagewhile
+ensuringthattheoutputoftheneuralnetworkisalmostunchangedintheoriginal
+domain. Forthispurpose,wemodifythenewresidualblocksinawaythatleads
+eachnewresidualblocktooutputnear-zerosintheoriginaldomain.
+This solution of neutral residues, which borrows architectural components from
+mixtureofexperts,iseffective: withonly20%extralearnableweightscompared
+toanoriginalmodeltrainedonEnglish,wegetresultsthataresignificantlybetter
+thanconcurrentapproaches(fine-tuning,low-rankorvanillaadapters)intermsof
+thetrade-offbetweenlearninganewlanguageandnotforgettingEnglish.
+L O G P E R P L E X I T Y
+Figure 1: Learning or Forgetting? Fine-
+Backbone tuning a model reduces the model perfor-
+1.1 Finetuning mance on the original task. Potential trade-
+LoRA offs are governed by the learning rate, with
+1.0 Adapters extreme cases being (top-left) the original
+Ours backbone and (bottom-right) finetuning on
+0.9 thenewdatawithalargelearningrate.
+LoRA or vanilla adapters mitigate catas-
+0.8 trophic forgetting but only to some extent.
+Ourmethodsignificantlyimprovesthiscom-
+0.70 0.75 0.80 0.85 promise. DetailedresultsinSection4.
+F O R G E T T I N G ( E N )
+1 INTRODUCTION
+Thedominatingstrategyforproducingfoundationmodelsinvolvestrainingfromscratchonalarge
+collection of data, typically trillions of tokens, covering multiple domains. Training such models
+is extremely costly in terms of computing resources. In view of the explosion of the number of
+giganticmodelsproducedinthelastyears(theHuggingFacemodelrepositoryclaimstohostabout
+one million models), this training paradigm raises the problem of the economical and ecological
+sustainability of the model production pipelines. As an example, training the Llama 3 model is
+estimated by multiple sources to cost hundreds of millions dollars, mostly due to the training on
+24,000flagshipGPUsH100formonths1,notcountingthehiddencostsofexploration.
+In this paper, we consider the question of extending an existing model, in order to add some new
+capabilitiesorknowledgewithoutretrainingitfromscratchandthereforeinamuchmoreresource-
+1https://www.theinformation.com/articles/ten-gifts-nvidia-gave-its-investors
+1
+4202
+tcO
+3
+]LC.sc[
+1v44720.0142:viXra
+)
+R
+F
+(
+G
+N
+I
+N
+R
+A
+E LNeutralresidues: Revisitingadaptersformodelextension
+efficient manner. The solutions that are successful for domain adaptation, such as finetuning or
+Low-RankAdaptation(Huetal.,2022,LoRA),arenotadequateinthiscontextbecausetheydonot
+addanyextracapacity. Thereforetheyareinherentlylimitedintheamountofknowledgethatthey
+canincorporatewithoutsufferingsignificantforgetting.Thiscatastrophicforgettingisawell-known
+probleminthecontinuallearningsetting(McCloskey&Cohen,1989;French,1999).
+Incontrast,theadaptersintroducedbyRebuffietal.(2017)extendapretrainedmodelbyaddingnew
+parameters. When transferringtoa newdomain ortask, only thesenewweights aretrained while
+thoseoftheoriginalbackbonearefrozen. Thisextensionstrategy,whichwasinitiallyintroducedin
+computervisionwithconvolutionalneuralnetworks,wassubsequentlyadaptedtotextualtransform-
+ersbyHoulsbyetal.(2019). Adaptersbenefitfromtheinitialpretrainedmodelandhenceexhibit
+competitivetransferperformance.Theyenjoyseveraladditionalproperties:Onlyasubsetofweights
+istrained. Mostimportantly, theyformallyaddsomecapacity(unlikelinearadditiveadapterslike
+LoRA)andhencedonotsufferfromtheaforementionedlimitations. However,adaptersstillsuffer
+significantforgettingintheircurrentformandarethereforenotsufficientforourproblem.
+Inourpaper,webuilduponadaptersand,accordingly,increasethecapacityofthemodelbyadding
+feed-forward blocks to the model, while offering a modular design (Pfeiffer et al., 2020). In par-
+ticular,weconsidertheuse-casewhereweaddanewlanguagetoapretrainedmodel. Wemeasure
+how the extended model performs both on the training criterion, namely perplexity, but also on
+downstreamtaskssuchasquestionanswering.
+We then analyze how to optimize the compromise between learning a new language, and not for-
+gettingtheinitialknowledgeofthepretrainedmodel. Westudytheimpactof(1)trainingdata;(2)
+trainingstrategy,suchaslossesspecificallyintendedatreducingtheforgetting,and(3)architecture.
+Thisleadsustopointoutseveralimportantfactorsforsuccessfullyextendingamodelwithadapters:
+• Data: Whenlearningadapters,asimplewaytodrasticallyreducetheforgettingistokeep
+trainingwithasmallfractionofdatasimilartotheoriginaldistribution.
+• Architecture:Anadaptergatingmechanismisaneffectivewaytoensurethatthenetwork
+distinguisheswhenitshouldoperateastheoriginalneuralnetworkorwhenthenewblocks
+aredesirabletoprocesstheinputdata.
+• Initialization: Our analysis concurs with the observation by Houlsby et al. (2019) that
+near-identical initialization is important when training adapters. We introduce a variant
+thatisevenmoredrasticthattheexisting0-blockinitializationoftheoutputmatrix.
+• Training: Thegatingmechanismisadvantageouslyinformedinasupervisedmanner. We
+proposed two strategies in that respect, both introducing a local loss: The first one is in-
+spiredbyMixture-of-Expertsandinvolvesanexplicitdomainclassifierateachblock. The
+secondoneinvolvesasparsitylosswhoseobjectiveistoensurethattheresidualconnec-
+tionsoutputnear-zerovalueswhentheinputfollowsthepretrainingdistribution.
+Overall, we show that multiple ingredients are advantageously intertwined to ensure that the ex-
+tendedmodelstillapproximatelyimplementstheoriginalfunctionwhentheinputisfromtheorig-
+inal distribution, without being too constrained to incorporate a large amount of new knowledge.
+In our experiments, these conclusions are validated with three models by extending the pretrained
+modelwithtwolanguages.
+2 RELATED WORK
+The success of deep learning is often associated to the outstanding performance obtained when
+trainingconvolutionalneuralnetworksonlargedatasetssuchasImagenet(Dengetal.,2009). Yet
+anotherkeybenefitistheiramenabilitytotransferknowledgebetweentaskswithalimitedamount
+oftrainingdata(Oquabetal.,2014). Thistransferisusuallyperformedwithaso-calledfinetuning
+stage,wheretheoriginalbackboneistrainedinadata-efficientmannertosolveadistincttargettask
+than the one employed at training time. It often requires to modify the architecture to adapt the
+outputlayerstothenewtasks. Severalself-supervisedpretrainingmethodsarenoticeablyinterested
+inimprovingwaysofpretrainingmodelsonproxytasks(Devlinetal.,2018;Caronetal.,2021),such
+thatnetworksfinetunedfromthesebackbones,orusedina0-shotmanner,performwellonmultiple
+tasks. Inmostofthesesettings,thebackboneonlyrequiressomeformofdomainadaptation.
+2Neutralresidues: Revisitingadaptersformodelextension
+Finetuning is however not sufficient when a large body of knowledge must be incorporated to the
+network. In this section we review a body of literature related to this problem and to our work.
+Thisincludessolutionsthataddnewknowledgeintoapretrainednetwork,aswellasmethodsthat
+incorporategatingmechanismssuchasmixturesofexperts(MoE).
+Parameter Efficient Finetuning. Enhancing language model capabilities using module based
+training has gained interest in recent years due to the high cost of full finetuning. Those meth-
+ods are known as parameter efficient finetuning methods (PEFT; Houlsby et al. (2019); Hu et al.
+(2022);Li&Liang(2021)). Unlikefullfinetuning,theyonlyrequirealimitedamountofmemory.
+Houlsby et al. (2019) proposed to insert small bottleneck layers, known as Adapters, within each
+transformerlayer,allowingmodelstobefinetunedbytrainingonlyasmallfractionoftheparame-
+ters,whilekeepingtheoriginalmodelfrozen. Thereisalargebodyaliteratureonadapters,seethe
+overviewbyPfeifferetal.(2023). Low-RankAdaptation(LoRA)byHuetal.(2022)addstrainable
+low-rankmatricestotransformerlayerswhilekeepingtheoriginalweightsfrozen.
+Continual Learning without Forgetting. Continual Learning is a widely studied con-
+cept(DeLangeetal.,2021;Wangetal.,2024)asitallowstheadditionofnewknowledgetoLLM
+aftertheirinitialpretraining. Itisusuallydonethroughfullfinetuninginordertolearndomainspe-
+cificknowledge(Roziereetal.,2023),toenhanceinstruction-followingabilities(Wangetal.,2023)
+or to align LLM with human preferences (Ouyang et al., 2022). One of the biggest challenges of
+continuallearningandthemaindrawbackofdoingitthroughfullfinetuningiscatastrophicforget-
+ting(Kirkpatricketal.,2017). Thisispartiallyalleviatedbyusingtheinitialtrainingdata(Robins,
+1995),whenavailable,orasaproxydatafromasimilardistribution.
+Severalstudieshaveinvestigatedmoreadvancedmethodstoaddressforgettingincontinuallearning
+(Bidermanetal.(2024);Wuetal.(2024);Lietal.(2024);Zhongetal.(2024);Riemeretal.(2019);
+Li&Hoiem(2017)). Bidermanetal.(2024)showthatusingLoRAhelpsreducingforgettingbutis
+lessefficientinlearningthanfullfinetuningespeciallyfordistributionsfarfromtheLLMpretraining
+distribution. Wu et al. (2024) proposed a continual learning method for LLMs, which amounts to
+addingnewintermediatetransformerblocksinaninterleavedmanner. Thisenablestheinjectionof
+newknowledgewhilepreservingtheinitialcapabilities.
+Mixture-of-Experts. MoEs have a long history in neural networks (Yuksel et al., 2012), for in-
+stance with set of classifiers where each individual classifier was specialized in a different task or
+aspects of data. Residual architectures (He et al., 2016) and in particular transformers (Vaswani
+etal.,2017)haverenewedtheinterestinthisstrategy. Inthiscontext,theyamounttoreplacingthe
+standardfeed-forwardnetworks(FFN)ofthetransformerblocksbyacollectionofFFNs, referred
+toasexperts.Agatingmechanismselectivelyactivatesasubsetofrelevantexpertsforagiveninput.
+Thistechniquehasbeenwidelyusedtoreducethecomputationalcostofinferenceinlargelanguage
+models(Jiangetal.,2024;Xueetal.,2024)withafocusonthedesignofanexpert-balancingloss
+topromoteequitabletokendistributionacrossexperts(Shazeeretal.,2017;Pfeifferetal.,2023).
+Recent works have explored utilizing MoE’s gating mechanism to mitigate catastrophic forgetting
+during the continual learning phase of language models. LorRAMoE (Dou et al., 2024) employs
+LoRAs as experts, integrating them with a gating mechanism to improve performance on specific
+downstream tasks through Supervised finetuning (SFT). LoRAMoE mitigates catastrophic forget-
+ting in the case of SFT, but to our knowledge its effectiveness has not been studied in a broader
+context. In contrast, two recent parallel concurrent works are closer to our proposal: Zhong et al.
+(2024)augmentMixture-of-ExpertsLLMswithnewmodalitiesbyadditionofnewexpertstoapre-
+trained mixture of experts. Similarly, Li et al. (2024) add an MoE layer in parallel to the FFN of
+the transformer block to learn multilingual capabilities and mitigate catastrophic forgetting during
+ContinualLearning. Oursolutionsharessomesimilaritieswiththisworkbyemployingmixeddata
+training. YetLietal.(2024)donotintegrateanexplicitsparsitycriterion,andneedtoweightdif-
+ferently the blocks of the pretrained model with those of the gated adapters. They also consider
+multipleelementsinthemixtureandapplyasoftmaxfortherootingmechanism. Sinceatleastone
+expertisactivatedintheirmixture,thisselectionmechanismalsopreventsthecapacityofthemodel
+toproduce0-valuedoutputs. Oursolutionofneutralresidueswithlocallossismoreeffectivethan
+simplygatingadapters,asshowninourexperimentalSection4.
+3Neutralresidues: Revisitingadaptersformodelextension
+Output Output
+Multi-Layer Adapter Block ELU
+Perceptron
+Output
+Weights
+RMSNorm RMSNorm
+SiLU
+Multi-Head
+Self-Attention Input Gating
+Weights Weights
+RMSNorm
+Input Input
+Figure2:Architecturaldesignadoptedforneutralresidues:(left)Weaddtheadapterblockinparal-
+leltotheFFN.(right)OurgatedadapterblockincludesagatewithaELUlinearity(seeSection4.4
+foracomparisonwithasigmoidalgating). Attrainingtime,thetrainableparametersarerepresented
+byredblocks. Theweightsoftheblueblocksarefrozen. Theoutputoftheadapterisoptimized
+withalocallosssuchthattheoutputissparseiftheinputfollowsthepretrainingdistribution.
+3 NEUTRAL RESIDUES WITH GATED ADAPTERS
+ThefirstadaptersbyRebuffietal.(2017)wereinitiallyintroducedinthecontextofconvolutional
+residual networks. Their motivation was to adapt a backbone to multiple tasks by finetuning on
+a limited amount of data, rather than adding a large body of knowledge. Therefore they consider
+a limited number of trainable parameters, typically less than 10% additional weights compared to
+theoriginalbackbone. Inthecontextoflanguagemodels,Houlsbyetal.(2019)addresidualfeed-
+forward block sequentially after each multi-head attention and the original FFN. In our case and
+as shown in Figure 2, we add more capacity (typically 20%) and adopt parallel adapters as we do
+notobserveanoticeabledifferencecomparedtoserialadapters. Thisconcurswithobservationsby
+Touvronetal.(2022)thatblockscanbeparallelizedpairwiseifvisiontransformersarelargeenough.
+Near-identical initialization. One key ingredient pointed out by Houlsby et al. (2019) is that it
+isbesttostarttrainingadapterssuchthattheinitialnetworkisnear-identicaltothepretrainedone,
+therebynotmodifyingtheinitialfunction. Thisistypicallydonebyinitializingtheoutputadapter
+matrixto0s,asalsoadvocatedbyZhangetal.(2019). Weareevenmoredrasticinthatrespect: in
+addition to setting the output matrix with 0s, we depart from the usual He’s initialization for both
+the input and gating matrix and initialize them with a much lower variance, such that the model
+remains longer close to the original one. More specifically, we reduce the variance employed in
+He’sinitialization: insteadofinitializingweightswithvariance2/d,wheredintheinputdimension
+ofthematrix,weuseavarianceof1/(d·L),whereListhenumberoftransformerlayers.
+FFNvsmulti-headattention(MHA). Inourexperimentscarriedoutforaddinganewlanguage,
+itismoreeffectivetoaddextraweightsintheformofFFNthaninMHAblocks,foragivennumber
+ofadditionalparameters. ThisisconsistentwithhowextracapacityisaddedinMoE.SimilarlyLi
+etal.(2024)presentanablationthatshowsthataddingFFNblocksisbetterthanaddingattention
+blocks. Note,thisisincontrastwithwhatisobservedbyHuetal.(2022)withtheLoRAmethod,
+forwhichthebestchoicetoadapttodifferentdownstreamtaskswithfewparametersistoupdatethe
+MHAmatrix, inparticulartheychoosetoupdatethekeysandvaluesmatrices. Inourpreliminary
+experiments,were-evaluateLoRAinourcontextofknowledgeaddition,andobservethatLoRAis
+significantlymoreeffectivewhenupdatingtheFFNblocksthantheMHAblocks. Wehypothesize
+thatthisapparentdiscrepancyisduetothefactthattaskadaptationisdifferentfromthequestionof
+addingalargebodyofknowledgetoapretrainednetwork.
+4
+noitcejorPNeutralresidues: Revisitingadaptersformodelextension
+L A Y E R 0 L A Y E R 7 L A Y E R 1 5
+0.6 Neutral residues
+Backbone
+Sigmoid adapters
+0.4 Adapters
+0.2
+0.0
+0 1000 2000 0 1000 2000 0 1000 2000
+Figure3: Spectralanalysisofthegatingmatrix,normalizedbythelargestsingularvalue.
+Mixeddistributiontraining. Asdiscussedintherelatedwork,onesolutiontolimitcatastrophic
+forgetting is to keep training with a proportion of the original data, if such data is available. This
+strategyistypicallyemployedwithfinetuningbutisalsoeffectivewithallbaselines. Lietal.(2024)
+report that catastrophic forgetting almost disappear when the volume of original language data is
+fivetimesgreaterthanthenewone,yettheyalsopointoutthatmixeddatatrainingislikelytoslow
+downthelearningofthenewlanguage.
+Inourwork,weassumethatwehaveaccesstoa“similardistribution”atposttrainingtimewhenwe
+learntheadapters.Weutilizeaproportionpofdataaimedatbeingsimilartotheoriginaldistribution
+(albeitnotidentical),whichinourcaseisdatainEnglish. Wealsoconsideracaseinwhichwedo
+notknowwhatkindofdatawasusedattrainingtime, likeinthecaseoftheGemmaetal.(2024)
+model. In our ablation section 4.4, we evaluate the impact of p on learning and forgetting. As a
+particularcase,wealsoanalyzethecasep=0,wherenopretrainingdataisavailableorused.
+Adaptergating&localloss. Recenttransformermodelscommonlyadoptagatedactivationwith
+a SiLU non-linearity (Elfwing et al., 2018). The gating weights implement a linear operator W .
+g
+When training a vanilla adapter block for a new language, the singular values of this operator are
+significantlymoreskewedthaninregulartransformerblockfromthepretrainedbackbone. Figure3
+shows this behavior, which is detrimental to the learning process. Our interpretation is that all
+projectionsinstantiatedbythisoperatortendtobecolinearandthereforetobehavesimilarlywhen
+combined with the SiLU non-linearity, because they implicitly operate as a old/new data switch.
+Theredundancyinthegatingmatrixhindersthecapacityofthemodel.
+Toaddresstheproblem,weaddablockgateasinMoEtransformers(Shazeeretal.,2017)andtwo
+recentworksonmodelextensionwithgatedMoE(Zhongetal.,2024;Lietal.,2024). Inourcase,
+weuseasinglegatewhoseroleistooperateasaselector,eitherexplicitorimplicit,coupledwitha
+locallossappliedattheblocklevel. Thisgatingiscombinedwithtwodistinctstrategies:
+• Explicitselectorwithsigmoidalactivation. ThissolutionisinspiredbyMoE.Inthiscase,
+theblockgateisassociatedwithasigmoidactivation.Itisthereforetrainedasalocalbinary
+classifierwhoseobjectiveistodistinguishbetweentheoldandthenewdatadistributions.
+• Implicitselector: ELUactivationwithsparsityconstraint. Thisstrategy,whichistheone
+thatwerefertoas“neutralresidues”unlessspecifiedotherwise,doesnotmakeanexplicit
+classification. Instead, welettheELUactivationadaptsitselfthestrengthofitsresponse
+fortheblock. Wealsoapplyalossℓ ontheoutputoftheadaptergovernedbyahyperpa-
+1
+rameter α, which favors the adapter to return a residues of 0s. It is only employed when
+feedingtheextendedmodelwithdataoftheoriginaldistribution.
+AsonecanobserveinFigure3,thegatingoperatorhasasignificanteffectonthesingularvaluesof
+thegatingmatrix: thedistributionofthesingularvaluesislessskewedthantheoriginalbackbone.
+The implicit selector is more effective than the local classifier in that respect. As we will see in
+Section4,itisthemethodthatoffersthebestcompromisebetweennotforgettingandlearning.
+5
+S
+E
+U
+L
+A
+V
+R
+A
+L
+U
+G
+N
+I
+SNeutralresidues: Revisitingadaptersformodelextension
+4 EXPERIMENTS
+Inthissection,wereportexperimentalresultstovalidatetheperformanceofneutralresiduestoadapt
+a neural network to a new domain. We consider the case of adding or improving the multilingual
+abilityofalargelanguagemodel. Moreprecisely,westartfromanEnglish-onlymodel(oramodel
+thathasonlyseenasmallamountofnon-Englishdata)andfinetuneitonFrenchdata.
+4.1 DATASETSANDEVALUATIONPROTOCOLS
+TrainingDatasets. FortheFrenchfinetuningdataset,weuseadatasetextractedfromCommon-
+Crawl, which was pre-processed with the following steps. First, the text content was extracted
+fromHTMLusingtheresiliparsepackage. Then,weperformedlanguageidentificationwith
+fastText to keep only French data. Next, we performed deduplication at the paragraph level,
+by computing a hash of each paragraph. Finally, we filtered document using a fastText linear
+classifier, which was trained to discriminate random pages from CommonCrawl vs. high-quality
+documentssuchasWikipediaarticles,textbooks,newsarticlesorscientificarticles.
+FortheEnglishdomain,werestrictedourselvestotextfromWikipedia. Themotivationforthisis
+touseafinetuningdatasetthatisclose,butyetdifferent,fromthetrainingdatasetofthebackbone
+model. Indeed,asdiscussedearlier,inmanycasesonedoesnothaveaccesstotheoriginaldataset
+that was used to train the backbone model, and we want to demonstrate that our method is robust
+eveninthecasewhereexactdatafromtheoriginaldomainisnotavailable.
+Evaluationbenchmarks. Weconsidertwomainwaystoevaluatetheperformanceoffinetuning.
+First, we evaluate the perplexity of the model on held-out sets, both in English and in French,
+to measure forgetting and learning. For English, we consider text from a domain that does not
+correspondtothefinetuningdata,andusethePubMedsubsetfromThePile(Gaoetal.,2020). The
+goalhereistoevaluatehowrobustourmethodistoforgetting,especiallyinthecasewherewedo
+nothaveaccesstothesametrainingdistributionastheoriginalmodel. ForFrenchandGerman,we
+considertextfromthesamedistributionasthefinetuningdataset.
+Second,weconsiderstandardacademicbenchmarksusedtoevaluatelargelanguagemodels,suchas
+questionansweringorCloze-styleproblems. Weusethefollowingdatasets: ARCchallenge(Clark
+et al., 2018), HellaSwag (Zellers et al., 2019), MMLU (Hendrycks et al., 2020), CommonSense
+QA(Talmoretal.,2018)andBelebele(Bandarkaretal.,2023). ForFrench, weusethetranslated
+datasetsfromDacLaietal.(2023)andSakaietal.(2024). Foralldatasets,wescoreeachanswer
+independentlyasthecontinuationofthequestion,andpredictthemostprobableone. Weusenor-
+malization,followingtherecommendationfromGuetal.(2024). Weperform5-shotevaluationfor
+ARCchallenge,CSQAandMMLU,and0-shotevaluationforHellaSwagandBelebele.
+Backbonemodels. Weconsiderthreemodelsthatweuseasbackbone. Thetwofirstmodelswere
+trainedinternallyon2.4Ttokens,andhave1Bparameters. Themaindifferencebetweenthesetwo
+models is that the first model, denoted Transf-EN, was trained on English data only. The second
+model Trans-ML is MultiLingual: it was trained on a mix of English, French, German, Spanish,
+ItalianandPortuguesedata. Thenon-Englishdatarepresentsroughly12.5%ofthetokens. Thelast
+model is Gemma-2B (Gemma et al., 2024). It also includes a small amount of multi-lingual data
+duringpre-training. WedonothaveaccesstothetrainingdatasetofGemma, makingitarealistic
+testcaseforourapproach. AppendixAgivesmoredetailsaboutthesemodels.
+Forfinetuningwithnewknowledge,wetrainduring100000stepswithabatchsizeof64forTrans-
+MLandTrans-EN,andwetrainGemma-2Bduring150000stepswithabatchsizeof8.
+Baselineextensionstrategies. Inourexperiments,weusethefollowingmethodasbaselines:
+• Finetuning:wetrainalltheweightsfromthebackbone.Were-initializetheoptimizerstate.
+• LoRA:unlikeHuetal.(2022),weaddalltheadditionalparametersintheFFNlayers,asin
+ourpreliminaryexperimentsthischoicewassignificantlybetterforknowledgeextension.
+• Adapters:weusethevanillaadaptersasHoulsbyetal.(2019)withnear-identicalinitializa-
+tion. Weuseparallelinsteadofserialblockstohaveamoredirectlycomparablebaseline.
+6Neutralresidues: Revisitingadaptersformodelextension
+Table 1: Mixture of distributions: Table 2: Training with new data only or mixed data.
+Impact of the rate p of data that fol- Starting from an English pretrained model, we measure
+lowsthepretrainingdistributionwhen the tradeoff in between learning and not forgetting if we
+trainingavanillaadapter. 10%ofini- only post-train with French or if we keep p = 10% of
+tial data distribution is a good com- English. We consider full finetuning, LoRA and vanilla
+promise between learning (FR ppl) adapters baseline, and our neutral residues. See Table 1
+andnotforgetting(ENppl). forresultsofthepretrainedmodel. Wereporttheperplex-
+ityonthevalidationsetsattheendoftraining.
+Englishratep EN FR
+p=0 p=0.1
+0.00 0.720 0.810 Method EN FR EN FR
+0.01 0.707 0.810
+Finetuning 0.874 0.755 0.811 0.758
+0.10 0.687 0.812
+LoRA 0.770 0.814 0.730 0.818
+0.50 0.683 0.828
+Vanillaadapters 0.720 0.810 0.687 0.812
+Pretrainedmodel 0.663 1.175 Neutralresidues 0.684 0.790 0.668 0.793
+Hyperparameters. Exceptmentionedotherwise,LoRAandbothadaptersuse20%ofextralearn-
+able weights. We use a learning rate of 5·10−5 by default, except for finetuning since the trade-
+off between learning and not forgetting is better with a learning rate of 2·10−4, see ablations in
+Section 4.4. The hyperparameters α and p have been selected based on perplexity results on the
+validationset. WeprovideothertraininghyperparametersinSectionA.
+4.2 PRELIMINARYANALYSIS
+Training with mixed data distribution Table 1 analyzes the impact of the proportion p of data
+from the pretraining distribution used to extend the model, measured for vanilla adapters. As one
+cansee,p=0.1offersagoodtrade-off: theforgettingisnotsignificantlyhigherthanwithp=0.5,
+whilethemodelisalmostasgoodinFrenchaswhenwetrainwithEnglishonly(p=0). Therefore,
+whentrainingwithmixeddata,wesetp=0.1inallsubsequentexperiments.
+Table 2 gives the trade-off between learning and not forgetting for all baselines and our method,
+whentrainingeitherwithoutorwithmixedtrainingdistributions.Asonecansee,themixedtraining
+significantlyreducestheforgettingforallthemethodswithouthinderingtoomuchthelearning.
+Table 3: Impact of the number of parameters.
+Extra Perplexity Tasksavg.
+Wevarytheextracapacityallocatedtonewlearn-
+weights EN FR EN FR
+able weights in our method. As to be expected,
+thecapacityofouradapterstoperformwellinthe +5% 0.667 0.849 46.8 39.5
++10% 0.667 0.819 46.2 40.8
+newlanguagestronglydependsonthenumberof
++20% 0.668 0.793 46.5 41.2
+weights that we add. Interestingly, the impact of
++50% 0.669 0.761 46.7 42.3
+extraweightsonforgettingisalmostneutral.
+4.3 MAINRESULTS
+Table 4 reports our main detailed results when we want to improve the performance in French of
+a pretrained model. Table 5 provides the counterpart when the new language to be added to the
+pretrained model is German, which overall leads to the same conclusions. As one can see, our
+proposal is overall offering the best trade-off between learning and not forgetting compared to all
+othertechniques:Itisfirstintermsofthesumofbothmetrics(English+FrenchorEnglish+German).
+Impact of the initial model. We observe that the results are consistent for all models. This in-
+dicates that even if we do not know exactly the data employed to produce the pretrained model,
+our neutral residues is beneficial. Note, this is also evidenced by Table 2, where neutral residues
+performsignificantlybetterthanothertechniquesevenwhenwedonotuseanypretrainingdata. If
+wecompareTransf-ENwithTrans-ML,asexpectedthepretrainedmodelTrans-MLobtainsmuch
+betterperformanceonFrench(resp. German). However,eventheTrans-MLmodel,whichhasseen
+somemultilingualattrainingtime,significantlybenefitsfromourposttrainingmethod.
+7Neutralresidues: Revisitingadaptersformodelextension
+Table 4: Main results: comparison of neutral residues (ours) versus four baselines for three pre-
+trainedmodels. Allmethodsexceptfinetuninguse20%oftrainableparameterscomparedwiththe
+backbonemodels.Weuseaproportionp=0.1ofFrenchforthetraining.Wereporttheaverageper-
+formanceacrossalltasksbothonEnglishandFrench. Thesemetricsreflecttheoverallperformance
+withrespecttonotforgettingandlearning,respectively. Inboldwereportthetwobestmodels.
+Forgetting:English Learning:French Taskavg.
+Model Method
+BeleBele(0)
+HellaS(0) ArcC(5) CSQA(5)
+MMLU(5)
+BeleBele(0)
+HellaS(0) ArcC(5) CSQA(5)
+MMLU(5)
+English French
+Backbone 43.0 60.3 40.5 56.5 34.5 34.6 32.8 25.9 37.4 27.4 47.0 31.6
+finetuning 37.9 45.5 34.8 45.5 31.0 42.2 48.6 34.5 57.0 31.7 39.0 42.8
+LoRA 42.0 53.1 38.1 52.3 33.2 42.4 46.2 33.0 51.5 30.7 43.7 40.8
+Adapters 42.1 56.9 38.7 53.6 33.4 43.2 46.2 31.7 50.0 30.9 45.0 40.4
+ours 43.4 59.5 39.9 55.4 34.3 43.6 48.5 32.2 50.4 31.4 46.5 41.2
+Backbone 41.2 59.4 40.6 57.4 34.4 42.6 48.9 34.4 47.6 31.1 46.6 40.9
+finetuning 40.1 52.3 37.2 54.3 32.0 43.8 52.7 40.4 57.8 32.6 43.2 45.5
+LoRA 40.0 57.1 39.8 54.1 33.5 44.2 51.1 37.4 53.1 31.7 44.9 43.5
+Adapters 41.2 58.0 39.0 55.1 34.6 41.8 50.0 38.0 55.4 31.4 45.6 43.3
+ours 42.1 59.3 40.6 55.3 34.2 42.9 51.1 38.1 53.7 32.1 46.3 43.6
+Backbone 46.3 69.7 47.0 63.0 39.9 44.3 50.3 36.8 43.8 32.5 53.2 41.5
+finetuning 43.7 55.2 38.8 52.6 34.3 45.2 55.3 38.4 56.4 33.7 44.9 45.8
+LoRA 48.2 66.7 45.0 60.0 37.9 46.7 55.5 40.5 55.6 35.9 51.6 46.8
+Adapters 43.7 66.0 44.3 40.6 38.3 43.7 53.3 34.6 52.4 34.5 46.6 43.7
+ours 47.4 69.1 47.6 63.1 40.0 47.7 55.3 41.0 54.5 34.7 53.4 46.6
+Table5: LearningGerman: weusethesamesettingasinTable4exceptthatwelearnGerman.
+Forgetting:English Learning:German Taskavg.
+Model Method
+BeleBele(0)
+HellaS(0) ArcC(5) CSQA(5)
+MMLU(5)
+BeleBele(0)
+HellaS(0) ArcC(5) CSQA(5)
+MMLU(5)
+English German
+Backbone 43.0 60.3 40.5 56.5 34.5 33.8 30.2 24.0 44.3 27.8 47.0 32.0
+finetuning 40.2 44.4 32.5 44.0 30.6 42.9 44.0 34.0 69.5 30.3 38.4 44.1
+LoRA 43.4 52.0 36.5 50.6 32.6 40.8 40.9 30.4 64.0 29.9 43.0 41.2
+Adapters 42.6 56.6 38.4 51.4 33.5 41.6 41.2 31.7 64.2 30.7 44.5 41.9
+ours 42.9 59.5 40.5 56.3 34.3 39.7 41.5 31.2 62.3 30.5 46.7 41.0
+Backbone 41.2 59.4 40.6 57.4 34.4 42.6 44.4 32.3 56.7 30.2 46.6 41.2
+finetuning 42.1 50.7 37.8 51.5 32.6 42.3 47.5 35.6 70.2 31.8 42.9 45.5
+LoRA 42.7 56.8 38.0 56.2 34.1 41.9 45.6 35.8 65.2 31.2 45.5 43.9
+Adapters 41.2 58.0 39.0 55.1 34.6 39.3 43.3 32.3 56.0 29.7 45.6 40.1
+ours 42.1 58.9 41.6 57.7 34.5 42.8 46.3 35.7 62.6 30.6 47.0 43.6
+Backbone 46.3 69.7 47.0 63.0 39.9 42.4 45.6 34.4 51.9 32.3 53.2 41.3
+finetuning 45.1 55.1 40.5 54.4 34.3 44.9 50.1 37.4 68.8 33.1 45.9 46.8
+LoRA 47.3 65.8 45.7 61.4 37.9 44.7 49.3 38.8 67.4 34.8 51.6 47.0
+Adapters 45.9 65.9 47.4 60.9 39.5 44.7 46.9 36.5 63.6 34.5 51.9 45.2
+ours 47.7 67.5 49.0 64.6 39.5 45.1 49.6 37.9 64.0 34.6 53.6 46.2
+8
+NE-fsnarT
+LM-fsnarT
+B2-ammeG
+NE-fsnarT
+LM-fsnarT
+B2-ammeGNeutralresidues: Revisitingadaptersformodelextension
+Table6: Gating,activationandlocalloss. Forthe Table8: Trade-offswith̸=learningrates.
+downstreamtasks,wereportthemeanofalltasks. This hyperparameter allows us to favor
+learningvs. forgettingorvice-versa. These
+Gate Gatelosses Our Perplexity Tasks
+resultsaretheonesreportedinFigure1.
+ℓ
+1
+CE init. EN FR EN FR
+0.684 0.812 45.0 40.4 Perplexity Tasksavg.
+∅ ✓ 0.681 0.813 45.5 40.6 Method LR EN FR EN FR
+✓ ✓ 0.697 0.812 45.6 41.0
+Backbone 0 0.663 1.175 47.0 31.6
+✓ 0.668 0.810 45.7 41.1
+Sigmoid ✓ ✓ 0.677 0.800 45.3 41.5 2·10−5 0.678 0.963 45.3 36.3
+✓ ✓ ✓ 0.667 0.800 45.7 41.8 Fine- 5·10−5 0.705 0.840 35.9 42.1
+tuning 2·10−4 0.811 0.758 39.0 42.8
+✓ 0.670 0.813 46.1 40.0 5·10−4 0.874 0.757 35.9 42.1
+ELU ✓ 0.674 0.792 46.7 42.3
+✓ ✓ 0.668 0.793 46.5 41.2 2·10−5 0.716 0.842 44.2 40.0
+5·10−5 0.730 0.818 43.7 40.8
+Backbonebaseline 0.663 1.175 47.0 31.6 LoRA
+2·10−4 0.745 0.802 41.8 41.4
+5·10−4 0.755 0.806 41.5 42.3
+Table7:Ablation:α governsthestrengthoftheℓ
+1
+localloss. SeeTable6formorecomparisons. 2·10−5 0.686 0.830 45.0 39.5
+Vanilla 5·10−5 0.687 0.812 45.0 40.4
+Perplexity Tasksavg. adapters 2·10−4 0.689 0.796 45.8 42.2
+α EN FR EN FR 5·10−4 0.688 0.795 45.4 42.2
+0 0.674 0.792 46.7 42.3
+1 0.674 0.792 46.4 42.0 2·10−5 0.667 0.802 46.7 41.0
+10 0.671 0.792 46.4 42.1 Neutral 5·10−5 0.668 0.793 46.5 41.2
+100 0.668 0.793 46.5 41.2 residues 2·10−4 0.670 0.789 46.8 41.2
+1000 0.671 0.793 45.9 40.8 5·10−4 0.670 0.790 46.2 41.6
+4.4 ABLATIONS
+Ablation of architectural components and losses. The low-variance initialization proposed in
+Section 3 improves the results in the context of gated adapters. Compared to He’s initialization,
+it favors training the gating faster that the other weights. This hypothesis is compatible with the
+observationthatthisinitializationisdetrimentalwithoutgating(∅).
+Ablation learning rate. Table 8 reports the trade-offs achievable by different techniques when
+varyingthefinetuninglearningrates, seealsoFigure1. Theresultsofourmethodareremarkably
+stableacrossalargerangeoflearningrate(oneorderofmagnitudefrom5·10−5 and5·10−4),in
+sharpcontrastwithFine-tuningandLoRA,whicharehighlysensitivetothisparameter.
+Ablation coefficient α. The perplexity results in Table 7 show that this weight gives a trade-off
+betweenlearningandnotforgetting,whichisbestoptimizedwhenselectedα=100. Weretainthis
+valueinallourexperiments.Thischoicedoesnottranslatetodownstreamtasksinthisspecificcase,
+yetTable6showsthatusingtheℓ ispreferableinothercontexts(withnogatingorsigmoid).
+1
+5 CONCLUSION
+Thispaperhasexploredthefeasibilityandeffectivenessofextendingexistingfoundationmodelsto
+incorporate new capabilities or knowledge without the need for resource-intensive retraining from
+scratch. Bybuildingupontheconceptofadapters,whichaddnewparameterstoapretrainedmodel,
+wehavedemonstratedthatitispossibletoextendamodelwithoutcompromisingitsoriginalknowl-
+edge,therebyofferingamoresustainableapproachthanretrainingfromscratch. Ourstudyfocused
+ontheuse-caseofaddinganewlanguagetoapretrainedmodelandevaluatedtheperformanceof
+theextendedmodelonbothtrainingcriteriaanddownstreamtasks. Thefindingshighlightseveral
+critical factors that contribute to the successful extension of a model while mitigating the issue of
+catastrophic forgetting. These factors include the strategic use of mixed training data, an adapter
+gatingmechanismcoupledwithalocalloss,andtheimportanceofnear-identicalinitialization.
+Acknowledgments. ThisprojectisfundedbyIliadGroup, CMACGMGroupandSchmidtSci-
+ences. WethankXavierNiel,RodolpheSaade´,EricSchmidt,AudeDurand,Se´verineGre´goireand
+NicolasGranatino,fortheirsupport. WethanktheKyutairesearchteam,withspecialappreciation
+toPatrickPe´rez,Ame´lieRoyer,NeilZeghidourandHippolytePilchen,fortheirvaluablefeedback,
+andSarahHoˆteandGuillaumeRouzaudfortheirhelp.
+9Neutralresidues: Revisitingadaptersformodelextension
+REFERENCES
+Lucas Bandarkar, Davis Liang, Benjamin Muller, Mikel Artetxe, Satya Narayan Shukla, Donald
+Husa,NamanGoyal,AbhinandanKrishnan,LukeZettlemoyer,andMadianKhabsa.Thebelebele
+benchmark: a parallel reading comprehension dataset in 122 language variants. arXiv preprint
+arXiv:2308.16884,2023.
+DanBiderman, JoseGonzalezOrtiz, JacobPortes, MansheejPaul, PhilipGreengard, ConnorJen-
+nings, Daniel King, Sam Havens, Vitaliy Chiley, Jonathan Frankle, et al. Lora learns less and
+forgetsless. arXivpreprintarXiv:2405.09673,2024.
+Mathilde Caron, Hugo Touvron, Ishan Misra, Herve´ Je´gou, Julien Mairal, Piotr Bojanowski, and
+Armand Joulin. Emerging properties in self-supervised vision transformers. In Proceedings of
+theIEEE/CVFinternationalconferenceoncomputervision,pp.9650–9660,2021.
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge.
+arXivpreprintarXiv:1803.05457,2018.
+VietDacLai,ChienVanNguyen,NghiaTrungNgo,ThuatNguyen,FranckDernoncourt,RyanA
+Rossi,andThienHuuNguyen. Okapi: Instruction-tunedlargelanguagemodelsinmultiplelan-
+guageswithreinforcementlearningfromhumanfeedback. arXive-prints,pp.arXiv–2307,2023.
+MatthiasDeLange, RahafAljundi, MarcMasana, SarahParisot, XuJia, Alesˇ Leonardis, Gregory
+Slabaugh,andTinneTuytelaars. Acontinuallearningsurvey: Defyingforgettinginclassification
+tasks. IEEEtransactionsonpatternanalysisandmachineintelligence,44(7):3366–3385,2021.
+JiaDeng,WeiDong,RichardSocher,Li-JiaLi,KaiLi,andLiFei-Fei. Imagenet: Alarge-scalehi-
+erarchicalimagedatabase. In2009IEEEconferenceoncomputervisionandpatternrecognition,
+pp.248–255.Ieee,2009.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep
+bidirectionaltransformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,2018.
+Shihan Dou, Enyu Zhou, Yan Liu, Songyang Gao, Wei Shen, Limao Xiong, Yuhao Zhou, Xiao
+Wang,ZhihengXi,XiaoranFan,ShiliangPu,JiangZhu,RuiZheng,TaoGui,QiZhang,andXu-
+anjingHuang. LoRAMoE:Alleviatingworldknowledgeforgettinginlargelanguagemodelsvia
+MoE-styleplugin. InLun-WeiKu,AndreMartins,andVivekSrikumar(eds.),Proceedingsofthe
+62ndAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: LongPapers),
+pp. 1932–1945, Bangkok, Thailand, August 2024. Association for Computational Linguistics.
+URLhttps://aclanthology.org/2024.acl-long.106.
+Stefan Elfwing, Eiji Uchibe, and Kenji Doya. Sigmoid-weighted linear units for neural network
+functionapproximationinreinforcementlearning. Neuralnetworks,107:3–11,2018.
+RobertMFrench. Catastrophicforgettinginconnectionistnetworks. Trendsincognitivesciences,
+3(4):128–135,1999.
+Leo Gao, Stella Biderman, Sid Black, Laurence Golding, Travis Hoppe, Charles Foster, Jason
+Phang,HoraceHe,AnishThite,NoaNabeshima,etal. Thepile:An800gbdatasetofdiversetext
+forlanguagemodeling. arXivpreprintarXiv:2101.00027,2020.
+Team Gemma, Thomas Mesnard, Cassidy Hardin, Robert Dadashi, Surya Bhupatiraju, Shreya
+Pathak,LaurentSifre,MorganeRivie`re,MihirSanjayKale,JulietteLove,etal. Gemma: Open
+modelsbasedongeminiresearchandtechnology. arXivpreprintarXiv:2403.08295,2024.
+Yuling Gu, Oyvind Tafjord, Bailey Kuehl, Dany Haddad, Jesse Dodge, and Hannaneh Hajishirzi.
+Olmes: Astandardforlanguagemodelevaluations. arXivpreprintarXiv:2406.08446,2024.
+KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimagerecog-
+nition. In Proceedings of the IEEE conference on computer vision and pattern recognition, pp.
+770–778,2016.
+10Neutralresidues: Revisitingadaptersformodelextension
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and
+Jacob Steinhardt. Measuring massive multitask language understanding. arXiv preprint
+arXiv:2009.03300,2020.
+NeilHoulsby,AndreiGiurgiu,StanislawJastrzebski,BrunaMorrone,QuentinDeLaroussilhe,An-
+drea Gesmundo, Mona Attariyan, and Sylvain Gelly. Parameter-efficient transfer learning for
+NLP. InInternationalconferenceonmachinelearning,pp.2790–2799.PMLR,2019.
+EdwardJHu,yelongshen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+andWeizhuChen. LoRA:Low-rankadaptationoflargelanguagemodels. InInternationalCon-
+ferenceonLearningRepresentations,2022.
+AlbertQJiang,AlexandreSablayrolles,AntoineRoux,ArthurMensch,BlancheSavary,ChrisBam-
+ford, Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand, et al.
+Mixtralofexperts. arXivpreprintarXiv:2401.04088,2024.
+JamesKirkpatrick,RazvanPascanu,NeilRabinowitz,JoelVeness,GuillaumeDesjardins,AndreiA
+Rusu,KieranMilan,JohnQuan,TiagoRamalho,AgnieszkaGrabska-Barwinska,etal.Overcom-
+ingcatastrophicforgettinginneuralnetworks. Proceedingsofthenationalacademyofsciences,
+114(13):3521–3526,2017.
+TianhaoLi,ShangjieLi,BinbinXie,DeyiXiong,andBaosongYang. MoE-CT:anovelapproach
+for large language models training with resistance to catastrophic forgetting. arXiv preprint
+arXiv:2407.00875,2024.
+Xiang Lisa Li and Percy Liang. Prefix-tuning: Optimizing continuous prompts for generation.
+In Chengqing Zong, Fei Xia, Wenjie Li, and Roberto Navigli (eds.), Proceedings of the 59th
+AnnualMeetingoftheAssociationforComputationalLinguisticsandthe11thInternationalJoint
+ConferenceonNaturalLanguageProcessing(Volume1: LongPapers),pp.4582–4597,Online,
+August 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.acl-long.353.
+URLhttps://aclanthology.org/2021.acl-long.353.
+ZhizhongLiandDerekHoiem. Learningwithoutforgetting. IEEEtransactionsonpatternanalysis
+andmachineintelligence,40(12):2935–2947,2017.
+Michael McCloskey and Neal J Cohen. Catastrophic interference in connectionist networks: The
+sequentiallearningproblem. InPsychologyoflearningandmotivation,volume24,pp.109–165.
+Elsevier,1989.
+MaximeOquab,LeonBottou,IvanLaptev,andJosefSivic. Learningandtransferringmid-levelim-
+agerepresentationsusingconvolutionalneuralnetworks. InProceedingsoftheIEEEconference
+oncomputervisionandpatternrecognition,pp.1717–1724,2014.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to fol-
+lowinstructionswithhumanfeedback. Advancesinneuralinformationprocessingsystems, 35:
+27730–27744,2022.
+Jonas Pfeiffer, Andreas Ru¨ckle´, Clifton Poth, Aishwarya Kamath, Ivan Vulic´, Sebastian Ruder,
+Kyunghyun Cho, and Iryna Gurevych. Adapterhub: A framework for adapting transformers.
+arXivpreprintarXiv:2007.07779,2020.
+JonasPfeiffer,SebastianRuder,IvanVulic´,andEdoardoPonti.Modulardeeplearning.Transactions
+onMachineLearningResearch,2023.ISSN2835-8856.URLhttps://openreview.net/
+forum?id=z9EkXfvxta. SurveyCertification.
+Sylvestre-AlviseRebuffi,HakanBilen,andAndreaVedaldi. Learningmultiplevisualdomainswith
+residualadapters. Advancesinneuralinformationprocessingsystems,30,2017.
+Matthew Riemer, Ignacio Cases, Robert Ajemian, Miao Liu, Irina Rish, Yuhai Tu, , and Ger-
+ald Tesauro. Learning to learn without forgetting by maximizing transfer and minimizing in-
+terference. In International Conference on Learning Representations, 2019. URL https:
+//openreview.net/forum?id=B1gTShAct7.
+11Neutralresidues: Revisitingadaptersformodelextension
+AnthonyRobins. Catastrophicforgetting,rehearsalandpseudorehearsal. ConnectionScience,7(2):
+123–146,1995.
+BaptisteRoziere,JonasGehring,FabianGloeckle,StenSootla,ItaiGat,XiaoqingEllenTan,Yossi
+Adi,JingyuLiu,TalRemez,Je´re´myRapin,etal. Codellama: Openfoundationmodelsforcode.
+arXivpreprintarXiv:2308.12950,2023.
+Yusuke Sakai, Hidetaka Kamigaito, and Taro Watanabe. mcsqa: Multilingual commonsense rea-
+soning dataset with unified creation strategy by language models and humans. arXiv preprint
+arXiv:2406.04215,2024.
+Noam Shazeer, *Azalia Mirhoseini, *Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hin-
+ton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-
+experts layer. In International Conference on Learning Representations, 2017. URL https:
+//openreview.net/forum?id=B1ckMDqlg.
+AlonTalmor,JonathanHerzig,NicholasLourie,andJonathanBerant.Commonsenseqa:Aquestion
+answeringchallengetargetingcommonsenseknowledge.arXivpreprintarXiv:1811.00937,2018.
+HugoTouvron,MatthieuCord,AlaaeldinEl-Nouby,JakobVerbeek,andHerve´Je´gou. Threethings
+everyoneshouldknowaboutvisiontransformers. InEuropeanConferenceonComputerVision,
+pp.497–515.Springer,2022.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez,
+Lukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in Neural Informa-
+tionProcessingSystems,2017.
+Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. A comprehensive survey of continual
+learning: Theory,methodandapplication. IEEETransactionsonPatternAnalysisandMachine
+Intelligence,46(8):5362–5383,2024. doi: 10.1109/TPAMI.2024.3367329.
+YizhongWang,YeganehKordi,SwaroopMishra,AlisaLiu,NoahA.Smith,DanielKhashabi,and
+Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated instructions.
+InAnnaRogers,JordanBoyd-Graber,andNaoakiOkazaki(eds.),Proceedingsofthe61stAnnual
+MeetingoftheAssociationforComputationalLinguistics(Volume1: LongPapers),pp.13484–
+13508, Toronto, Canada, July2023.AssociationforComputationalLinguistics. doi: 10.18653/
+v1/2023.acl-long.754. URLhttps://aclanthology.org/2023.acl-long.754.
+ChengyueWu,YukangGan,YixiaoGe,ZeyuLu,JiahaoWang,YeFeng,YingShan,andPingLuo.
+LLaMA pro: Progressive LLaMA with block expansion. In Lun-Wei Ku, Andre Martins, and
+Vivek Srikumar (eds.), Proceedings of the 62nd Annual Meeting of the Association for Compu-
+tationalLinguistics(Volume1: LongPapers),pp.6518–6537,Bangkok,Thailand,August2024.
+Association for Computational Linguistics. URL https://aclanthology.org/2024.
+acl-long.352.
+Fuzhao Xue, Zian Zheng, Yao Fu, Jinjie Ni, Zangwei Zheng, Wangchunshu Zhou, and Yang
+You. Openmoe: An early effort on open mixture-of-experts language models. arXiv preprint
+arXiv:2402.01739,2024.
+SenihaEsenYuksel,JosephNWilson,andPaulDGader. Twentyyearsofmixtureofexperts. IEEE
+transactionsonneuralnetworksandlearningsystems,23(8):1177–1193,2012.
+RowanZellers, AriHoltzman, YonatanBisk, Ali Farhadi, and YejinChoi. Hellaswag: Cana ma-
+chinereallyfinishyoursentence? arXivpreprintarXiv:1905.07830,2019.
+HongyiZhang, YannNDauphin, andTengyuMa. Fixupinitialization: Residuallearningwithout
+normalization. arXivpreprintarXiv:1901.09321,2019.
+ShanshanZhong,ShanghuaGao,ZhongzhanHuang,WushaoWen,MarinkaZitnik,andPanZhou.
+MoExtend: Tuning new experts for modality and task extension. In Xiyan Fu and Eve Fleisig
+(eds.), Proceedings of the 62nd Annual Meeting of the Association for Computational Linguis-
+tics (Volume 4: Student Research Workshop), pp. 80–91, Bangkok, Thailand, August 2024.
+Association for Computational Linguistics. URL https://aclanthology.org/2024.
+acl-srw.8.
+12Neutralresidues: Revisitingadaptersformodelextension
+A ARCHITECTURE DETAILS AND HYPER-PARAMETER SETTINGS
+Table9: Pre-trainedmodels: weconsidertwovanillatransformersthatwehavepretrainedontwo
+different corpus for which we know the data distribution: English only or MultiLingual with a
+majorityofEnglish. WealsoconsideredtheGemma2Bmodel(Gemmaetal.,2024),forwhichwe
+donotknowthedistribution. Forthismodel,werefertotheirpaperfortraininghyper-parameters.
+TransformerEnglish TransformerMultilingual Gemma2B
+numberoflayersL 16 16 18
+workingdimensionality 2048 2048 2048
+numberofheads 128 128 256
+dimensionFFNlatentspace 5632 5632 16384
+activationtype gatedSILU gatedSILU gatedGELU
+normalization RMSpre-normalization
+groupquery ✓
+pretrainingcontextlength 4096 4096 8192
+Hyper-parametersfortrainingtheextendedmodel
+batchsize 64 64 8
+contextlength 4096 4096 4096
+#trainingsteps 100000 100000 150000
+AdamW:β 0.9 0.9 0.9
+1
+AdamW:β 0.95 0.95 0.95
+2
+13
