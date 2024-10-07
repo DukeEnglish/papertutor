@@ -1,0 +1,952 @@
+TRAINING LANGUAGE MODELS ON SYNTHETIC EDIT
+SEQUENCES IMPROVES CODE SYNTHESIS
+UlyanaPiterbarg,LerrelPinto,RobFergus∗
+DepartmentofComputerScience
+NewYorkUniversity
+up2021@cims.nyu.edu
+ABSTRACT
+Softwareengineersmainlywritecodebyeditingexistingprograms. Incontrast,
+largelanguagemodels(LLMs)autoregressivelysynthesizeprogramsinasingle
+pass. Oneexplanationforthisisthescarcityofopen-sourcededitdata. Whilehigh-
+qualityinstructiondataforcodesynthesisisalreadyscarce,high-qualityeditdata
+isevenscarcer. Tofillthisgap,wedevelopasyntheticdatagenerationalgorithm
+calledLintSeq. Thisalgorithmrefactorsexistingcodeintoasequenceofcodeedits
+byusingalintertoprocedurallysampleacrosstheerror-freeinsertionsthatcan
+beusedtosequentiallywriteprograms. Itoutputseditsequencesastextstrings
+consistingofconsecutiveprogramdiffs. TotestLintSeq,weuseittorefactora
+datasetofinstruction+programpairsintoinstruction+program-diff-sequence
+tuples. Then,weinstructionfinetuneaseriesofsmallerLLMsrangingfrom2.6B
+to 14B parameters on both the re-factored and original versions of this dataset,
+comparingzero-shotperformanceoncodesynthesisbenchmarks. Weshowthat
+duringrepeatedsampling,editsequencefinetunedmodelsproducemorediverse
+programsthanbaselines.Thisresultsinbetterinference-timescalingforbenchmark
+coverageasafunctionofsamples,i.e. thefractionofproblems“pass@k”solved
+byanyattemptgiven“k”tries. Forexample,onHumanEvalpass@50,smallLLMs
+finetunedonsyntheticeditsequencesarecompetitivewithGPT-4andoutperform
+modelsfinetunedonthebaselinedatasetby+20%(±3%)inabsolutescore.Finally,
+wealsopretrainourowntinyLMsforcodeunderstanding.Weshowthatfinetuning
+tinymodelsonsyntheticcodeeditsresultsinstate-of-the-artcodesynthesisfor
+theon-devicemodelclass. Our150MparametereditsequenceLMmatchesor
+outperformscodemodelswithtwiceasmanyparameters,bothwithandwithout
+repeatedsampling,includingCodexandAlphaCode.
+1 INTRODUCTION
+Thesuccessesoflargelanguagemodels(LLMs)aredifficulttooverstate. However,consistentand
+correctzero-shotgenerationincodesynthesisremainsout-of-reachforallbutthelargestmodels
+(Abdinetal.,2024;Groeneveldetal.,2024;Dubeyetal.,2024). Comparedtootherreasoningtasks,
+thissettinghastwochallengingproperties,namelysolutionsarebothstructuredandlong-form.
+Humans tackle problems that have these properties by leveraging abstract mental models, first
+developingaplanfortheirsolutionthatreflectsthesetting’sstructureandthenexecutingtheplan
+onestepatatime(Gopnik,1982;Kirsh,2009). Forexample, asoftwareengineermightemploy
+object-orientedprogrammingwhencreatinganewcode-basebydevelopinga“class”objectandthen
+graduallyaddingnewfunctionalitytothisclassastheircode-basebecomesmorecomplex.
+In contrast, LLMs are trained to autoregressively synthesize entire programs from scratch. This
+makesrepeatedlyeditingaprogramwithanLLMextremelyexpensive–currentstate-of-the-art,
+LLM-poweredcodeeditingtoolslikeCursorrepeatedlypromptmodelstorewriteentireprograms
+duringeveryeditgenerationcall(Sanger,2024). LLMoutputsalsosufferfromdegradingquality
+assequencelengthsgrowandexhibitlimiteddiversityacrosssamples(Chenetal.,2021;Lietal.,
+∗Codewillbeopen-sourcedtohttps://github.com/upiterbarg/lintseq
+1
+4202
+tcO
+3
+]GL.sc[
+1v94720.0142:viXraFigure1: CodesynthesiswithLMstrainedonsyntheticcodeeditsequences. Left: Anexample
+generation from an LM trained to synthesize code as a stream of static-error-free edits. Right:
+Comparingzero-shotHumanEvalcoverage(in%)asafunctionofFLOPsforlargeexternalLLMsvs
+thesmallerLMsthatweinstructionfinetuneinthispaper. Repeatedlysamplingfromeditsequence
+LMsyieldscodingproblemsolutionsthatarecompetitivewithGPT-4andGPT-4-Omni,and
+havetotalcostsimilartosamplingoncefromthebestopen-sourceLLMs(seeAppendixF.4).
+2022b;Roziereetal.,2023;Lozhkovetal.,2024). Theconsequenceofthesepathologiesisthatthere
+doesnotexistareliabletrade-offbetweenzero-shotgenerationqualityandinference-timecompute
+costunderthecurrentparadigmofautoregressivecodesynthesis,particularlyforsmallermodels.
+Inthispaper,weclaimthattheseissuescanbemitigatedatthedata-levelbyreparameterizingcode
+synthesisasasequentialeditproblem.Ratherthantrainingmodelsforsingle-stepgenerationofentire
+programs,weproposethatmodelsbetrainedtogeneratecodebypredictingcodeeditsequences.
+Thisobjectivehasamajorobstacle: whilehigh-qualitysolutiondataforcodesynthesisisscarce,
+open-sourceeditdatawithgoodcoverageoverthedistributionofallerror-freecode“diffs”isnon-
+existent (Muennighoff et al., 2023). To address this, we introduce an algorithm titled “LintSeq”
+thatre-factorsexistingprogramsintosequencesofstaticerror-freecodeedits. LMstrainedondata
+generatedwithouralgorithmoutputcodeeditsthateffectinterdependentlinesofaprogram. LintSeq
+isparameter-free. Itconsistsoftwophases: abackwardsamplingphase,whichtakesasourcefileas
+inputandusesastaticprogramverifiertosamplesequencesoferror-freeprogramstatesthatbegin
+withthisfileandendwithemptyprograms;andaforwardeditcomputationphase,whichreverses
+each sequence of programs, employing the Unix diff (Thompson & Ritchie, 1975) operator to
+computedeltasbetweenconsecutiveversionsofthesourcefile,andoutputseditsequences. Thestatic
+programverifierusedbyLintSeqinitsbackwardsamplingphaseisalsoreferredtoasalinter.
+TotesttheimpactoffinetuningLMstosynthesizecodewitheditsequencesviaLintSeqinstruction
+data,weconductaseriesofexperimentscomparingthesemodelstothosefinetunedonastandard
+versionofthesameinstructiondata. WeevaluateLMszero-shotonthecodesynthesisbenchmarks
+HumanEval(Chenetal.,2021)andMBPP(Austinetal.,2021)bycomputingcoverage,theproportion
+ofproblemssolvedbyanyattempt,asafunctionofsamples. WedonotallowLMstousechain-of-
+thoughtreasoning(Weietal.,2022)duringevaluation. Ourresultsarefive-fold:
+1. Acrossmodelsranginginscalefrom150Mto14Bparameters,instructionfinetuningLMs
+oneditsequencesvsfullprogramsimprovesthequalityanddiversityofsynthesizedcode.
+2. Theimproveddiversityofsamplesmeansthatpass@kperformanceincreasessmoothlyasa
+functionofinference-timecompute,allowingforabettertrade-offbetweenthetwo.
+3. TinyeditsequenceLMshavestate-of-the-artperformanceintheirmodelclass(Table1).
+4. ForsmallerLLMs,repeatedlysamplingfromeditsequencemodelsresultsinHumanEval
+coveragethatiscompetitivewithGPT-4modelsandhassimilarcumulativecosttosampling
+onceperproblemfromopen-sourceLLMslikeLlama3.1405B(Figures1and4).
+5. Ablatingthelinterfromeditsamplingduringdatagenerationhurtsthedownstreamquality
+ofprogramssynthesizedbyeditsequencemodels(Figures5and6).
+2Figure2: VisualizingLintSeq,analgorithmforre-factoringprogramsintosequencesofedits. This
+algorithmsamplesacrossallofthestaticerror-freelineinsertionsthatcanbeusedtowriteaprogram
+chunk-by-chunk. ItusestheUnix-diffoperatortoexpressgeneratededitsequencesastextstrings.
+2 LINTSEQ: CODE SYNTHESIS AS A SEQUENTIAL EDIT PROBLEM
+LintSeqisanalgorithmforsyntheticdatagenerationthatsamplesacrosssequencesofinsertions
+thatcanbeusedtosequentiallywriteaprogram,leveragingalintertorepeatedlycheckprogram
+statesforstaticerrorsduringgeneration. Alinterisatypeofstandardcodeanalysistoolthatverifies
+thecorrectnessofprograms. TheLintSeqalgorithmislooselyinspiredbyrecentworkondiscrete
+diffusionmethodsfortextgeneration,wheredecodingisnon-autoregressive(Lietal.,2022a).
+ThekeyhypothesisunderlyingLintSeqisasfollows: bytrainingLMsoncodeeditsequenceswith
+teacher-forcedsupervisedlearning,wecanpotentiallyachieveabettertrade-offbetweengeneration
+qualityandcomputeatinference-timewhilestillbenefitingfromthetrainingandsamplingefficiency
+oftheautoregressivemodelingparadigm.Inthissection,weprovideaformalismfortheeditsequence
+re-parameterizationofcodesynthesisandweformallyintroduceLintSeq.
+2.1 REPARAMETERIZINGCODEDATASETSWITHEDITS
+Weoperateinthetextualsupervisedlearningsettinginthispaper,wherewehaveaccesstoacode
+datasetDofN exampleprogramsy,eachofwhichmaybeoptionallypairedwithacorresponding
+naturallanguageinstructionxthatdescribestheprogram’sfunction,i.e. D ={(xi,yi)}N .
+i=1
+Let ∆(·,·) denote the Unix diff operator (Thompson & Ritchie, 1975), which computes a text
+difference between a pair of strings by performing a line-by-line matching and returns a string
+summarizingthedetecteddifferences. Thediffoperatorisimplementedbypopularversioncontrol
+andsoftwaredevelopmentsystemstohelpprogrammerstrackeditsorcode“diffs”betweenversions
+oftextfiles. Asingleeditcomputedwiththediffoperatormayconsistofmultiplelinedeletions
+and/orlineinsertions.
+FixaprogramyinthedatasetD. Considerasequenceσ ofjtextstringscorrespondingtoprograms
+y
+orprogramstatesthatterminatesaty.
+σ =(y ,...,y ,y) (1)
+y 1 j−1
+Wecanequivalentlyre-expressσ asaneditsequenceδ oflengthjbyfirstcomputingadiffbetween
+y y
+anemptyprogramϵandthefirstprograminthesequence,andthencomputingdiffsbetweenallpairs
+ofconsecutiveprograms,asshownbelow.
+δ =(∆(ε,y ),∆(y ,y ),∆(y ,y ),...,∆(y ,y)) (2)
+y 1 1 2 2 3 j−1
+IfD′ isadatasetsuchthatforeverypair(x,y) ∈ D,thereexistsapair(x,δ ) ∈ D′,thenwesay
+y
+thatD′isaneditsequencere-factoringofD.
+3Figure3: EmpiricsofprocessingcodedatawithLintSeq. Left: Linesperexampleinadataset
+ofinstructionfinetuningdataforPythonsynthesisbeforeandafterprocessingwithLintSeqviathe
+linterpylint(seeSection3.2). LintSeqprocessingaddslinesofdiffmetadatatoexamples(see
+AppendixA).Right: Thecorrespondingeditcountspersyntheticcodeeditsequence. Onadatasetof
+shortprograms(14linesofcode,onaverage),themeanLintSeqeditsequencecontainsfouredits.
+2.2 GENERATINGLINTER-GUIDEDSYNTHETICEDITSEQUENCES
+Recall from above that a single program edit computed by the diff operator ∆(·,·) can consist
+of any number of deletions and insertions. LintSeq is an algorithm for computing edit sequence
+re-factoringsD′suchthatalldata(x,δ )∈D′haveaparticularproperty: everyeditinδ consistsof
+y y
+insertionsonly. TherearetwophasesinLintSeq: abackwardsamplingphasethatisusedtocompute
+programstatesequencesσ ,andaforwardeditsequencecomputationphasethatisusedtore-express
+y
+σ aseditsequencesδ . AnillustrationofthesephasesisshowninFigure2. Fullexamplesofedit
+y y
+sequencesgeneratedwithLintSeqareprovidedinAppendixE(Figures9and10).
+Phase I: Backward Sampling In the backward sampling phase of LintSeq, for each of the N
+pairs(x,y) ∈ D, wegeneratessequencesofintermediateprogramstatesσ thatbeginwiththe
+y
+emptyprogramandterminateattheoriginalprogramy. Thesesequencesaregeneratedinreverseor
+backwardsusingasimpleprocedurethatwedublinter-guidedsampling. Startingwiththeprogramy,
+wesequentiallygenerateeachpredecessorprograminσ fromitssuccessorbyfollowingthesesteps:
+y
+(1)deletealinefromthecurrentprogrambysamplinguniformlyatrandom;(2)runalinterorother
+verifierontheremainingcode;(3)ifthedeletioninducednewerrors,removeallaffectedlines;and
+(4)repeatsteps2and3untilnoerrorsarecaughtbythelinter. Werepeatthesestepsuntilalllines
+havebeenremovedfromtheoriginalprogramy,atwhichpointσ hasbeengenerated.
+y
+PhaseII:ForwardEditComputation Oncesprogramstatesequencesσ havebeengenerated
+y
+foreach(x,y)∈D,weruntheforwardeditcomputationphaseofouralgorithm. Inthisphase,we
+applyEquation2fromabovetocomputeaneditsequenceδ foreachσ . Startingfromthelast
+y y
+program that was added to σ , we use the diff operator to compute edits between each pair of
+y
+consecutiveprogramsinσ uptotheoriginalprogramy. Finally,wepaireacheditsequenceδ with
+y y
+itsinstructionx(ifpresent)toyieldaneditsequencere-factoringD′ofDwithsizesN.
+2.3 PROPERTIESOFLINTSEQDATA
+Synthetic edit sequences generated by LintSeq have a few other important properties. Let δ be
+y
+anarbitraryj-lengtheditsequenceinD′generatedwithLintSeq,δ =(∆(ε,y ),...,∆(y ,y)).
+y 1 j−1
+First, we observe that there is a simple correspondence between δ and the original program y
+y
+usedtogenerateit: y canbere-constructedbystartingwithanemptyprogram,andsuccessively
+applyingeacheditinδ tothisprogramone-by-one. Inotherwords,theeditsequenceδ resolves
+y y
+toy. Furthermore,byconstruction,everyprefixsubsequenceofδ resolvestoasub-programofy
+y
+thatiserror-free,i.e. thatthrowsnoerrorswhencheckedwiththelinterortheverifierusedduring
+generation. Thesetwoproperties,inconjunctionwiththeuniformsamplingstepusedinthefirst
+phaseofthealgorithm,showthatLintSeqsamplessexamplesacrossallpossiblestaticerror-free
+sequencesoflineinsertionsthatcanbeusedtosequentiallywriteaprogramyfrom-scratch.
+WeshowanexampleofprogramsynthesisdatasetstatisticsbeforeandafterLintSeqprocessingin
+Figure3. Intheworstcase,re-expressingaprogramasaneditsequenceincreasesthelengthofa
+trainingexamplebyatokencountthatisconstantinthenumberofprogramlines(AppendixA).
+42.4 PRACTICALITIESOFTRAININGLANGUAGEMODELSONLINTSEQDATA
+LintSeqcanberunonanycodedata. Itisagnostictothecontentsofaprogram,andonlydepends
+onknowledgeoftheprogramminglanguagethatafileiswritteninandtheexistenceofalinteror
+anotherkindofverifierforwrittenprogramfiles.
+Weuseteacher-forcedsupervisedlearning(Williams&Zipser,1989)totrainmodelsonLintSeq
+data, concatenating edit sequences into a single string by interleaving edits with special tokens,
+“<|diff|>,” andcomputinginstruction-conditionedlossesovertheresultantsequences. During
+inference,finetunedmodelscanbepromptedtosynthesizeprogramswitheditsequencesbyappending
+thesespecialtokenstotheendsofprompts. MoredetailsareprovidedinAppendixA.
+SyntheticdatagenerationwithLintSeqiscontrolledbyasinglehyperparameter: thenumberofedit
+sequencessthataresampledforeachexampleinthesourcecodedatasetD. Editsequencesampling
+canoptionallybeconstrainedtoavoidrepetitions,thoughthismayyieldadatasetD′withfewerthan
+s|D|examplesifthereareprogramsinDwithnonon-emptyandstaticerror-freesub-programs.
+3 EXPERIMENTS
+TostudyLintSeqandtheimpactofre-parameterizingprogramsynthesisasasequentialeditgeneration
+problem,weconductamulti-prongedsetofinstructionfinetuningexperiments. Theseexperiments
+studycodesynthesisinPythonandaredesignedtoanswerthefollowingquestions:
+• HowdoesfinetuningtinyLMsonre-factorizedcodeeditdatageneratedwithLintSeqimpact
+benchmarkcoveragecomparedtofinetuningontheoriginalcodedata?
+• Doperformanceimprovementsholdacrossmodelscales,families,andtokenizers?
+• How does ablating linter-guidance from LintSeq to finetune on randomly sampled edit
+sequencesimpactcodesynthesis?
+Similartopreviousworks(Chenetal.,2021),weevaluatemodelsbycomputingzero-shotcoverage
+statisticsoncodesynthesisbenchmarkswithandwithoutrepeatedsampling. Weexpounduponour
+motivationforevaluatingmodelsinthismannerinAppendixB.3.1.
+3.1 PRETRAININGTINYLMSFORCODEUNDERSTANDING
+Webeginourinvestigationsbypre-trainingtwotinydecoder-onlytransformers,TinyCodeLM-150M
+andTinyCodeLM-400M,forPythoncodeunderstandingon72billiontokensoftext. Pretrainingour
+ownlanguagemodelsgrantsusadatacontamination-freetest-bedtostudycodesynthesiswithedit
+sequences,rapidlyevaluateLintSeq,andbroadlyre-examinethetrade-offbetweeninference-time
+computeandgenerationqualityincodesynthesisformodelsthatcanbeupdatedon-device.
+Werelyonopen-sourcedataandlibrariestopretrainourmodels(Penedoetal.,2024;Lozhkovetal.,
+2024;Soldainietal.,2024;Groeneveldetal.,2024). OurpretrainingdatamixisinspiredbyCode
+Llama(Roziereetal.,2023),andreflectsacode-skewedmixtureofwebtextandrawPythonsampled
+fromFineWebandTheStack,respectively(Penedoetal.,2024;Lietal.,2023). Thearchitecture
+ofourmodelsrespectivelymimicsthetwosmallestversionsofGPT-2(Radfordetal.,2019),but
+integratesthetransformerarchitecturechangesproposedbytheOLMoframework. Thisincludesthe
+absenceofbiastermsandtheadditionofnon-parametriclayernorms(Ba,2016),aswellastheuse
+ofSwiGLU(Shazeer,2020),rotarypositionalembeddings(Suetal.,2024),andtheGPT-NeoX-20B
+tokenizer(Blacketal.,2022). Wetrainbothmodelsfortwoepochswithabatchsizeof524,288
+tokensonanNVIDIAH100nodewithfourGPUs. OurexperimentsaresupportedbyPytorchFSDP
+(Zhaoetal.,2023). MoredetailsonourpretrainingproceduresareinAppendixC.
+3.2 GENERATINGASYNTHETICDATASETWITHLINTSEQ
+Next,tosupportourfinetuningexperiments,wepreparealarge“baseline”datasetofpairedinstruction
+andprogramdata. Were-factorizetheprogramsinthisdatasetintocodeeditsequenceswithLintSeq.
+To that end, we first pool the Python portions of two open-source instruction datasets for code
+synthesis: theGPT3.5/4-basedMagicoderinstructiontuningdatasetandtheStarCoder2-15B-based
+5Table 1: Summary of temperature-tuned coding benchmark results for LMs with ≤0.2B
+parameters. Scoresannotatedwith“(†)”indicateexternalmodelevaluationsthatweranusingthe
+proceduredescribedinAppendixB,andallotherscoresareasreportedbymodelauthors. Welist
+modelsinorderofincreasingHumanEvalpass@1score.
+HumanEval MBPP(+)
+Model Size pass@1 pass@10 pass@1 pass@10 Open-Source
+PolyCoder 160M 2.1 3.4 - -
+AlphaCode 89M 4.3 12.2 - -
+(cid:32)
+Codex 85M 8.2 12.8 - -
+(cid:35)
+SmolLM-Instruct 135M 7.6 14.4(†) 10.1(†) 14.6(†)
+(cid:35)
+TinyCodeLM-Instruct 150M 9.1 13.2 11.5 16.4
+(cid:32)
+TinyCodeLM-LintSeqInstruct 150M 12.8 20.6 13.6 24.4
+(cid:32)
+(cid:32)
+Table2: Summaryoftemperature-tunedcodingbenchmarkresultsfor0.2Bto0.4Bparameter
+languagemodels. Annotations,modelorder,andevaluationprocedurearethesameasinTable1.
+HumanEval MBPP(+)
+Model Size pass@1 pass@10 pass@1 pass@10 Open-Source
+PolyCoder 400M 3.0 5.3 - -
+TinyCodeLM-Instruct 400M 9.6 18.5 15.5 22.2
+(cid:32)
+SmolLM-Instruct 360M 11.3 19.3(†) 19.4(†) 23.1(†)
+(cid:32)
+AlphaCode 302M 11.6 18.8 - -
+(cid:32)
+CodeT5+ 220M 12.0 20.7 - -
+(cid:35)
+Codegen-Mono 350M 12.8 23.1 9.4(†) 15.2(†)
+(cid:32)
+Codex 300M 13.2 20.4 - -
+(cid:32)
+TinyCodeLM-LintSeqInstruct 400M 13.4 20.9 19.4 29.9
+(cid:35)
+(cid:32)
+self-alignmenttrainingdataset(Weietal.,2024b;a). ThesedatasetsaregeneratedwiththeOSS-
+InstructapproachbyWeietal.(2024b)andhaveundergonedecontaminationforthebenchmarksthat
+weevaluateoninthispaper. Weconductde-duplicationonthepooleddatatocheckforrepeated
+examples. Furthermore, we strip any chain-of-thought-like natural language explanations from
+completiondata. Theresultantdatasethasover88,900instruction-Pythonprogrampairs.
+Withourbaselinedatasetprepared,werunLintSeqtogenerates=5syntheticedittrajectorysamples
+foreachinstruction-programpair. AsdescribedinSection2.4,weconcatenateeachsyntheticedit
+trajectoryintoasinglestringbyinterleavingconsecutiveeditswithaspecialreserved“edit”token.
+InspiredbyMuennighoffetal.(2024),wedonotrestrictagainsteditsequencerepetitions. Weuse
+thepopularPythonlinterpylinttoguideeditsamplingduringgeneration. Examplesofgenerated
+editsequencesandexperimentstestingtheeffectofvaryingsareinAppendixE.
+3.3 FINETUNINGLANGUAGEMODELSONLINTSEQEDITSEQUENCES
+WenowprobetheimpactofinstructionfinetuningavarietyofautoregressiveLMstosynthesizecode
+witheditsequences,comparedtostandardgenerationoffullprograms. Weusetwocodesynthesis
+benchmarkstosupportourmodelevaluations: HumanEval(Chenetal.,2021)andMostlyBasic
+ProgrammingProblems(MBPP)(Austinetal.,2021).
+Usingboththecodeeditre-factorizedandbaselineinstructiondatasetsobtainedinsection3.2,we
+runpairsoffinetuningexperimentswithsixdifferentmodels. Ineachexperimentpair,wefinetune
+an LM on both datasets for an equal number of optimizer steps and with the same learning rate
+schedule,savingintermediatecheckpointsthroughoutfinetuning. Werunfullbenchmarkevaluations
+on HumanEval and MBPP on each saved checkpoint1, performing no prompt tuning. Then, we
+comparethebestinference-timescalingbehavior,i.e. benchmarkcoverage(pass@k)asafunctionof
+samples(k),obtainedbyeditsequencefinetuningvsstandardfinetuningforeachmodel. Amore
+1ToprocessthegenerationsofeditsequenceLMsintoexecutableprograms,wesimplyresolveeachofthe
+predictedcodeeditsone-by-one.ThisprocedureisvisualizedinFigure1anddescribedinAppendixA.2.
+6Figure4: HumanEvalandMBPPcoveragewithrepeatedsampling(“pass@kvs. k”)achievedby
+instructionfinetuningGemma2,Phi-3,andLlama3.1languagemodelsonadatasetofLintSeqedit
+sequencere-factoredvsstandardPythoncode(temperature=1,top-p=0.95).
+detailed description of the computed metrics as well as a full specification of the evaluation and
+finetuningproceduresisprovidedinAppendicesBandD.
+3.3.1 TINYCODELM
+WerunourfirsttwopairsoffinetuningexperimentsonTinyCodeLM-150MandTinyCodeLM-400M.
+Thesemodelswerenotpretrainedoncodesynthesisinstructiondata,norweretheypretrainedonany
+“diff”-likeeditdata. OurexperimentalresultsaresummarizedinTables1and2,wherewecompare
+thetemperature-tunedperformanceofourmodelstothereportedbenchmarkcoverageofexisting
+code LMs at similar parameter scales. We also report the inference-time scaling of benchmark
+coverageasafunctionofsamplesforourfinetunedmodelsinAppendixTables8and9.
+Forboththe150Mand400MparameterversionsofTinyCodeLM,wefindthatfinetuningLMsto
+synthesizecodewitheditsviaLintSeqdatadramaticallyimprovesbenchmarkperformancecompared
+tobaselinefinetuning. Indeed,theeditsequencevariantsofTinyCodeLMoutperformallexisting
+codelanguagemodelsofcomparablescalethatweareawareof, includingAlphaCode(Lietal.,
+2022b),Codex(Chenetal.,2021),CodeT5+(Wangetal.,2023b),andtherecentSmolLM-Instruct
+(BenAllaletal.,2024). Oursmallereditsequence-finetunedmodelisparticularlystrongforitssize,
+roughlymatching orout-performingmodels withtwiceas manyparameters includingthe300M
+parameterversionofCodexandthe302M-parameterversionofAlphaCode(Tables1and2).
+3.3.2 GEMMA2,PHI-3,ANDLLAMA3.1
+Theresultsaboveraiseanaturalquestion: doperformanceimprovementsfromfinetuningLMsto
+synthesizecodewitheditsequencesholdforothermodelscales,architectures,andtokenizers? To
+testthis,weconductfouradditionalpairsofinstructionfinetuningexperimentsonLMsfromthree
+model families, Gemma 2, Phi-3, and Llama 3.1, ranging in size from 2.6B to 14B. We employ
+pretrained-onlymodelweights,ifavailable. TheresultsoftheseexperimentsareinFigure4,where
+weplotzero-shotbenchmarkcoverageasafunctionofsamplesforinstructionfinetunedmodels.
+RawcoveragescoresarereportedinAppendixTables10and11.
+Most of our findings echo those of Section 3.3.1. Aggregating across sample counts, we find
+that finetuning models to synthesize code with edits improves overall zero-shot performance on
+HumanEvalandMBPPcomparedtofinetuningontheoriginaldata. Thissuggeststhatre-factoring
+codewitheditsequencesisanarchitecture-andtokenizer-independentmechanismforimproving
+downstream LMoutputs. Furthermore, asshowninFigure4andTables10and11, wefindthat
+thedegreebywhicheditsequenceLMsoutperformbaselinemodelvariantsincreaseswithrepeated
+samplingforalltestedmodels, culminatinginanaverageabsolutegaininpass@50of+20%(±
+3%)onHumanEvaland+12%(±2%)onMBPP.Thisobservationconfirmsthehypothesisposedin
+Section2,showingthattrainingLMstosynthesizecodewitheditsusingLintSeqdataimprovesthe
+relationshipbetweencumulativeinference-timecomputeandzero-shotperformance.
+7Figure5: HumanEvalandMBPP“pass@kvs. k”achievedbyfinetuningTinyCodeLMmodelson
+linter-guidedvsrandomlysampledcodeeditsequences(temperature=1,top-p=0.95).
+Atpass@1,however,ourresultsareslightlymoremixedthaninSection3.3.1. ForPhi-3models,we
+observeeithernodifferenceoradecreaseinscorebetweeneachpairofmodel-datavariants. One
+explanationforthisisbias: thePhi-3modelshavebeenpreviouslyinstructionfinetunedandwere
+likelytohavebeentrainedonstandardcodedata, puttingLMvariantsfinetunedtogenerateedit
+sequencere-factorizedcodeatacomparativedisadvantageduetodistributionalshift.
+3.4 ABLATINGLINTER-GUIDANCE
+The backward sampling phase of LintSeq uses a linter or other verifier to group interdependent
+linesofaprogramtogetherduringeditsequencegeneration,ensuringthatallcodeeditsresolveto
+programsthatarefreeofstaticerrors. Weconcludeourexperimentsbytestingtheimportanceofthis
+designchoicewithTinyCodeLMmodels.
+Todothis,wereplacethebackwardsproceduredescribedinSection2.2withexclusivelyrandom
+sampling;duringeachstepofthealgorithm,wefirstsamplethenumberoflinestodeletefromthe
+currentprogramuniformlyatrandom,beforesamplingasetoflineswiththedesiredcount. Using
+thislinter-ablatedversionofthealgorithm,wegenerateanewsyntheticeditsequencedatasetwiththe
+samesizeastheLintSeqdatasetusedinallpreviousfinetuningexperiments,i.e. withs=5example
+sequencespersampleinthesourcedataset. Theaveragenumberofeditsperexampleinthisdataset
+(E = 3.9) is empirically similar to its linter-guided counterpart (E = 3.8,
+RandSeqInstruct LintSeqInstruct
+seeFigure3). WeemploythesameprocedureastheoneusedinSection3.3toinstructionfinetune
+TinyCodeLMmodelsonthedatasetofrandomlysamplededitsequences.
+InFigure5,wecomparethetemperature1inference-timescalinglawsonHumanEvalandMBPP
+obtainedbyfinetuningmodelsonrandomlysampledvsstaticerror-freeeditsequences. Rawmodel
+scores are also provided in Appendix F, Tables 8 and 9. Ablating linter-guidance results in a
+declineinbenchmarkcoverage. OnHumanEval, linterablationreducesabsolutepass@50score
+onTinyCodeLM-150M(22.6%(cid:55)→17.7%)andonTinyCodeLM-400M(26.8%(cid:55)→22.0%). MBPP
+pass@50issimilarlyaffected,droppingforbothmodels(34.5% → 30.2%and39.6% (cid:55)→ 34.5%).
+Theseresultssuggestthattheerror-freenatureofeditsinLintSeqinstructionfinetuningdatadoes
+indeedhaveapositiveimpactonthecodingproblemcoverageofsampledsolutions.
+Toconcludeouranalysis,weprobewhethertrainingmodelsonerror-freeeditsequencesalsohasan
+effectonthepresenceoferrorsinacrossallgeneratedprograms,asidefromitspositiveeffectson
+coverage. Toassessthis,werunthePythonlinterpylintovereachofthesynthesizedprograms
+usedtocomputethereportedtemperature1pass@kmetrics,checkingcodeforstaticerrors.
+InFigure6,weplotthetotalproportionsofsynthesizedprogramsampleswithatleastonestatic
+erroracrossfinetunedmodelvariants. Onbothbenchmarks,LMstrainedonrandomlysamplededits
+(dark grey) appear to generate “buggy” code with much higher frequency than all other models.
+Furthermore,onHumanEval,wefindthatLintSeqmodels(indigo)synthesizeprogramswithstatic
+errors at a higher frequency than baseline models (light grey), despite their higher coverage of
+benchmarkcodingproblems. Thisadditionalfindingsuggeststhatmodelperformancegainsfrom
+LintSeqcannotsimplybeattributedtoimprovementinstaticerrorfrequencyacrosscode–training
+onre-factoredcodemustbehelpingmodelswritegenerallybetter,morediverseprograms.
+Insummary,theerror-freenatureofthelinter-guidededitssampledinLintSeqappearstoindeedbe
+importantforimprovingboththequalityanddiversityofsampledprograms(Figure5),aswellasthe
+overallcorrectness(Figure6)ofcodesynthesizedbylanguagemodelstrainedoneditsequences.
+8Figure6: Comparingstaticerrorfrequencyinsynthesizedcodesamplesacrossbaselinevsedit
+sequenceinstructionfinetunedmodelvariants(n=50,temperature=1,top-p=0.95).
+4 RELATED WORK
+FoundationModelsforCode Codesynthesisisoneoftheoldestproblemsincomputerscience.
+Neurallanguagemodel-basedapproachessuchasCodex,AlphaCode,CodeT5+,CodeGen,StarCoder,
+andCodeLlamahaverecentlyproventobeextremelycompetitivewithpreviousmethods(Chen
+etal.,2021;Lietal.,2022b;Wangetal.,2023b;Nijkampetal.,2022;Lietal.,2023;Roziereetal.,
+2023). Today,foundationmodelstrainedonwebtextandcodedatadominate,andLLM-powered
+code editing tools like Github Copilot and Cursor are used by thousands of engineers every day
+(Heaven,2024).Manygeneral-purposeLLMsarealsotrainedoncodedata.Whilethelargestofthese
+LLMsshowstrongperformanceoncodingbenchmarks,generationscontinuetosufferfromlimited
+meaningfuloutputdiversity, promptsensitivity, anddegradingqualityonlong-contexts(Achiam
+etal.,2023;GeminiTeametal.,2023;Dubeyetal.,2024). Smallermodelsalsolagbehind(Abdin
+etal.,2024;GemmaTeametal.,2024;BenAllaletal.,2024). Asofthewritingofthispaper,directly
+promptingLLMstogeneratecode“diffs”resultsinlowqualityeditsacrossmodels(Sanger,2024).
+Weclaimthatthisistheresultofadataproblemandweattempttoaddressitinthiswork.
+FinetuningonSyntheticData LLMpost-trainingmethodslikesupervisedfinetuninghavebeen
+showntobeextremelypowerfulforimprovingmodelperformanceacrosstasks(Weietal.,2021).
+However,high-qualitydatasetsofpairedinstruction-responseexamplesareextremelyexpensiveto
+curate. OnepossiblesolutionliesinsyntheticdatagenerationmethodslikeSelf-Instruct,wherein
+anLLMispromptedtogenerateinstructionsand/orresponsesfromexamples(Wangetal.,2022).
+Such data have been used extensively for improving LLM performance through self-refinement
+and/orknowledgedistillationoncodingtasks(Chaudhary,2023;Roziereetal.,2023;Abdinetal.,
+2024;Lozhkovetal.,2024). Weemploypost-processedinstructiondataforcodesynthesiscreated
+withamethodfromthisfamily,OSS-Instruct(Weietal.,2024b),asthebaseofourexperiments
+on re-factorizing code with code edit sequences via LintSeq. Unlike Self-Instruct-like synthetic
+datagenerationmethods,ouralgorithmdoesnotemployanLLMfordatageneration,andinstead
+generatesexamplesoferror-freeeditsequencesfromexistingcodedatabyusingasimplelinter.
+FinetuningonEdits SeveralworkshaveinvestigatedfinetuningcodeLLMsoneditdata. Notably,
+Muennighoff et al. (2023) instruction tune models on a 4TB dataset of GitHub commits pairing
+codechangeswithhumaninstructions. Relatedly,Lietal.(2024)useGitHubcommitdatasourced
+from Python repositories to generate code editing instruction data with GPT 3.5/ChatGPT. Both
+oftheseworksspecificallyfocusonbetter-equippingLLMsfornaturallanguage-promptedcode
+editingtasks,inwhichamodelisexplicitlypromptedtogenerateaneditinresponsetoanatural
+languagespecification. Ourworkdiffersinthreeimportantways:first,westudyeditsequencesrather
+thansingleedits;second,wetrainLLMstopredicteditsimplicitlyduringcodesynthesis;third,our
+syntheticeditgenerationalgorithmdoesnotrelyontheexistenceofanykindofcommitdata.
+“OnDevice”LanguageModels AsthecapabilitiesofLLMshaveimproved,sotohavethoseof
+smalllanguagemodels. RecentprojectslikeSmolLM(BenAllaletal.,2024)andOpenELM(Mehta
+et al., 2024) re-examine the potential of tiny language models that can be run and even updated
+“on-device,” i.e. onasmartphoneorlaptop. Therepresentationslearnedbysuchmodelsduring
+pretraining are weaker than those of scaled-up LLMs (Kaplan et al., 2020). This is particularly
+true for harder tasks that involve reasoning, such as code synthesis (Gemma Team et al., 2024;
+Abdinetal.,2024). Toourknowledge,themostrecentopen-sourceworkstudyingsmalllanguage
+modelspretrainedentirelyforcodeunderstandingisfromseveralyearsago(Xuetal.,2022;Nijkamp
+et al., 2022; Wang et al., 2021; 2023b). The 150M and 400M parameter TinyCodeLM models
+pretrainedinthispaperbelongtothe“ondevice”modelfamilyandbuilduponpreviousworks. These
+9modelsprovideanefficienttest-bedforexperimentsonLMcodesynthesisthatisupdatedtorecent
+advancementsinhighthroughputpretrainingandtoimprovementsinopen-sourcedataquality.
+Inference-TimeComputeScaling Theperformanceoflanguagemodelscanbeboostedduring
+inference by using scaled-up sample counts, hand-engineered prompting schema, and/or search
+(Brownetal.,2024;Snelletal.,2024). Thesemethodsdramaticallyincreaseinferencecosts. Their
+effectivenessistightlylinkedtotheexpressivityoflearnedmodelrepresentationsandthediversityof
+outputsacrosssamples. Ourexperimentswithsmallerlanguagemodelsareinspiredbytheseworks–
+westudywhetheritispossibleto(1)improvetheexpressivityofrepresentationsforcodesynthesis
+acrossLMparameterscalesduringfinetuning,and(2)takeadvantageofthispropertytoimprovethe
+inference-timeperformanceofsmallerLMsbylargermarginsduringrepeatedsampling.
+5 DISCUSSION, LIMITATIONS, AND CONCLUSION
+This paper introduces an algorithm, LintSeq, for generating synthetic code edit sequences from
+existingprograms.LintSeqenablesLLMreasoningsettingslikecodesynthesistobere-parameterized
+atthedata-levelassequentialeditgenerationtasks. Thealgorithmisparameter-free,requiresonly
+CPUtorun,andmakesnoassumptionsaboutthecontentorstructureofcodefiles.
+Re-parameterizingcodegenerationwitheditshasafewimmediatebenefits. Forexample,itmakes
+codegenerationwithLLMsmuchmorecontrollableattheprompt-level(AppendixA.3)anditreduces
+thecostofpredictingusefulandcorrectcodeinsertionswithmodels,sincesyntheticedit-trained
+LLMsdonotneedtobepromptedtore-synthesizeentireprogramsfromscratch(Section2.4).
+InourexperimentswithLintSeq,wealsoshowthefollowing:
+1. TinyLMscanbeefficientlyfinetunedtosynthesizePythonprogramswitheditsequences
+viaLintSeqdata. Thisresultsinstate-of-the-artcodebenchmarkperformanceformodels
+thatcanbetrained“ondevice”(Sections3.1and3.3.1).
+2. AcrossothertestedmodelsfromthePhi,Gemma,andLlamafamilies,finetuningonLintSeq
+dataalsoimprovesthediversityofzero-shotgenerations,boostingtheinference-timescaling
+ofcoverageonHumanEvalandMBPPatfixedsamplecounts(Section3.3.2).
+3. On HumanEval, the cumulative inference cost of repeatedly sampling from small edit
+sequenceLLMsissimilartosamplingoncefromlargerLLMsandyieldscoveragethatis
+competitivewithGPT-4,GPT-4-Omni,andLlama3.1405B(Figure1,AppendixF.4).
+4. Ablatinglinter-guidancefromLintSeqhurtsthequality,diversity,andcorrectnessofcode
+synthesizedbyinstructionfinetunedmodels(Section3.4).
+Thereareseverallimitationstoourwork.
+First,ascurrentlyformulated,LintSeqcanonlybeusedtogeneratesyntheticsequencesofinsertion
+edits. Thisisaconsequenceoftheparameter-freenatureofthealgorithm–everyeditinaLintSeq
+sequencereflectsanexistinglineofcodeinthesourcefileusedtogenerateit. Asaresult,LintSeq
+editdatacanonlybeusedtotrainmodelsforsynthesis-liketasks,ratherthanforrefinement.
+Second, ourexperiments with LintSeqstudycodesynthesis inPythononly. We lookforwardto
+testingLintSeqwithotherprogramminglanguages,verifiers,andproblemsinfuturework. Oneother
+excitingsettingwhereLintSeqmightimprovethetradeoffbetweenmodelgenerationqualityand
+inference-timecomputeisinmathematicalreasoningandformaltheoremproving.
+ETHICS STATEMENT
+Thisworkexploresdata-drivenmechanismsforimprovingthequalityoflanguagemodel-generated
+code. Oursyntheticdatagenerationmethodreliesonopen-sourcedataandourexperimentsleverage
+open-sourcesoftwareandresources. Itisimportanttoacknowledgethatalllanguagemodelsforcode
+synthesishavethepotentialtobemisused–whetherintentionallyorunintentionally–forgeneration
+ofcodewithvulnerabilitiesand/ormaliciousbehaviors. Anyandallmodelgeneratedcodehasthe
+potentialtobeharmfulandmustnotbeexecutedwithoutprecautions.
+10ACKNOWLEDGEMENTS
+ThisworkwassupportedbygrantsfromNSFaward2339096andONRawardsN00014-21-1-2758
+andN00014-22-1-2773. WearegratefultoShenglongWangandNYUHighPerformanceComputing
+fortheirsupportofthisproject. UPisfundedbyanNSFGRFPAward,andLPisfundedbythe
+PackardFellowship. WewouldliketothankNateRahn,MahiShafiullah,andDavidBrandfonbrener
+forhelpfulcommentsanddiscussions.
+REFERENCES
+Marah Abdin, Sam Ade Jacobs, Ammar Ahmad Awan, Jyoti Aneja, Ahmed Awadallah, Hany
+Awadalla,NguyenBach,AmitBahree,ArashBakhtiari,HarkiratBehl,etal. Phi-3technicalreport:
+Ahighlycapablelanguagemodellocallyonyourphone. arXivpreprintarXiv:2404.14219,2024.
+JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoniAleman,
+DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. Gpt-4technicalreport.
+arXivpreprintarXiv:2303.08774,2023.
+Bo Adler, Niket Agarwal, Ashwath Aithal, Dong H Anh, Pallab Bhattacharya, Annika Brundyn,
+JaredCasper,BryanCatanzaro,SharonClay,JonathanCohen,etal. Nemotron-4340btechnical
+report. arXivpreprintarXiv:2406.11704,2024.
+JacobAustin,AugustusOdena,MaxwellNye,MaartenBosma,HenrykMichalewski,DavidDohan,
+EllenJiang,CarrieCai,MichaelTerry,QuocLe,etal. Programsynthesiswithlargelanguage
+models. arXivpreprintarXiv:2108.07732,2021.
+JLBa. Layernormalization. arXivpreprintarXiv:1607.06450,2016.
+LoubnaBenAllal,NiklasMuennighoff,LogeshKumarUmapathi,BenLipkin,andLeandrovon
+Werra. Aframeworkfortheevaluationofcodegenerationmodels. https://github.com/
+bigcode-project/bigcode-evaluation-harness,2022.
+Loubna Ben Allal, Anton Lozhkov, and Elie Bakouch. Smollm - blazingly fast and remarkably
+powerful. https://huggingface.co/blog/smollm,2024. Accessed: 2024-09-02.
+SidBlack,StellaBiderman,EricHallahan,QuentinAnthony,LeoGao,LaurenceGolding,HoraceHe,
+ConnorLeahy,KyleMcDonell,JasonPhang,etal. Gpt-neox-20b: Anopen-sourceautoregressive
+languagemodel. arXivpreprintarXiv:2204.06745,2022.
+Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V Le, Christopher Re´, and
+AzaliaMirhoseini. Largelanguagemonkeys: Scalinginferencecomputewithrepeatedsampling.
+arXivpreprintarXiv:2407.21787,2024.
+SahilChaudhary. Codealpaca: Aninstruction-followingllamamodelforcodegeneration. https:
+//github.com/sahil280114/codealpaca,2023.
+MarkChen, JerryTworek, HeewooJun, QimingYuan, HenriquePondeDeOliveiraPinto, Jared
+Kaplan,HarriEdwards, YuriBurda, NicholasJoseph, GregBrockman, etal. Evaluatinglarge
+languagemodelstrainedoncode. arXivpreprintarXiv:2107.03374,2021.
+AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,etal. Thellama3herdofmodels.
+arXivpreprintarXiv:2407.21783,2024.
+GoogleGeminiTeam,RohanAnil,SebastianBorgeaud,YonghuiWu,Jean-BaptisteAlayrac,Jiahui
+Yu,RaduSoricut,JohanSchalkwyk,AndrewMDai,AnjaHauth,etal. Gemini: afamilyofhighly
+capablemultimodalmodels. arXivpreprintarXiv:2312.11805,2023.
+GoogleGemmaTeam,ThomasMesnard,CassidyHardin,RobertDadashi,SuryaBhupatiraju,Shreya
+Pathak,LaurentSifre,MorganeRivie`re,MihirSanjayKale,JulietteLove,etal. Gemma: Open
+modelsbasedongeminiresearchandtechnology. arXivpreprintarXiv:2403.08295,2024.
+11AlisonGopnik. Wordsandplans: Earlylanguageandthedevelopmentofintelligentaction. Journal
+ofChildLanguage,9(2):303–318,1982.
+Dirk Groeneveld, Iz Beltagy, Pete Walsh, Akshita Bhagia, Rodney Kinney, Oyvind Tafjord,
+Ananya Harsh Jha, Hamish Ivison, Ian Magnusson, Yizhong Wang, et al. Olmo: Accelerat-
+ingthescienceoflanguagemodels. arXivpreprintarXiv:2402.00838,2024.
+Will Douglas Heaven. How ai assistants are already changing the way code gets
+made. https://www.technologyreview.com/2023/12/06/1084457/
+ai-assistants-copilot-changing-code-software-development-github-openai/,
+2024. Accessed: 2024-09-20.
+JaredKaplan,SamMcCandlish,TomHenighan,TomBBrown,BenjaminChess,RewonChild,Scott
+Gray,AlecRadford,JeffreyWu,andDarioAmodei. Scalinglawsforneurallanguagemodels.
+arXivpreprintarXiv:2001.08361,2020.
+David Kirsh. Problem solving and situated cognition. The Cambridge Handbook of Situated
+Cognition,pp.264–306,2009.
+DenisKocetkov,RaymondLi,LoubnaBenAllal,JiaLi,ChenghaoMou,CarlosMun˜ozFerrandis,
+YacineJernite,MargaretMitchell,SeanHughes,ThomasWolf,etal.Thestack:3tbofpermissively
+licensedsourcecode. arXivpreprintarXiv:2211.15533,2022.
+KaixinLi,QishengHu,JamesZhao,HuiChen,YuxiXie,TiedongLiu,MichaelShieh,andJunxian
+He. Instructcoder: Instructiontuninglargelanguagemodelsforcodeediting. InProceedingsof
+the62ndAnnualMeetingoftheAssociationforComputationalLinguistics(Volume4: Student
+ResearchWorkshop),pp.50–70,2024.
+RaymondLi,LoubnaBenAllal,YangtianZi,NiklasMuennighoff,DenisKocetkov,ChenghaoMou,
+MarcMarone,ChristopherAkiki,JiaLi,JennyChim,etal. Starcoder: maythesourcebewith
+you! arXivpreprintarXiv:2305.06161,2023.
+XiangLi,JohnThickstun,IshaanGulrajani,PercySLiang,andTatsunoriBHashimoto. Diffusion-lm
+improvescontrollabletextgeneration. AdvancesinNeuralInformationProcessingSystems,35:
+4328–4343,2022a.
+YujiaLi,DavidChoi,JunyoungChung,NateKushman,JulianSchrittwieser,Re´miLeblond,Tom
+Eccles,JamesKeeling,FelixGimeno,AgustinDalLago,etal. Competition-levelcodegeneration
+withalphacode. Science,378(6624):1092–1097,2022b.
+Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. Is your code generated
+by chatGPT really correct? rigorous evaluation of large language models for code generation.
+InThirty-seventhConferenceonNeuralInformationProcessingSystems,2023. URLhttps:
+//openreview.net/forum?id=1qvx610Cu7.
+AntonLozhkov,RaymondLi,LoubnaBenAllal,FedericoCassano,JoelLamy-Poirier,Nouamane
+Tazi,AoTang,DmytroPykhtar,JiaweiLiu,YuxiangWei,etal. Starcoder2andthestackv2: The
+nextgeneration. arXivpreprintarXiv:2402.19173,2024.
+SachinMehta,MohammadHosseinSekhavat,QingqingCao,MaxwellHorton,YanziJin,Chenfan
+Sun,SeyedImanMirzadeh,MahyarNajibi,DmitryBelenko,PeterZatloukal,andMohammad
+Rastegari. OpenELM: An efficient language model family with open training and inference
+framework. InWorkshoponEfficientSystemsforFoundationModelsII@ICML2024,2024. URL
+https://openreview.net/forum?id=XNMbTkxroF.
+NiklasMuennighoff,QianLiu,ArmelZebaze,QinkaiZheng,BinyuanHui,TerryYueZhuo,Swayam
+Singh,XiangruTang,LeandroVonWerra,andShayneLongpre. Octopack: Instructiontuning
+codelargelanguagemodels. arXivpreprintarXiv:2308.07124,2023.
+NiklasMuennighoff, AlexanderRush, BoazBarak, TevenLeScao, NouamaneTazi, Aleksandra
+Piktus,SampoPyysalo,ThomasWolf,andColinARaffel. Scalingdata-constrainedlanguage
+models. AdvancesinNeuralInformationProcessingSystems,36,2024.
+12Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou, Silvio Savarese,
+andCaimingXiong. Codegen: Anopenlargelanguagemodelforcodewithmulti-turnprogram
+synthesis. arXivpreprintarXiv:2203.13474,2022.
+Guilherme Penedo, Hynek Kydl´ıcˇek, Anton Lozhkov, Margaret Mitchell, Colin Raffel, Leandro
+VonWerra,ThomasWolf,etal. Thefinewebdatasets: Decantingthewebforthefinesttextdataat
+scale. arXivpreprintarXiv:2406.17557,2024.
+UlyanaPiterbarg,LerrelPinto,andRobFergus. diffhistoryforneurallanguageagents. InForty-first
+InternationalConferenceonMachineLearning,2024.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal. Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+JieRen,SamyamRajbhandari,RezaYazdaniAminabadi,OlatunjiRuwase,ShuangyanYang,Minjia
+Zhang, Dong Li, and Yuxiong He. {ZeRO-Offload}: Democratizing {Billion-Scale} model
+training. In2021USENIXAnnualTechnicalConference(USENIXATC21),pp.551–564,2021.
+BaptisteRoziere,JonasGehring,FabianGloeckle,StenSootla,ItaiGat,XiaoqingEllenTan,Yossi
+Adi,JingyuLiu,TalRemez,Je´re´myRapin,etal. Codellama: Openfoundationmodelsforcode.
+arXivpreprintarXiv:2308.12950,2023.
+AmanSanger. Editingfilesat1000tokenspersecond. https://www.cursor.com/blog/
+instant-apply,2024. Accessed: 2024-09-02.
+NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+CharlieSnell,JaehoonLee,KelvinXu,andAviralKumar. Scalingllmtest-timecomputeoptimally
+canbemoreeffectivethanscalingmodelparameters. arXivpreprintarXiv:2408.03314,2024.
+LucaSoldaini,RodneyKinney,AkshitaBhagia,DustinSchwenk,DavidAtkinson,RussellAuthur,
+BenBogin,KhyathiChandu,JenniferDumas,YanaiElazar,etal. Dolma: Anopencorpusofthree
+trilliontokensforlanguagemodelpretrainingresearch. arXivpreprintarXiv:2402.00159,2024.
+JianlinSu,MurtadhaAhmed,YuLu,ShengfengPan,WenBo,andYunfengLiu.Roformer:Enhanced
+transformerwithrotarypositionembedding. Neurocomputing,568:127063,2024.
+KenThompsonandDennisMRitchie. unixProgrammer’sManual. BellTelephoneLaboratories,
+1975.
+Guanhua Wang, Heyang Qin, SamAde Jacobs, ConnorHolmes, Samyam Rajbhandari, Olatunji
+Ruwase,FengYan,LeiYang,andYuxiongHe. Zero++: Extremelyefficientcollectivecommuni-
+cationforgiantmodeltraining. arXivpreprintarXiv:2306.10209,2023a.
+YizhongWang,YeganehKordi,SwaroopMishra,AlisaLiu,NoahASmith,DanielKhashabi,and
+HannanehHajishirzi. Self-instruct: Aligninglanguagemodelswithself-generatedinstructions.
+arXivpreprintarXiv:2212.10560,2022.
+YueWang,WeishiWang,ShafiqJoty,andStevenCHHoi.Codet5:Identifier-awareunifiedpre-trained
+encoder-decodermodelsforcodeunderstandingandgeneration. arXivpreprintarXiv:2109.00859,
+2021.
+Yue Wang, Hung Le, Akhilesh Deepak Gotmare, Nghi DQ Bui, Junnan Li, and Steven CH Hoi.
+Codet5+: Opencodelargelanguagemodelsforcodeunderstandingandgeneration. arXivpreprint
+arXiv:2305.07922,2023b.
+JasonWei,MaartenBosma,VincentYZhao,KelvinGuu,AdamsWeiYu,BrianLester,NanDu,
+AndrewMDai,andQuocVLe. Finetunedlanguagemodelsarezero-shotlearners. arXivpreprint
+arXiv:2109.01652,2021.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,Denny
+Zhou,etal. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. Advancesin
+neuralinformationprocessingsystems,35:24824–24837,2022.
+13YuxiangWei,FedericoCassano,JiaweiLiu,YifengDing,NamanJain,HarmdeVries,Leandrovon
+Werra,ArjunGuha,andLingmingZhang. Starcoder2-instruct: Fullytransparentandpermissive
+self-alignmentforcodegeneration. https://huggingface.co/blog/sc2-instruct,
+2024a. Accessed: 2024-09-08.
+YuxiangWei,ZheWang,JiaweiLiu,YifengDing,andLingmingZhang. Magicoder: Empowering
+codegenerationwithoss-instruct. InForty-firstInternationalConferenceonMachineLearning,
+2024b.
+RonaldJWilliamsandDavidZipser. Alearningalgorithmforcontinuallyrunningfullyrecurrent
+neuralnetworks. Neuralcomputation,1(2):270–280,1989.
+ThomasWolf,LysandreDebut,VictorSanh,JulienChaumond,ClementDelangue,AnthonyMoi,
+PerricCistac,ClaraMa,YacineJernite,JulienPlu,CanwenXu,TevenLeScao,SylvainGugger,
+MariamaDrame,QuentinLhoest,andAlexanderM.Rush. Transformers: State-of-the-ArtNatural
+LanguageProcessing. InAssociationforComputationalLinguistics,pp.38–45,October2020.
+URLhttps://www.aclweb.org/anthology/2020.emnlp-demos.6.
+FrankFXu,UriAlon,GrahamNeubig,andVincentJosuaHellendoorn. Asystematicevaluationof
+largelanguagemodelsofcode. InProceedingsofthe6thACMSIGPLANInternationalSymposium
+onMachineProgramming,pp.1–10,2022.
+YanliZhao,AndrewGu,RohanVarma,LiangLuo,Chien-ChinHuang,MinXu,LessWright,Hamid
+Shojanazeri,MyleOtt,SamShleifer,etal. Pytorchfsdp: experiencesonscalingfullyshardeddata
+parallel. arXivpreprintarXiv:2304.11277,2023.
+14A MORE ON EDIT SEQUENCES AND DIFFS
+A.1 READINGUNIXDIFFS
+WeprovideaguidetoreadingUnix-stylediffsbelowinFigure7. Thediffshowninthisfigureis
+computedusingthePythonlibrarydifflib,whichistheimplementationthatweusetocompactly
+representeditsinoursyntheticdatagenerationexperiments. Notethatthetotalextratokenspresentin
+aninsertioneditsequencerepresentationofaprogramscaleswiththenumberofprogramlinesL,and
+canbeupper-boundedasT ≤L·((charsin“decorator”)+(extracharsperlinein“body”))=16L.
+diff
+Figure 7: The anatomy of a Unix diff: A diagrammatic visualization of the different parts of a
+Unix-stylediff,ascomputedbydifflib. Thebodyofadiffcanconsistofmultiplelinedeletions,
+followed by multiple line insertions. The decorator portion of the diff respectively indicates the
+locationandsizeofthesedeletionsandinsertions,ifany. Likethediffshownabove,theeditsin
+syntheticeditsequencesgeneratedbyLintSeqconsistoflineinsertionsonly.
+A.2 RESOLVINGEDITSEQUENCES
+Duringinference,LMsthathavebeenfinetunedonLintSeqinstructdatawillsynthesizecodeviaedit
+sequences,outputtingtextstringsthatconsistofasequenceofconsecutivePythondiffsinterleaved
+withnewlinecharactersand“<|diff|>”tokens,similarto Piterbargetal.(2024). Eachofthese
+diffswillbestructuredasshowninFigure7,ifcorrectlyformattedbythelanguagemodel.
+ResolvinganeditsequencegeneratedbyalanguagemodelintoanexecutablePythonprogramis
+simple: startingwithanemptyprogram,weconsecutivelyapplythelineinsertionsand/ordeletions
+inthebodyofeachdifftothelinesoftheprogramspecifiedinitsdecorator. Wecontinuethisprocess
+untilallofthediffsinthegeneratededitsequencehavebeenparsedandresolved.
+Figure1showsacodeeditsequencegenerationfromaLintSeqinstructionfinetunedLMandthe
+correspondingresolved,executablePythonprogram.
+A.3 CONTROLLABILITYOFCODESYNTHESISWITHEDITSEQUENCELMS
+ThestructureofUnix-stylediffsaffectsthedownstreamcontrollabilityofcodesynthesiswithmodels
+thathavebeentrainedoneditsequencere-parameterizedprograms. AsshowninFigure7,thefirst
+lineofeverydiffisadecoratorthatdescribesthelocationandthenumbersoflineschangedbythe
+edit. Duringinference,autoregressivelanguagemodelsthathavebeentrainedonUnix-stylediffs
+withthisformatcanbepromptedtopredictaneditinanydesiredtargetlocationwithintheprogram
+beingsynthesizedby“intervening”onamodelgeneration.
+A.4 FUTUREWORK: SEARCHINGINEDITSPACE
+If we apply the lens of reinforcement learning or search to this setting, we might say that re-
+parameterizingthecodedatausedtotrainalanguagemodelre-parameterizesthemodel’sgenerative
+actionspace. ItispossiblethatcombiningeditsequenceLMswithmoresophisticateddecoding
+mechanisms,inference-timesearch,and/orinteractivepost-trainingmayresultinevenlargerimprove-
+mentstothequalityofgeneratedcodethanthoseofthezero-shotcodesynthesissettingsstudiedin
+thispaper. Welookforwardtotestingthishypothesisinfuturework.
+15B EVALUATION
+HumanEval(Chenetal.,2021)andMostly-BasicProgrammingProblems(MBPP)(Austinetal.,
+2021)aretwoofthemoststudiedbenchmarksforevaluatingcodeLMs(Liuetal.,2023). These
+benchmarksprobethecodesynthesiscapabilitiesofmodels,andconsistofpairsofnaturallanguage
+programdescriptionsandtest-cases. WeemploytheextendedMBPPtestcasesreleasedasMBPP(+)
+byLiuetal.(2023)toaddadditionalrigourtoourtestingprocedure. AllofthecodeLMsthatwe
+compareourmodelsagainstevaluateHumanEvalperformanceusingtheoriginalsetofbenchmark
+testcases;forconsistency,weemploythesesametestcasesinourevaluationswhencomparingthe
+performanceofourmodelstothereportedscoresofexternalLMs.
+DuringtestingonbothHumanEvalandMBPP(+),LMsarepromptedtogenerateoutputsusingthe
+naturallanguagedescriptionsoftargetprograms. Theiroutputsarethenevaluatedonthepairedtest
+cases. Agenerationisconsidered“correct”ifandonlyifitpassesallofthetestcasesuponexecution,
+subjecttoafixedtimeoutsetting. Previousworksoncodesynthesiswithlanguagemodelsreport
+scoresonHumanEvalandMBPP(+)acrosssamples. Themostcommonofthesemetricsisknownas
+pass@k(Chenetal.,2021;Austinetal.,2021;Lietal.,2022b;Wangetal.,2023b). Thisisthemetric
+thatweusetoreportandcomparemodelperformancethroughoutthispaper. Ourimplementationof
+HumanEvalandMBPP(+)evaluationsmimicstheBigCodeEvaluationHarnessbyBenAllaletal.
+(2022). Wedonotallowmodelstousechain-of-thoughtduringgeneration.
+B.1 PROMPTING
+Theprimarygoalofthispaperistointroduceamethodforre-factorizingcodesynthesiswithLMs
+byfinetuningthemonsyntheticinstructiondata. Asaresult,weevaluateallmodelsusingminimal
+prompt formats, performing no prompt tuning (see Figures 9 and 10). Examples of the prompt
+formatsthatweuseduringevaluationareshowninFigure8.
+Figure8: ExamplesofformattedHumanEvalandMBPP(+)promptsusedinmodelevaluations.
+WefinetunealltestedmodelsonexampleoutputsexclusivelycorrespondingtoPythoncode,andasa
+result,wedonotuseMarkdownformattingtoseparatePythoncodefromnaturallanguageineither
+ourinstructiondatanorinourinference-timeprompts.
+ToevaluatemodelsonHumanEval,weuseboththedefault“Pythonversion”promptformatinthe
+originalbenchmarkdataset,whereanaturallanguageprogramdescriptionisprovidedtoanLMwithin
+adocstring,aswellastheequivalent,fullynaturallanguagepromptformatfromHumanEvalPack
+(Muennighoffetal.,2023). Thelatterformatissimilartothestructureoftheinstructionsinour
+finetuningdatasets.
+ToevaluatemodelsonMBPP(+),weusethedefaultpromptsfromtheMBPPbenchmarkdataset,
+formattedwithspecificationofthetargetfunctionnameandargumentsbothinsideandoutsideofthe
+naturallanguageinstruction,asshowninFigure8.
+DuringLMbenchmarkevaluations,wetestmodelsoneachoftheformatvariantsdescribedabove
+andreportscoresonthebetterperformingvariantforeachbenchmarkonly.
+16B.2 GENERATIONANDPARSING
+Duringgeneration,wecontinuedecodinguntilanend-of-sequencetokenisoutputbyanLM.We
+treatallLMoutputsaseitherPythoncodeorsequencesofPythoncodeedits,dependingonwhether
+anLMwasfinetunedonstandardinstructorLintSeqinstructdata. Inthelattercase,wepost-process
+outputsbyresolvingtheoutputeditsequencesusingtheproceduredescribedinAppendixA.2.
+B.3 EVALUATINGMODELCHECKPOINTS
+B.3.1 PHILOSOPHY
+Thereisawell-knowntrade-offbetweenthetemperatureusedforsamplingfromautoregressivecode
+LMsandthebenchmarkcoverageachievablebymodels,i.e. theproportionofproblems“pass@k”
+forwhichanLMisabletogenerateatleastoneoutputthatpassesalltestcasesgiven“k”tries. This
+trade-offwasfirstdescribedbyChenetal.(2021). Informally,increasingthesamplingtemperature
+increasesthewidthofthedistributionfromwhichtokensaresampled,producingmorediversebut
+noisier (and possibly lower quality) generations. For larger repeated sample counts, the pass@k
+scoretypicallyincreaseswithsamplingtemperatureuptosomethreshold,beyondwhichthenegative
+effectsofnoiseoverpowerthepositiveeffectsofdiversity. Thebenchmarkcoverageachievablebyan
+LMatanytemperatureandinthelimitofsamples,i.e. onpass@kfork ↑∞,ultimatelydependson
+boththepowerandexpressivityofthecodelanguagemodel’slearnedrepresentation.
+Fromapracticalperspective,whilesmallerlanguagemodelsmayhaveweakerrepresentationalpower
+thanlargermodels,therepresentationalexpressivityoftheformermayenablethemtoovertakethe
+latteratfixedcomputationalbudgetsbyleveragingextracomputeatinference-time,e.g. generating
+a larger number of samples per problem and using the provided test cases to check each one for
+correctnessbeforereturninganoutput(Brownetal.,2024;Snelletal.,2024). Forexample,anLLM
+thathasan85%pass@1scoreonanarbitrarytaskmaybemoreexpensiveintotalservingcost(see
+Figure1)thanasmallerLMwitha90%pass@50scoreonthesametask. AsmallLMcanonlyhave
+thisproperty,however,ifitexhibitsareliabletrade-offbetweengenerationqualityandinference-time
+samplingcostacrosstasks. Inotherwords,itsrepresentationmustbesufficientlyexpressive.
+B.3.2 COMPUTINGCOVERAGE(PASS@K)
+Our goal is to probe whether re-parameterizing code synthesis with edit sequences can improve
+the expressivity of smaller LLM representations, boosting benchmark coverage as a function of
+samples-per-problem. Hence,weprimarilycomparefinetunedmodelsbyevaluatingthemwiththe
+proceduresdescribedaboveonHumanEvalandMBPP(+)atahightemperatureandalargesample
+count,computingpass@kfork∈{1,5,10,20,50}withN =50samples2attemperature1,top-p
+0.95. Wecomputepass@kstatisticswiththesameprocedureasChenetal.(2021). Theresultsof
+theseevaluationsarereportedthroughoutthepaperandshowninFigures4,5andTables8,9,10,11.
+Inasimilarspirit,weidentifythemostperformantcheckpointfromeachmodel-datafinetuningrun
+bycomparingpass@50scoreattemperature1onHumanEvalandMBPP(+)acrosscheckpoints.
+Many existing state-of-the-art code synthesis LMs only report temperature-tuned pass@k scores
+on HumanEval, including Codex, AlphaCode, and Codegen-Mono (Chen et al., 2021; Li et al.,
+2022b; Nijkamp et al., 2022). Thus, in Tables 1 and 2, we temperature-tune TinyCodeLM
+models’ pass@1 and pass@10 scores when reporting results. On HumanEval, we test temper-
+atures τ ∈ {0.0,0.2,0.4,0.8,1.0}. On MBPP(+), we sweep over a smaller temperature range,
+τ ∈ {0.0,0.1,1.0}. Weperformthesametemperaturetuningprocedurewhenreportingexternal
+model benchmark scores as well, i.e. the scores annotated with “(†)” in Tables 1 and 2. When
+runningbenchmarkevaluationswiththeseexternalcodeLMs,westrayfromthepromptformatting,
+generation,andparsingproceduresdescribedinAppendicesB.1andB.2;instead,intheinterestofa
+fairevaluation,wereproducetheconventionsreportedbymodelauthorstoreportotherscores.
+2Thesearethelargestsamplecountsthatarefeasibletocomputeonourhardwaregiventhescopeofour
+experiments.
+17C PRETRAINING
+Werelyondataandlibrariesopen-sourcedbytheHuggingFace,FineWeb,StarCoder,Dolma,OLMo,
+andPyTorchFSDPprojectstopretrainourmodels(Wolfetal.,2020;Penedoetal.,2024;Lozhkov
+etal.,2024;Soldainietal.,2024;Groeneveldetal.,2024;Zhaoetal.,2023).
+C.1 MODELARCHITECTURESANDPRETRAININGHYPERPARAMETERS
+Table3: Architecturalandpretraininghyperparametersofour“ondevice”150Mand400M
+parameterTinyCodeLMmodels,pretrainedonamixtureofWebtextandcodeforPythonunder-
+standing.
+TinyCodeLM
+Smallest,150MParameters Small,400MParameters
+TransformerArchitecture decoder-only decoder-only
+ModelFamily OlmoForCausalLM OlmoForCausalLM
+Tokenizer GPT-NeoX-20B-OLMo GPT-NeoX-20B-OLMo
+AttentionBias False False
+AttentionDropout 0.0 0.0
+HiddenActivation SwiGLU SwiGLU
+HiddenSize 768 1024
+IntermediateSize 3072 4096
+NumberofAttentionHeads 12 16
+NumberofHiddenLayers 12 24
+NumberofKey-ValueHeads 12 16
+VocabularySize 50304 50304
+PositionalEncodings Rotary(RoPE) Rotary(RoPE)
+MixedPrecision BFLOAT16 BFLOAT16
+WeightTying True True
+FlashAttention2 True True
+Optimizer AdamW AdamW
+LearningRate 0.0003 0.0003
+WeightDecay 0.01 0.01
+Betas (0.9,0.95) (0.9,0.95)
+Epsilon 1.0e-05 1.0e-05
+LearningRateScheduler cosine(withwarmup) cosine(withwarmup)
+NumberofWarm-UpSteps 100 100
+Alpha-f(α ) 0.1 0.1
+f
+TotalEpochsofPretraining 2 2
+C.2 PRETRAININGDATAMIX
+Table4: PretrainingdatamixusedtotrainbothTinyCodeLMmodels. Datasetsweretokenizedand
+preparedusingHuggingFaceandDolmatooling(Wolfetal.,2020;Soldainietal.,2024).
+PretrainingDataSource Subset Tokens Documents
+FineWeb(Penedoetal.,2024) 10BTSample 10.4BT 14.9M
+TheStack(Kocetkovetal.,2022) PythonOnly 61.8BT 24.2M
+18D INSTRUCTION FINETUNING
+D.1 BASELINEINSTRUCTIONDATASET
+Table 5 displays the data sources that are used to prepare the dataset described in Section 3.2.
+Thesedataarepooledandpreprocessedintoinstruction-programpairsbystrippingawayMarkdown
+formattingandnaturallanguageexplanationsfromcompletions(Figure9and10).Inourexperiments,
+weusetheresultantdatatofinetunebaselinemodels,comparingtheirperformancetothoseofLMs
+finetunedoneditsequencesgeneratedwithLintSeqfromthesamesetofinstruction-programpairs.
+HuggingFaceInstructionDataSource Subset Examples
+bigcode/self-oss-instruct-sc2-exec-filter-50k Full 50,661
+ise-uiuc/Magicoder-OSS-Instruct-75K Python 38,284
+88,945
+Table5: InstructiondatamixusedtopreparethebaselineinstructiondatasetinSection3.2.
+D.2 PROCEDURESANDHYPERPARAMETERS
+WeinstructionfinetuneallmodelswithMicrosoftDeepSpeedusingtheZeRO++protocolforstage
+threesharding. Forthelargestofthesemodels,wealsouseCPUparameteroffloadingtoaccelerate
+experiments(Wangetal.,2023a;Renetal.,2021). WhenfinetuningmodelsonLintSeqdata,weadd
+anewtoken“<|diff|>”totokenizers(Section2.4)andresizemodelembeddingsaccordingly.
+InourexperimentswithGemma2,Phi-3,andLlama3.1models,weuseHuggingFacetoaccess
+and load pretrained model weights and tokenizers. As mentioned in the main body of the paper,
+weinstructionfinetunepretrained-onlyweightsifopen-sourcedandavailable. Thisisthecasefor
+Gemma2andLlama3.1only,asofthewritingofthispaper.
+Acrossallofthefinetuningexperimentsconductedinthispaper,wetrainmodel-datavariantswith
+the same batch size and for an equal number of total optimizer steps. This optimizer step count
+corresponds to ten epochs of finetuning with the baseline instruction tuning dataset described in
+Section3.2. Wesaveintermediatecheckpointsatequaloptimizerstepintervalsinallexperiments,
+andwereportbenchmarkscoresforthebestperformingcheckpointfromeachmodel-datavariant.
+Inordertotunethepeaklearningratesusedineachsetofmodelexperiments,werunafullsweep
+α∈{6e-4,3e-4,1e-4,5e-5,1e-5,5e-6}inthebaselineinstructiondatasettingforeachmodel. We
+selectpeaklearningratevaluesbytrackingthebest-achieveddownstreambenchmarkperformance
+acrossmodels. ThechosenvaluesaredisplayedinTable6. Allotherfinetuninghyperparametersare
+keptfixedatthesettingsinTable7acrossexperiments.
+TinyCodeLM Gemma2 Phi-3 Llama3.1
+150M 400M 2B 3.8B 14B 8B
+PeakLearningRate(α) 3e-4 3e-4 5e-5 5e-5 1e-5 1e-5
+Table6: Peaklearningratesusedtoinstructionfinetunemodels.
+HyperparameterSetting
+LearningRateScheduler linear
+WarmupRatio 0.001
+WeightDecay 0.01
+TotalBatchSize 512
+BatchLossReduction sum
+MixedPrecision BFLOAT16
+MaxSequenceLength 1024
+TotalOptimizerSteps 1740
+Table7: Allotherinstructionfinetuningsettings,re-usedacrossexperiments.
+19E MORE ON SYNTHETIC DATA GENERATION WITH LINTSEQ
+E.1 EXAMPLESOFGENERATEDSYNTHETICEDITTRAJECTORIES
+Figure9: LintSeqeditsequencesamplesvsbaselineinstruction-programdata,exampleA.
+Figure10: LintSeqeditsequencesamplesvsbaselineinstruction-programdata,exampleB.
+E.2 TUNINGLINTSEQEXAMPLECOUNT
+Figure11: ProbingtheeffectofvaryingthenumberofeditsequencessampledwithLintSeqper
+instruction-examplepairduringdatageneration: UsingthesourcedatasetdescribedinSection
+3.2,wesweepoverthevalueoftheLintSeqparametersusedduringsyntheticdatagenerationto
+yieldthreedifferenteditsequenceinstructiondatasetswiths∈{1,5,10}. WefinetuneTinyCodeLM
+modelsoneachofthesedatasets,andcomparetheresultantHumanEvalandMBPP(+)performance
+vssamples(i.e. pass@kvsk)attemperature1. Themostperformantvaluesiss=5.
+20F ADDITIONAL RESULTS
+F.1 PRETRAININGTINYCODELM
+Figure12: Evaluatingthezero-shotPythonsynthesiscapabilitiesofTinyCodeLM-150Mduring
+pretrainingonHumanEvalandMBPP(+).
+Figure13: Evaluatingthezero-shotPythonsynthesiscapabilitiesofTinyCodeLM-400Mduring
+pretrainingonHumanEvalandMBPP(+).
+21F.2 FINETUNINGTINYCODELM
+F.2.1 INFERENCE-TIMESCALINGLAWS
+Table 8: HumanEval fixed-temperature coverage scaling results for all finetuned TinyCodeLM
+models(zero-shot,temperature=1,top-p=0.95).
+HumanEval
+Linter
+ModelVariant Size Guided pass@1 pass@5 pass@10 pass@20 pass@50
+tinycodeLM-Instruct 150M - 6.2 10.4 12.3 14.5 18.3
+tinycodeLM-RandSeqInstruct 150M ✗ 4.0 9.7 11.9 14.4 17.7(-0.6)
+tinycodeLM-LintSeqInstruct 150M ✓ 6.4 14.3 17.7 20.4 22.6(+4.3)
+tinycodeLM-Instruct 400M - 6.8 11.4 13.7 16.2 18.9
+tinycodeLM-RandSeqInstruct 400M ✗ 7.2 12.7 15.6 18.6 22.0(+3.1)
+tinycodeLM-LintSeqInstruct 400M ✓ 7.2 14.9 18.2 21.5 26.8(+7.9)
+Table9: MBPP(+)fixed-temperaturecoveragescalingresultsforallfinetunedTinyCodeLMmodels
+(zero-shot,temperature=1,top-p=0.95).
+MBPP(+)
+Linter
+ModelVariant Size Guided pass@1 pass@5 pass@10 pass@20 pass@50
+tinycodeLM-Instruct 150M - 7.3 16.4 20.4 24.6 30.6
+tinycodeLM-RandSeqInstruct 150M ✗ 4.3 13.1 18.4 23.7 30.2(-0.4)
+tinycodeLM-LintSeqInstruct 150M ✓ 7.5 18.2 23.4 28.5 34.5(+3.9)
+tinycodeLM-Instruct 400M - 9.3 17.9 22.2 26.8 32.4
+tinycodeLM-RandSeqInstruct 400M ✗ 5.5 15.9 21.5 27.0 34.5(+2.1)
+tinycodeLM-LintSeqInstruct 400M ✓ 13.1 25.2 29.9 34.4 39.6(+7.2)
+22F.3 FINETUNINGGEMMA2,PHI-3,ANDLLAMA3.1
+F.3.1 INFERENCE-TIMESCALINGLAWS
+Table10: HumanEvalfixed-temperaturecoveragescalingresultsforallfinetunedGemma2,Phi-3,
+andLlama3.1models(zero-shot,temperature=1,top-p=0.95).
+HumanEval
+ModelVariant Parameters pass@1 pass@5 pass@10 pass@20 pass@50
+Gemma-2-Instruct 2.6B 16.1 26.3 30.5 34.6 40.2
+Gemma-2-LintSeqInstruct 2.6B 21.6 35.0 41.2 48.3 58.5(+18.3)
+Phi-3-Mini-Instruct 3.8B 40.1 48.8 52.1 55.0 57.3
+Phi-3-Mini-LintSeqInstruct 3.8B 38.3 63.6 72.0 79.0 86.6(+29.3)
+Llama-3.1-Instruct 8B 34.2 50.3 55.6 59.7 63.4
+Llama-3.1-LintSeqInstruct 8B 37.6 61.1 69.2 75.3 82.3(+18.9)
+Phi-3-Med-Instruct 14B 52.8 67.9 72.0 75.0 77.4
+Phi-3-Med-LintSeqInstruct 14B 44.7 73.5 80.2 84.5 90.2(+12.8)
+Table11: MBPP(+)fixed-temperaturecoveragescalingresultsforallfinetunedGemma2,Phi-3,and
+Llama3.1models(zero-shot,temperature=1,top-p=0.95).
+MBPP(+)
+ModelVariant Parameters pass@1 pass@5 pass@10 pass@20 pass@50
+Gemma-2-Instruct 2.6B 22.8 34.2 37.8 41.2 44.6
+Gemma-2-LintSeqInstruct 2.6B 27.7 41.3 46.3 50.5 54.7(+10.1)
+Phi-3-Mini-Instruct 3.8B 35.2 45.9 49.1 52.0 56.1
+Phi-3-Mini-LintSeqInstruct 3.8B 39.3 57.5 62.4 65.9 69.4(+13.3)
+Llama-3.1-Instruct 8B 38.4 50.2 53.8 56.6 59.4
+Llama-3.1-LintSeqInstruct 8B 38.5 56.5 61.6 65.7 69.8(+10.4)
+Phi-3-Med-Instruct 14B 40.3 51.5 54.2 56.3 59.0
+Phi-3-Med-LintSeqInstruct 14B 40.0 60.9 67.0 71.5 75.9(+16.9)
+23F.4 COMPUTINGHUMANEVALCOVERAGEVSCUMULATIVEINFERENCE-TIMEFLOPS
+In Figure 1, we plot HumanEval coverage as a function of cumulative inference-time FLOPs,
+comparing the performance and total cost of repeatedly sampling from our instruction finetuned
+Phi-3andLlama3.1modelsvssamplingasinglegenerationperproblemfromverylargemodelslike
+Llama3.1405B(Dubeyetal.,2024)andNemotron4340B(Adleretal.,2024).
+We use the approximations below, drawn from Kaplan et al. (2020), to conservatively estimate
+thecumulativeinferencecostsofsynthesizingsolutionstoallofthe164HumanEvalbenchmark
+problemsacrossdifferentmodels. Themodelsthatwecomparearealldensetransformers,wherethe
+majorityoftheparametersareusedinmatrixmultiplications.
+FLOPspertoken≈2·(N +2·L ·C )
+model-params model-layers context
+TotalFLOPs≈FLOPspertoken·T ·K ·M
+avg-total-tokens-per-sample samples problems
+≈FLOPspertoken·T ·K ·164
+avg-total-tokens-per-sample samples
+Forourinstructionfinetunedmodels,wedeterminethequantitiesT bycomputing
+avg-total-tokens-per-sample
+tokencountsoverallsetsofsamplesperproblemthatweobtainedtocomputethecoveragestatistics
+inFigure4andTable10above. Thesetokenstatisticsareprovidedinthetablebelow.
+Table12:HumanEvaltotaltokenspersampleforfinetunedGemma2,Phi-3,andLlama3.1models
+(zero-shot, temperature = 1, top-p = 0.95). These counts reflect prompt and completion tokens.
+TheyarecomputedusingthesamesampleswhosecoveragestatisticsarereportedinTable10.
+Avg. TotalTokens
+ModelVariant Parameters PerHumanEvalSample(n=50)
+Gemma-2-Instruct 2.6B 172
+Gemma-2-LintSeqInstruct 2.6B 205
+Phi-3-Mini-Instruct 3.8B 218
+Phi-3-Mini-LintSeqInstruct 3.8B 247
+Llama-3.1-Instruct 8B 178
+Llama-3.1-LintSeqInstruct 8B 201
+Phi-3-Med-Instruct 14B 230
+Phi-3-Med-LintSeqInstruct 14B 247
+Note that edit sequence (i.e. LintSeqInstruct finetuned) LMs have slightly higher average token
+countspersampleduetopresenceof“diff”descriptortokensingenerations(seeAppendixA).
+Wereportzero-shotHumanEvalcoverageforexternalmodelsbyusingtheevaluationstatisticsfrom
+Dubeyetal.(2024)(Table18,columnone). Toestimatecumulativeinference-timeFLOPsforthese
+models,weemploytheapproximationexpressionaboveandestimateT ≈200,
+avg-total-tokens-per-sample
+reflectinganensembleoverthepersampletokencountsofstandard“Instruct”finetunedmodelsshown
+inTable12. Notethatthisensembledstatisticreflectsprogramgenerationswithoutchain-of-thought
+only. Asaresult,webelieveittobeaconservativeestimator.
+24

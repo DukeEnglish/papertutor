@@ -1,0 +1,1021 @@
+INTERPRETING AND EDITING VISION-LANGUAGE
+REPRESENTATIONS TO MITIGATE HALLUCINATIONS
+NickJiang∗,AnishKachinthaya∗,SuziePetyrk†,YossiGandelsman†
+UniversityofCalifornia,Berkeley
+{nickj,anishk,spetryk,yossi gandelsman}@berkeley.edu
+ABSTRACT
+We investigate the internal representations of vision-language models (VLMs)
+toaddresshallucinations,apersistentchallengedespiteadvancesinmodelsize
+andtraining. WeprojectVLMs’internalimagerepresentationstotheirlanguage
+vocabularyandobservemoreconfidentoutputprobabilitiesonrealobjectsthan
+hallucinatedobjects. Weadditionallyusetheseoutputprobabilitiestospatially
+localizerealobjects. Buildingonthisapproach,weintroduceaknowledgeerasure
+algorithmthatremoveshallucinationsbylinearlyorthogonalizingimagefeatures
+with respect to hallucinated object features. We show that targeted edits to a
+model’slatentrepresentationscanreducehallucinationsbyupto25.7%onthe
+COCO2014datasetwhilepreservingperformance. Ourfindingsdemonstratehow
+adeeperunderstandingofVLMs’latentrepresentationscanenhancereliabilityand
+enablenovelcapabilities,suchaszero-shotsegmentation.1
+1 INTRODUCTION
+Vision-LanguageModels(VLMs)haverecentlyemergedaspowerfultoolsforunderstandingimages
+viatext(Daietal.,2023;Liuetal.,2024). Theyhavedemonstratedremarkablecapabilitiesacross
+multimodaltaskssuchasimagecaptioning(Lietal.,2023a),visualquestionanswering(Yeetal.,
+2023),andcomplexmultimodalreasoning(Baietal.,2023). Despitetheircapabilities,VLMstendto
+hallucinatecontentthatdoesnotappearintheimages(Jietal.,2023),whichposesseriousconcerns
+forthereliabilityofthesemodelsinreal-worldapplications(Huetal.,2023;Luoetal.,2024).
+Widespreadbeliefhasbeenthatscalingtolargermodelsandmoretrainingdatawillnaturallymitigate
+hallucinations. However,recentstudieshaveshownthathallucinationspersisteveninlargerandmore
+advancedmodels(Rohrbachetal.,2019;Lietal.,2023b),suggestingthatthisissuecannotbesolved
+byscalealone. Currentmethodsreducehallucinationsbyapplyingexternalinterventions(e.g. object
+detectors;Yinetal.(2023))oradditionalmodelfine-tuning(e.g. onhallucinationexamples;Zhou
+etal.(2024);Zhangetal.(2024a)). Nevertheless,thesemethodsoftenstruggletodistinguishbetween
+subtlehallucinationsandexistingdetails,requiringnewmodelsorupdatedmodelparameters.
+In this paper, we aim to introduce fine-grained edits directly to the image latent representations
+ofVLMstoreducehallucinationswithouthinderingtheirperformance,anapproachthathashad
+some success in large language models (Zhang et al., 2024b; von Rutte et al., 2024). To edit
+thelatentrepresentationsofVLMs, wefirstexplaintheirroleviatext. Weemploythelogitlens
+technique(nostalgebraist,2020)todirectlyinterpretthespatialVLMimagerepresentationswith
+VLMtextvocabulary. Surprisingly,thecharacteristicsoftheseimagerepresentationsaredifferent
+forrealobjectsthatappearintheimageandobjectsthatarehallucinated. Moreover,thelogitlens
+enablesspatiallylocalizingobjectswithintheinputimage.
+Relyingontheabilitytodetecthallucinatedobjects,weeditthemoutbyinterveningintheirinternal
+representations. Weintroduceaknowledgeerasurealgorithm,PROJECTAWAY,totargetandremove
+objectsbylinearlyorthogonalizingimagefeatureswithrespecttothetextfeaturesoftargetobjects.
+WefindthatPROJECTAWAYcanerasebothrealandhallucinatedobjectswithhighratesofremoval.
+∗Equalcontributionasfirstauthors.
+†Equalcontributionaslastauthors.
+1Code:https://github.com/nickjiang2378/vl-interp
+1
+4202
+tcO
+3
+]VC.sc[
+1v26720.0142:viXra(a) Vision-Language Model (b) Project Latents to (c) Object Removal
+Cat and dog<end> Vocabulary Cat<end>
+44.96% couch
+41.01% table
+Layer 4 …
+Layer 3
+60.32% couch
+Layer 2 36.11% table
+…
+Layer 1
+94.14% cat
+Cat and dog 2.01% bear Cat
+…
+edit Edit and replace -
+image representations: edit
+W Unembedding Matrix 63.63% cat -
+U 32.86% dog “dogˮ text - edit
+Latent Representations … representation edit
+-
+Figure1: InterpretingVLMinternalimagerepresentations. (a)GivenaVLM,(b)weunembed
+thelatentrepresentationsfromimageembeddingstothevocabularyandclassifyhallucinations. We
+removehallucinationsby(c)linearlyeditingthemoutofthelatentrepresentations.
+Weuseourinterpretationandeditingapproachforthreetasks. First,weutilizethelogitlensonimage
+featurestodetecthallucinationsintheimage. WefindthatitimprovesmAPby22.45%and47.17%
+intwoVLMs. Then,wecombineoureditinganddetectionmethodtoerasehallucinationsfromthe
+VLM’sinternalrepresentations,reducinghallucinationsupto25.7%onstandardbenchmarks,while
+preserving accuracy inimage captioning. Finally, weuse the logit lensto localize objectsin the
+imagefeatures. Wefindthatourspatialmappingprovidescomparableperformancetostate-of-the-art
+zero-shotsegmentationmethods. Ourresultsindicatethatunderstandingtheinternalrepresentations
+ofVLMscanbeachievedandusedtorepairmodelhallucinationsandintroducenewcapabilities.
+2 RELATED WORK
+2.1 INTERPRETINGLATENTREPRESENTATIONSINLANGUAGEMODELS
+Interpretingtheinnerworkingsoflargelanguagemodelsenablesfine-grainedimprovementofthe
+languagemodelbehavior. Recentworkinvolvesutilizingthemodel’sattentionmaps(Kobayashi
+etal.,2020;Cheferetal.,2021),activationpatterns(Conmyetal.,2023;Mengetal.,2023;Bronzini
+etal.,2024),andlatentrepresentations(Ghandehariounetal.,2024;Cunninghametal.,2023;Bricken
+etal.,2023)tounderstandtheirbehaviorwithapplicationssuchasearlyexiting(Halawietal.,2024)
+andeditingorerasingthemodel’sknowledge(Daietal.,2022;Ravfogeletal.,2024). Oneclassof
+methodsprobetheVLMsknowledgewithlinearclassifiers(Hewitt&Manning,2019;Tuckeretal.,
+2021;Lietal.,2024;Belroseetal.,2023). Thelogitlensmethod(nostalgebraist,2020),whichwe
+willuseinouranalysis,findstheoutputdistributionoverthevocabularyofthelanguagemodelat
+intermediatelayerswiththemodel’sownunembeddingmatrix. WeapplythisapproachtoVLMsto
+interpretthemodel’sunderstandingofvisualinformationinthemodel’stextualvocabulary.
+2.2 INTERPRETINGLATENTREPRESENTATIONSINVISIONMODELS
+Understandingtheinternaldynamicsofvisionmodelsiscriticalforensuringsafetyandreliabilityin
+multimodalsystems. Earlyworksinthisareafocusedonproducingsaliencymaps(Petsiuketal.,
+2018),analyzingindividualneurons(Bauetal.,2020;2019;Dravidetal.,2023),andtrainingnetworks
+tomaplatentrepresentationstoconcepts(Esseretal.,2020). Withtheemergenceoftransformer-
+basedvisionmodelslikeCLIP(Radfordetal.,2021),recentmethodsexplainlatenttokens (Chen
+etal.,2023)andtherolesofattentionheadsandneuronswithnaturallanguage(Gandelsmanetal.,
+2024b;a;Shahametal.,2024). FewworkscurrentlyinterprettheinternalcomputationofVLMs:Palit
+etal.(2023)developaneuroncausaltracingtool;Schwettmannetal.(2023)identifiesmulti-modal
+neurons;andHuoetal.(2024)ablatesdomain-specificneuronstoimprovevisionquestion-answering.
+2
+ledoM
+egaugnaL
+egami
+tupnI
+ledoM
+egaugnaLWhereaspastpapershaveprimarilystudiedthemechanisms(e.g. neuronanalysis)thatdriveVLMs,
+wefocusoninterpretingandeditingtheirlatentrepresentationsforreal-worldapplicability.
+2.3 DETECTINGANDREDUCINGVLMHALLUCINATIONS
+WhileVLMperformancesonimagecaptionandvisualquestionansweringarecontinuallyimproving,
+theycontinuetohallucinatefactsthatarenotsupportedbythevisualinput. Existingmethodsfor
+detectinghallucinationsinlanguagemodelsduringinferenceutilizelatentrepresentations(Heetal.,
+2024; Su et al., 2024), activations (Chen et al., 2024), and output logit values (Varshney et al.,
+2023). SAPLMA(Azaria&Mitchell,2023)trainsahallucinationclassifierontheinternallatent
+representations. LUNA (Song et al., 2024) learns a transition function on latent representations
+andidentifiesabnormaltransitions. Varshneyetal.(2023)usesthefinallayerlogitstoscorethe
+model’sconfidenceinanentityorkeywordandintervenesbyinstructingthemodeltoeitherrepair
+orremovethehallucinatedinformation. AmongVLMs,LURE(Zhouetal.,2024)isafine-tuned
+revisormodeltodetectandreducehallucinations. OPERA(Huangetal.,2024)usesthemodel’s
+internalattentionweightstodetectandsuppresspatternsthatalignwiththebeginningofhallucinated
+phrases. Incontrasttothesemethods,weleveragetheinternalimagerepresentationsintheVLMsfor
+hallucinationreductionandforzero-shotsegmentation.
+3 EXTRACTING KNOWLEDGE FROM VLMS
+WestartbyintroducingVLMsandthegeneralframeworkoftheirarchitecturesinmostrecentwork.
+Wethendescribeourapproachfordecodingthefeaturesinintermediateimagerepresentationsin
+VLMsintotext,andapplyittotwotypesofVLMs. Surprisingly,thisapproacheffectivelyprobesthe
+knowledgeaboutobjectspresentinimagesandcanlocalizeobjectswithintheimage.
+3.1 PRELIMINARIES
+Vision-Language Models. The architecture of recent state-of-the-art VLMs for text generation
+typically involves three main components: a vision encoder to process image inputs, a mapping
+network to map image features to image embeddings, and an autoregressive language model to
+processtheimageembeddingsandpromptembeddingstogeneratetext. Wefocusontworecent
+state-of-the-artVLMs: LLaVA1.5(Liuetal.,2024)andInstructBLIP(Daietal.,2023). Weuse
+7Bversionsofboththesemodels. LLaVAutilizesafrozenCLIPvisionencoderandanMLPas
+amappingnetworktoprojectthevisionencoderoutputsintoimageembeddingsforthelanguage
+model. TheMLPispre-trainedonalargevision-languagedatasetandboththeMLPandthelanguage
+modelarefine-tunedonaninstruction-focuseddataset. Incontrast,InstructBLIPfreezesboththe
+visionencoderandthelanguagemodelandonlytrainsthemappingnetwork.
+Notations. Forthepurposesofourwork,wedefinetheVLMarchitectureasfollows. Thevision
+encoderprocessesaninputimagetoproducenimagefeatures. Theseimagefeaturesareprojected
+to embedding space via the mapping network, resulting in n d-dimensional image embeddings
+{k : k ∈ Rd,i = 1,...,n}. Forthelanguagemodel, theentiresetoftexttokensconstitutesthe
+i i
+vocabularyV withvocabularysize|V|. Theimageembeddings,followedbymtextembeddings
+{t :t ∈Rd,i=1,...,m}oftheprompttokens,areinputtothelanguagemodelthroughLdecoder
+i i
+layers. For an input embedding x ∈ Rd, we define h (x) ∈ Rd to be the latent representation
+l
+forembeddingxatlayerl ∈ {1,...,L}, theoutputofthedecoderlayer, whichisconditionedon
+previoustokensoftheinputsequence. AnunembeddingmatrixW ∈R|V|×dmapsthelastlatent
+U
+representationh (t )toaprobabilitydistributionoverthevocabularyforthenexttokent .
+L m m+1
+LogitLens. LogitLensisaninterpretabilitymethodforintermediatelanguagemodelrepresenta-
+tionsintroducedinSection2.1. ThelogitlenstechniqueappliestheunembeddingmatrixW to
+U
+latentrepresentationsh (x)intheLintermediatelayersinthelanguagemodeltoretrievethelogit
+l
+distributionsoverthevocabulary.
+f (t )=W ·h (t )=[logit ,logit ,logit ,...,logit ] (1)
+l m U l m 1 2 3 |V|
+Thisisthelogitdistributionrepresentingthepredictionsofthemodelafterl layers, wherelogit
+j
+correspondstothetokenj inthevocabulary.
+34×103 InstructBLIP ×103 LLaVA
+Not in Image 6 Not in Image
+3
+In Image In Image
+4
+2
+1 2
+0 10 4 10 3 10 2 10 1 100 0 10 2 10 1 100
+Internal Confidence Internal Confidence
+Figure2: Comparisonofinternalconfidenceinobjectspresentandnotpresentintheimage.
+WeexaminetheinternalconfidenceofCOCOobjectsthatexistanddonotexistintheimagewithin
+intermediateVLMimagerepresentations. Weobservethatobjectsthatdonotexistintheimagehave
+lowerinternalconfidence.
+3.2 APPLYINGLOGITLENSONVLMS
+Weapplythelogitlenstoprobethelanguagemodelasitprocessestheimagerepresentations. This
+enablesustointerprettheimagefeatures’outputdistributionsastheyaretransformedbythelayers
+ofthelanguagemodelandlocalizeobjectsspatiallywithintheimage.
+Extractingprobabilitydistributionsfromintermediateimagerepresentations. Weapplylogit
+lensontheimagerepresentationsintheVLM.Foragivenimageembeddingk ,wefindthelatent
+i
+representationoftheimageembeddingatlayerl,h (k ),takingthelogitlenstogettheprobability
+l i
+distributionoverthevocabulary,softmax(f (k )). Wedefineanobjecto,anobjectwordcomposedof
+l i
+tokensfromthevocabulary. Weinspecttheprobabilityofaspecificobjecto,softmax(f (k )) . For
+l i o
+multi-tokenobjects,wetakethemaximumprobabilityvalueovertheobjecttokens. Thisprovidesa
+generalizableframeworkforanalyzingspecificlatentimagerepresentationsviatext,withrespect
+tospecificobjects. Next,wefindthemaximumprobabilityoverallimagerepresentationsoverall
+layers. Forobjecto,wecompute:
+c = max{softmax(f (k )) } (2)
+o l i o
+1≤l≤L
+1≤i≤n
+We define c as the VLMs internal confidence of an object o existing in the image: the highest
+o
+probabilityofobjectpresenceacrossnimagerepresentationsthroughLlayersofthelanguagemodel.
+Comparingtheinternalconfidenceofpresentandnotpresentobjects. Todetermineifinternal
+confidenceprovidesmeaningfulinformationaboutobjectsintheimage,weexaminec forobjects
+o
+present and not present in an image. We use InstructBLIP and LLaVA to caption 5000 random
+COCO2014imagesintheKarpathyvalidationsplit(Linetal.,2015)anddeterminec forall80
+o
+COCOobjects,onlyafewofwhicharepresentineachimage. Sincetherearemanymoreobjects
+notpresentthanpresent,werandomlysampleasubsetoftheinternalconfidencesforobjectsnot
+present. Figure2exhibitstheinternalconfidencesforobjectspresentandnotpresentintheimage.
+We empirically find that the VLMs’ internal confidences are higher for present objects than not
+presentones. WeusethisclaimlatertoclassifyobjectsashallucinationsinSection5.1.
+Objectlocalization. Giventhatthelanguagemodelcandistinguishbetweenobjectspresentandnot
+presentinanimage,weexaminewhetheritcanattributehighobjectinternalconfidencetospecific
+patchesinanimage. Foreachimageembeddingk innimageembeddings,wefindthemaximum
+i
+softmaxprobabilityofanobjectwithinthelayersofthemodel,max {softmax(f (k )) }.Using
+1≤l≤L l i o
+theseinternalconfidencevalues,welocalizetheobjectsintheimagepatches,eachofwhichmapsto
+animageembedding. WefocusonLLaVAforthistask,sinceitsimageencoderpreservesthespatial
+mappingofimagepatchestoimagefeatures.
+Weobservethatimagerepresentationsthatexhibithigherinternalconfidenceforspecificobjects
+correspondtotheimagepatchesinwhichthoseobjectsarevisuallypresent(examplesinFigure3).
+Buildingonourpreviousobservation,weseethattheintermediateimagerepresentationssemantically
+align with latent token representations of objects present in them while maintaining their spatial
+locality. Weusethisuniquefindingforzero-shotsegmentationinSection5.3.
+4
+ycneuqerF ycneuqerFInput image “catˮ probabilities “catˮ localization “bicycleˮ probabilities“bicycleˮ localization
+Input image “bottleˮ probabilities “bottleˮ localization “bowlˮ probabilities “bowlˮ localization
+Figure3: Localizingobjectsusinginternalconfidencevalues. Wefindtheprobabilitiesofobjects
+throughlayersofthelanguagemodelforeveryimageembeddinginLLaVA.Weusethehighestlayer
+probabilityperimageembeddingtolocalizeanobjectwithintheimage.
+Whilethemodelisnotdirectlytrainedtomaptheimagerepresentationsclosertothetextrepresen-
+tationsofobjectswithinthem, wecanunembedtheimagerepresentationsinthetextvocabulary
+forlocalizationandfinddifferencesininternalconfidenceforpresentandhallucinatedobjects. In
+Section5.1,wewillusethisobservationforvariousapplicationsincludinghallucinationdetection
+andzero-shortsegmentation.
+4 ERASING KNOWLEDGE FROM VLMS
+Recognizingthatimageembeddingsaredirectlyinterpretable(Section3.2),weedittheseembeddings
+toerasethepresenceofobjectsfromimagecaptions. Weproposealineareditingalgorithmthat
+subtractsthetextembeddingofatargetobjectfromallimageembeddings. Whenappliedonsingular
+andmultipleobjectremovals,wefindthatiteraseshallucinatedobjectsmoreeffectivelythancorrectly
+detected(CD)objects(i.e. realobjectsthatthemodelcorrectlydetects).
+4.1 ERASINGOBJECTSFROMIMAGEREPRESENTATIONS
+Wepresentanalgorithm,PROJECTAWAY(Fig-
+Algorithm1: PROJECTAWAY
+ure4),thatorthogonalizesimagerepresentations
+withrespecttotextrepresentationsinorderto Input: AsetofimageembeddingsK,textem-
+eraseobjectsinimagecaptions,applyingitto
+bedding⃗t,andweightfactorα
+removeobjectsoneatatimeandallatonce. Output: Asetofmodifiedimageembeddings
+K′projectedawayfromthetextembedding
+Givenanimageandanobjecttoremove,weedit Initialization: K′ ←∅
+the latent representations h lI(k i) at a hidden for⃗k ∈K do
+layerlI acrossallimageembeddingsk i. Wedo p←⃗k·⃗t
+notmodifyanylatentrepresentationsoutsideof
+ifp>0then
+thosebelongingtoimagefeatures. Wecompute K′ ←K′∪{⃗k−α· p ·⃗t}
+the dot product, p, of h lI(k i) and the object’s ∥⃗t∥2
+2
+textembedding⃗t,subtractingaweighted⃗tfrom else
+K′ ←K′∪{⃗k}
+h (k ) only if the dot product is positive. At
+lI i
+endif
+α=1,PROJECTAWAYisequivalenttoorthogo-
+endfor
+nalizingtheimagerepresentationswithrespect
+tothetextrepresentation. Tocomputetextrep-
+Figure 4: Our editing algorithm erases the pres-
+resentation⃗t,wepasstheobject(e.g. “hotdog”)
+enceofanobjectfromimageembeddingsbyor-
+intotheVLM’stextmodelandextracth (t )
+lT -1 thogonalizingthemwithrespecttotheobject’stext
+athiddenlayerlT,wheret isthelasttokenof
+-1 embedding.
+theobject. Weusethelasttokenoftheobjectto
+capturethewholeoftheobject’smeaning.
+5EditScope Model IndividualRR(%) MassRR(%) CDchange(%) C ↓ C ↓
+i s
+InstructBLIP - - - 15.0 54.1
+Noedits
+LLaVA - - - 14.6 51.1
+InstructBLIP 83.3 74.3 +0.07 8.94 33.2
+Hallucinations
+LLaVA 86.0 72.8 +0.01 11.2 35.5
+InstructBLIP 16.2 15.0 -2.2 17.3 58.3
+CD
+LLaVA 6.9 8.3 -1.6 15.2 52.4
+Table1: Removingmentionedobjectsindividually&in-mass. UsingPROJECTAWAY,weremove
+hallucinatedobjectsandobservehighhallucinationreductionwithCHAIR,mass-removalrate(Mass
+RR),andindividualremovalrate(IndividualRR).Wealsoremovecorrectlydetected(CD)objects
+butfindthattheyaremoreresistanttolinearediting. DenoteCHAIR asC andCHAIR asC .
+S S I I
+4.1.1 REMOVINGOBJECTSONEBYONE
+WeevaluatethePROJECTAWAYalgorithm’seffectivenessaterasingindividualobjectsfromcaptions
+acrossmultipleimagesandobjects.
+Experimentalsetting. Weapply PROJECTAWAY on5000 randomimagesfromthe COCO2014
+trainingsetonallmentionedCOCOobjects(i.e. hallucinationandCD)individuallyandmeasurethe
+removalrateatwhichobjectsnolongerappearinthecaption. ForInstructBLIP,weset(lI,lT,α)=
+(1,2,1.5). ForLLaVA,weset(lI,lT,α) = (19,21,3.5). Theseparametersarefixedirrespective
+of image and are chosen for their maximal effect (see ablations in Section 4.2). To differentiate
+hallucinations from CD, we compute CHAIR (Rohrbach et al., 2019), an evaluation criteria that
+comparesmodel-generatedcaptionstoground-truthhumanannotations. CHAIRprovidestwomain
+scores,CHAIR andCHAIR ,thatquantifyhallucinationsforinstancesandsentences,respectively:
+I S
+|{captionswithhallucinatedobjects}| |{hallucinatedobjects}|
+CHAIR = ,CHAIR = (3)
+S |{allcaptions}| I |{allobjectsmentioned}|
+Results. Table 1 shows that PROJECTAWAY is significantly more effective in erasing individual
+hallucinatedobjectsatanindividuallevelthanCDobjectsforbothInstructBLIPandLLaVA.Along
+withtheinsightthathallucinatedobjectshavelowersoftmaxscores(Figure2),theseresultssuggest
+thathallucinatedobjectsmanifestmoreweaklyinimageembeddingsandarehenceeasiertoremove
+thanCDobjects.
+4.1.2 MASS-REMOVINGOBJECTS
+WeiterativelyapplyPROJECTAWAYtoasetofobjects,followingthesameexperimentalsetupand
+observingsimilarlydifferentremovalratesforhallucinatedobjectsandCDobjects.
+Mass-removinghallucinations. Wemass-removehallucinationsidentifiedwithgroundtruthan-
+notationsusing PROJECTAWAY. Table1showsthateditingoutallthehallucinationsofanimage
+yieldsasimilarremovalrateasindividuallyeditingoutand,importantly,thaterasinghallucinated
+objects together does not interfere with each other. We achieve a hallucination reduction rate of
+41.3%forInstructBLIPand23.3%forLLaVA(seeTable4). Recallcountslightlyincreasesforboth
+models,indicatingthatcaptionaccuracyispreserved. Thismaybebecauseremovedhallucinations
+arereplacedwithobjectsthemodelismoreconfidentin. QualitativeresultsareinFigure5.
+MassremovingCD.WesimilarlyfindthatapplyingPROJECTAWAYcansuccessfullyremoveCD
+objectswheneditedalltogetherinTable1. Furthermore,CHAIRscoresminimallychange,which
+indicatesthatthismass-removalmerelyerasesobjectpresencewithouterodingcaptionaccuracy.
+Whiletheremovalrateislowerthanforhallucinatedobjects,thisinsightprovesusefulwhenwe
+applyPROJECTAWAYforhallucinationreductioninSection5.2.
+4.2 ABLATIONSTUDY: MASS-REMOVINGHALLUCINATIONS
+WeperformablationsonparametersofPROJECTAWAYtoimproveobjectremovalrateforerasing
+hallucinationsin-mass.
+6Before: In the image, a group of four young men Before: The image features a delicious slice Before: The image features a black and white cat sitting
+are gathered around a picnic table, posing for a of pizza sitting on a white paper plate. The in the middle of a cluttered living room floor. The cat is
+photo. They are holding frisbees in their hands pizza is topped with various ingredients, surrounded by various items such as clothes, bags,
+and seem to be having a good time together. including pepperoni, olives, and mushrooms, books, and a backpack. There are two chairs placed
+The picnic table is located in the middle of the making it a mouth-watering dish. The plate near the cat, one on the left side and the other on the
+scene, providing a central point for the group's is placed on a table, adding to the overall right side of the room. In addition to the cat, there are
+gathering. There are several chairs placed presentation of the pizza. In addition to the two people visible in the scene. One person is standing
+around the table, indicating that the group may pizza slice, there are several other items on on the left side of the room, while the other person is
+have been enjoying a meal or socializing while the table, including two cups, a fork, a located on the right side of the room. Both individuals
+playing with the frisbees. A car can be seen knife, and a spoon. These items add to the seem to be engrossed in their own activities, possibly
+parked in the background, possibly belonging to overall atmosphere of the scene, creating a unaware of the cat's presence.
+ 
+one of the group members.
+
+ cozy and inviting setting for enjoying the
+pizza.
+
+ After: The image depicts a black and white cat sitting in
+After: A group of four young men are gathered the middle of a cluttered room. The cat is surrounded by
+around a picnic table, posing for a photo while After: The image features a delicious slice of a variety of items, including suitcases, backpacks,
+holding frisbees. They seem to be enjoying their pizza on a paper plate, placed on a dining clothes, and shoes. There are at least three suitcases
+time together, possibly playing a friendly game table. The pizza is topped with various scattered around the room, with one located closer to the
+of frisbee. The picnic table is located in the ingredients, including pepperoni, olives, and cat and the other two further away. A backpack can be
+middle of the scene, providing a convenient spot mushrooms, making it a mouth-watering seen on the left side of the room, and a pair of shoes can
+for the group to gather and play. In addition to meal. The pizza slice dominates the scene, be spotted on the right side. In addition to these items,
+the frisbees, there are several backpacks taking up most of the space on the paper there are several clothes spread out on the floor,
+scattered around the area, suggesting that the plate. The plate is placed on top of a dining including a shirt, a jacket, and a pair of pants. The
+group may have come prepared for an outdoor table, which can be seen in the background. cluttered environment suggests that the room may have
+adventure. . been recently used for packing or preparing for a trip.
+Figure 5: Qualitative results for mass object removal. We present example images and their
+captionsaftermass-removinghallucinations(red)withPROJECTAWAY.,whichcaneffectivelyremove
+hallucinationswhilepreserving,evenincreasing,correctlydetectedobjects(green).
+Experimentalsetting. WeablatethethreeparametersofPROJECTAWAY: layerlI toeditat,layer
+lT toretrievethetextrepresentation, andweightfactorα. AtlT = −1, weaveragetogetherthe
+object’sconstituenttokenembeddings. AtlI =−1,weedittheimageembeddingsdirectlyinputted
+tothetextmodel. Weevaluateacross500trainingsamplesfromCOCO2014thathaveatleastone
+hallucination.
+Hiddenlayers. Figure6showshallucinationreductionrateonLLaVAfrommass-removinghalluci-
+nationsoneverycombinationoflI andlT (eachfrom-1to31). Asacoreconcernisthatediting
+erodescaptionaccuracy,wegrayoutanycombinationthatreducesCDobjects. ForInstructBLIP
+(seeFigure10),thebestparameters(lI =1,lT =2)reduceshallucinationsby38.5%. ForLLaVA,
+ourbestparameters(lI =19,lT =21)reducehallucinationsby25.7%,andthemiddlelayersare
+thebesttoeditandextractlatenttextembeddingsfrom. Ourresultsalsoprovideawiderangeof
+reasonableparameteralternativestouseifthisreductionratedoesnotgeneralizebeyondoursamples.
+Weightfactor. Usingthebest-reducedhiddenlayers,weablatetheweightfactorαforPROJECT-
+AWAYacrossthesame500randomlyselectedCOCOimages. Figure7showsthatasαincreases,
+hallucinationsareremovedatahigherrate,andtheoverallhallucinationcountdropssignificantly. At
+highα,weobservethroughanecdotalexamplesthatcaptionsbecomenonsensical,asquantitatively
+shownbythecompletelossofbothcorrectlydetectedandhallucinatedobjectsfromthecaption.
+Therefore,asapre-caution,weonlyselectweightfactorsthatdonotreduceCDobjectswhenwe
+applyPROJECTAWAYtoerasehallucinatedobjects.
+5 APPLICATIONS
+5.1 HALLUCINATIONDETECTION
+When extracting knowledge from VLMs in Section 3.2, we found that applying logit lens on in-
+contextimagerepresentationsexhibitusefulinformationaboutvisualobjectspresentintheimage.
+Usingtheseobservations,wepresentanapproachforobjectpresenceclassificationthatonlyrelies
+ontheVLMsownparameters. Weutilizetheinternalconfidencec valuetoclassifyobjectpresence,
+o
+725
+100
+20
+80
+15
+60
+10
+40
+Hallucinations
+5 20 Correctly detected
+Mass removal rate
+0
+0 0 2 4 6 8 Weight factor
+-1 1 3 5 7 9 11 13 15 17 19 21 23 25 27 29
+Text embedding hidden layer
+Figure6: HiddenlayerablationsforLLaVA. Figure 7: Weight ablations for LLaVA. We
+Wetrackhallucinationreduction(%)acrossdif- vary the weight factor α and measure changes
+ferentlayerstoeditatandextractlatentembed- in correctly detected objects, removal rate, and
+dingsforthetextembedding,crossingout(red) hallucinationreduction. Weobserveadeclinein
+parametersfromconsiderationwherethereisa hallucinationsasweightgrowsandmarkaweight
+decreaseincorrectlydetectedobjects. wherethereisnolossincorrectlydetectedobjects.
+InstructBLIP LLaVA
+ROC Curve PR Curve ROC Curve PR Curve
+1 1 1 1
+Ours (0.83 AUC) Ours (AP=0.92) Ours (AUC=0.68) Ours (AP=0.87)
+Baseline (AUC=0.55) Baseline (AP=0.76) Baseline (AUC=0.47) Baseline (AP=0.74)
+0 0 0 0
+0 1 0 1 0 1 0 1
+False Positive Rate Recall False Positive Rate Recall
+Figure8: ObjectPresenceClassificationCurvesforInstructBLIPandLLaVA.Weshowthe
+Precision-RecallandROCcurvesofourconfidencemeasureforpresentobject-hallucinationclas-
+sificationontheCOCOtrainingsubset. Classifyingobjectpresencewiththeinternalconfidence
+outperformsthebaseline,indicatingthatthelanguagemodel’simagerepresentationsknowwhich
+objectsarehallucinationsandwhicharetrulypresent.
+sincetheinternalconfidenceforobjectsthatarenotpresentintheimage,orhallucinated,arelower
+withintheimagerepresentations.
+Experimental setting. We evaluate the strength of the internal confidence c as an indicator of
+o
+objectpresence. Wesample5000imagesfromtheMSCOCOtrainingset,usingtheimagecaptioning
+objectivetocaptionmethodswithbothInstructBLIPandLLaVA.Weusethec forpresentobjects
+o
+and hallucinations within the captions generated by each VLM. We assess how well the internal
+confidence aligns with the ground truth labels of object presence, where a negative sample is a
+hallucinationandapositivesampleisapresentobject.
+Baseline. Asabaseline,weusethemaximumoutputprobabilityoftheobject’stokens. Thisisthe
+confidence of the model prediction. Previous works such as Zhou et al. (2024) have found that
+hallucinationsoccurmorefrequentlyonobjectscharacterizedbyhighuncertaintyduringgeneration.
+Results. WepresentquantitativeresultsinFigure8andAppendixA.5. Weshowqualitativeresults
+forLLaVA(Figure12)andInstructBLIP(Figure13)intheAppendix. Wefindthatutilizinginternal
+confidencetoclassifyobjecthallucinationsprovidesa47.17%improvementinmAPinInstructBLIP
+and 22.45% in LLaVA. Furthermore, the ROC AUC improves over the baseline by 50.10% in
+InstructBLIPand44.68%inLLaVA,indicatingstrongerobjectpresenceclassification.
+8
+reyal
+neddih
+detidE
+etaR
+evitisoP
+eurT
+92725232129171513111
+9
+7
+5
+3
+1
+1-
+noisicerP
+etaR
+evitisoP
+eurT
+egnahc
+egatnecreP
+noisicerPModel Method CHAIR ↓ CHAIR ↓ HallucinatedObjects↓
+i s
+Greedy 57.0 23.3 512
+Nucleus 58.0 24.0 508
+InstructBLIP BeamSearch 53.4 14.6 564
+OPERA 45.6 13.9 472
+Ours 43.8 12.5 419
+Greedy 49.2 14.2 532
+Nucleus 55.8 17.1 618
+LLaVA BeamSearch 52.4 15.0 583
+OPERA 44.8 12.8 462
+Ours 42.0 12.2 444
+Table2: Hallucinationinterventionperformance. Wemass-removehallucinationsdetectedbythe
+methodinSection5.1andoutperformotherbaselines. Weobserveaconsiderabledropintheraw
+countofhallucinatedobjects.
+5.2 HALLUCINATIONREMOVAL
+We use the mass editing technique to remove hallucinations detected by the prior method. Sec-
+tion4.1.2successfullyremovesasignificantportionofhallucinationsbutpresupposesaknowledge
+ofwhatthehallucinationsare. Wethresholdontheinternalconfidenceofeachobjecttoidentifyhal-
+lucinationsandmass-removethemusingPROJECTAWAY. Ourchosenthresholdprioritizesprecision
+overrecall(i.e. weallowclassificationofsomeCDobjectsashallucinations)becauseCDobjectsare
+lessaffectedbytheremovalmethod,asshowninSection4.1.2.
+Experimentalsetting. Wethresholdhallucinationsasc <0.2forInstructBLIPandc <0.1for
+o o
+LLaVA.Basedonpriorablations(Section4.2),weselect(lI =1,lT =2,α=1.5)forInstructBLIP
+and(lI =19,lT =21,α=3.5)forLLaVA.Ourpromptis“Pleasedescribethisimageindetail.”
+Baselines. Sinceourmethodintervenesduringthedecoderstep,wecompareourmethodwith3
+standarddecodingalgorithms. Greedydecodingpredictsthenexttokenbasedonthehighestlogit
+probability. Beam search maintains a tree of beams and selects the best beam at generation end.
+Nucleus sampling selects the next token from a set of high probability tokens whose cumulative
+probability reaches a threshold p. We also evaluate against OPERA (Huang et al., 2024), which
+mitigateshallucinationsbyaddinganovertrustpenaltyduringdecodergeneration. Wesetp=0.9
+fornucleussampling. WeusebeamsearchinourmethodandunifyN =5forthebaseline.
+beam
+Results. Weapplytheseparametersto500COCOimagesfromtheKarpathyvalidationset. We
+provide qualitative results in Figure 15 and Figure 14. Quantitative results in Table 2 show that
+weoutperformourbaselinesandreducehallucinationsby25.7%onInstructBLIPand23.8%on
+LLaVA compared to beam search. Our approach achieves a similar hallucination reduction rate
+as Section 4.1.2, despite not precisely differentiating hallucinations and some CD objects being
+incorrectly edited out. Notably, our method relies on no training or external models, effectively
+offeringa“freelunch.”
+5.3 ZERO-SHOTSEGMENTATION
+BuildinguponourfindingsinSection3.2,weutilizetheinternalconfidenceperimagefeaturefor
+zero-shotimagesegmentation. Thisapplicationleveragesthespatialinformationencodedinthe
+imagerepresentationsanddemonstrateshowVLMsinternallyrepresentandlocalizeobjectswithin
+images.
+Method. Our approach leverages the spatial correspondence between image patches and their
+associatedimageembeddings. WeuseLLaVAtogeneratethenameoftheclassintheimageandwe
+focusontheinternalconfidenceofthatclassperimagepatch. Wetakethemeaninternalconfidence
+fortokenscomprisingaclassword. Weresizethesetof24×24internalconfidencevaluesperimage
+patchbackintoafixedimagesizeof336×366pixels. Wethenapplyathresholdtotheseconfidence
+valuestobinarizethemintoaforeground/backgroundsegmentationfortheobjectintheimage.
+9Model Method PixelAcc.↑ mIoU↑ mAP↑
+rawattention(CLIP) ImageEncoder 69.81 45.19 77.30
+TextSpan(Gandelsmanetal.,2024b) ImageEncoder 75.57 53.60 80.22
+rawattention(VLM) VLM 67.28 39.27 73.96
+Ours VLM 76.16 54.26 79.90
+Table3: SegmentationPerformanceonImageNet-segmentation. Localizingobjectsusingtheir
+probabilitieswithintheimagerepresentationsresultsinmoreaccuratezero-shotsegmentationthan
+previousvision-encoders-basedandVLM-basedmethods.
+Baseline. Asabaseline,weextracttheattention Input Image
+valuesofgeneratedtokenswiththeimageem-
+beddingsfromLLaVA.Wealsocomparetothe
+segmentation method introduced by Gandels-
+manetal.(2024b),whichutilizestheattention
+heads of the image encoder without the addi- raw attention (VLM)
+tionalVLMprocessing,usingthesameimage
+encoder(CLIP-ViT-L/14at336px).
+Results. We evaluate our method on the Im-
+agenet validation set. Qualitative results are
+showninFigure9andquantitativecomparisons Ours
+withthebaselinesinSection5.3. Weimprove
+mAPby8.03%overusingtheVLMsrawatten-
+tionvaluesandprovidebetterand/orcomparable
+performance to other state-of-the-art methods
+that utilize just the image encoder. While the Figure9: Zero-shotsegmentation. Warmerareas
+VLM is not directly trained for segmentation, indicatehigherinternalconfidencefortheclassat
+ourtechniquerevealsthatitstillencodessignifi- thatimagepatch. Webinarizethesevalueswitha
+cantspatialinformationaboutobjectswithinits thresholdtogeneratesegmentations.
+intermediateimagerepresentations.
+6 DISCUSSION AND LIMITATIONS
+We interpreted VLMs’ image representations through the language model layers and discovered
+thatlineareditingoftheserepresentationscanselectivelyremoveobjectinformationviaasimple
+orthogonalization.Ourfindingsenabledhallucinationreductionandimprovedzero-shotsegmentation.
+Wepresenttwolimitationsofourworkandconcludewithfuturedirections.
+Multi-token objects. Our method simplifies the use of object words that may be composed of
+multipletokens,suchasbytakingthemaxinternalconfidenceoverobjecttokensorutilizingthe
+averagetokenembeddingforediting. Thiscanintroducenoisetotheinternalconfidenceifcertain
+tokensarecommoninmultipledifferentwordsandleadtoanapproximationoftheobject’slatent
+representationswhenediting.
+Fine-grainededits. Theeditingapproachmaystrugglewithhighlyabstractorlongersentencesthat
+involveattributesorinteractionsofobjects. Removingafullsentence,forexample,isnotsomething
+weassessedinthispaper,sinceourfocusisontheremovalofindividualobjects.
+Futurework. WhileourfocuswasoninterpretingobjectsandobjecthallucinationsinVLMs,we
+believethatourapproachcanbeextendedtootherkeyelementsofvisualscenes,suchaspeople,
+attributes,andactions. Wealsofocusedonobjectremoval,butwebelievethateditingcanalsobe
+extendedtoinjectobjectsintoacaption(byaddinginsteadofsubtractingthetextembedding). We
+hopetoexploretheapplicationsofourapproachinothermultimodalarchitectures. Ourinsights
+may help design better VLMs that are more robust to hallucinations and have improved spatial
+understanding. Weplantoexplorethesedirectionsinourfuturework.
+106.1 ACKNOWLEDGMENTS
+WethankKayoYinforhercommentsandfeedbackonourpaper. YGissupportedbytheGoogle
+Fellowship. Authors,aspartoftheiraffiliationwithUCBerkeley,weresupportedinpartbythethe
+BerkeleyArtificialIntelligenceResearch(BAIR)commonsprogram.
+REFERENCES
+Amos Azaria and Tom Mitchell. The internal state of an LLM knows when it’s lying. In
+Houda Bouamor, Juan Pino, and Kalika Bali (eds.), Findings of the Association for Compu-
+tational Linguistics: EMNLP 2023, pp. 967–976, Singapore, December 2023. Association
+for Computational Linguistics. doi: 10.18653/v1/2023.findings-emnlp.68. URL https:
+//aclanthology.org/2023.findings-emnlp.68.
+JinzeBai,ShuaiBai,ShushengYang,ShijieWang,SinanTan,PengWang,JunyangLin,ChangZhou,
+andJingrenZhou. Qwen-vl: Aversatilevision-languagemodelforunderstanding,localization,
+textreading,andbeyond,2023. URLhttps://arxiv.org/abs/2308.12966.
+DavidBau,Jun-YanZhu,HendrikStrobelt,BoleiZhou,JoshuaB.Tenenbaum,WilliamT.Freeman,
+and Antonio Torralba. Gan dissection: Visualizing and understanding generative adversarial
+networks. InProceedingsoftheInternationalConferenceonLearningRepresentations(ICLR),
+2019.
+DavidBau, Jun-YanZhu, HendrikStrobelt, AgataLapedriza, BoleiZhou, andAntonioTorralba.
+Understandingtheroleofindividualunitsinadeepneuralnetwork. ProceedingsoftheNational
+AcademyofSciences,2020. ISSN0027-8424. doi: 10.1073/pnas.1907375117. URLhttps:
+//www.pnas.org/content/early/2020/08/31/1907375117.
+NoraBelrose,ZachFurman,LoganSmith,DannyHalawi,IgorOstrovsky,LevMcKinney,Stella
+Biderman,andJacobSteinhardt. Elicitinglatentpredictionsfromtransformerswiththetunedlens,
+2023. URLhttps://arxiv.org/abs/2303.08112.
+TrentonBricken,AdlyTempleton,JoshuaBatson,BrianChen,AdamJermyn,TomConerly,Nick
+Turner,CemAnil,CarsonDenison,AmandaAskell,RobertLasenby,YifanWu,ShaunaKravec,
+Nicholas Schiefer, Tim Maxwell, Nicholas Joseph, Zac Hatfield-Dodds, Alex Tamkin, Karina
+Nguyen, Brayden McLean, Josiah E Burke, Tristan Hume, Shan Carter, Tom Henighan, and
+ChristopherOlah. Towardsmonosemanticity: Decomposinglanguagemodelswithdictionary
+learning. Transformer Circuits Thread, 2023. URL https://transformer-circuits.
+pub/2023/monosemantic-features/index.html.
+Marco Bronzini, Carlo Nicolini, Bruno Lepri, Jacopo Staiano, and Andrea Passerini. Unveiling
+llms: Theevolutionoflatentrepresentationsinadynamicknowledgegraph,2024. URLhttps:
+//arxiv.org/abs/2404.03623.
+HilaChefer,ShirGur,andLiorWolf.Genericattention-modelexplainabilityforinterpretingbi-modal
+andencoder-decodertransformers,2021. URLhttps://arxiv.org/abs/2103.15679.
+Chao Chen, Kai Liu, Ze Chen, Yi Gu, Yue Wu, Mingyuan Tao, Zhihang Fu, and Jieping Ye.
+Inside: Llms’ internal states retain the power of hallucination detection, 2024. URL https:
+//arxiv.org/abs/2402.03744.
+HaozheChen,JunfengYang,CarlVondrick,andChengzhiMao. Interpretingandcontrollingvision
+foundation models via text explanations, 2023. URL https://arxiv.org/pdf/2310.
+10591.
+ArthurConmy,AugustineN.Mavor-Parker,AengusLynch,StefanHeimersheim,andAdria`Garriga-
+Alonso. Towardsautomatedcircuitdiscoveryformechanisticinterpretability,2023. URLhttps:
+//arxiv.org/abs/2304.14997.
+HoagyCunningham,AidanEwart,LoganRiggs,RobertHuben,andLeeSharkey. Sparseautoen-
+coders find highly interpretable features in language models, 2023. URL https://arxiv.
+org/abs/2309.08600.
+11DamaiDai,LiDong,YaruHao,ZhifangSui,BaobaoChang,andFuruWei. Knowledgeneuronsin
+pretrainedtransformers,2022. URLhttps://arxiv.org/abs/2104.08696.
+Wenliang Dai, Junnan Li, Dongxu Li, Anthony Meng Huat Tiong, Junqi Zhao, Weisheng Wang,
+BoyangLi,PascaleFung,andStevenHoi. Instructblip: Towardsgeneral-purposevision-language
+modelswithinstructiontuning,2023. URLhttps://arxiv.org/abs/2305.06500.
+AmilDravid, YossiGandelsman, AlexeiA.Efros, andAssafShocher. Rosettaneurons: Mining
+thecommonunitsinamodelzoo. InProceedingsoftheIEEE/CVFInternationalConferenceon
+ComputerVision(ICCV),pp.1934–1943,October2023.
+PatrickEsser,RobinRombach,andBjornOmmer. Adisentanglinginvertibleinterpretationnetwork
+forexplaininglatentrepresentations,2020. URLhttps://arxiv.org/pdf/2004.13166.
+YossiGandelsman,AlexeiA.Efros,andJacobSteinhardt. Interpretingthesecond-ordereffectsof
+neuronsinclip,2024a. URLhttps://arxiv.org/abs/2406.04341.
+YossiGandelsman,AlexeiA.Efros,andJacobSteinhardt. Interpretingclip’simagerepresentation
+viatext-baseddecomposition,2024b. URLhttps://arxiv.org/pdf/2310.05916.
+Asma Ghandeharioun, Avi Caciularu, Adam Pearce, Lucas Dixon, and Mor Geva. Patchscopes:
+A unifying framework for inspecting hidden representations of language models, 2024. URL
+https://arxiv.org/abs/2401.06102.
+DannyHalawi,Jean-StanislasDenain,andJacobSteinhardt. Overthinkingthetruth: Understanding
+howlanguagemodelsprocessfalsedemonstrations,2024. URLhttps://arxiv.org/abs/
+2307.09476.
+Jinwen He, Yujia Gong, Kai Chen, Zijin Lin, Chengan Wei, and Yue Zhao. Llm factoscope:
+Uncovering llms’ factual discernment through inner states analysis, 2024. URL https://
+arxiv.org/abs/2312.16374.
+John Hewitt and Christopher D. Manning. A structural probe for finding syntax in word repre-
+sentations. InJillBurstein,ChristyDoran,andThamarSolorio(eds.),Proceedingsofthe2019
+Conference of the North American Chapter of the Association for Computational Linguistics:
+HumanLanguageTechnologies,Volume1(LongandShortPapers),pp.4129–4138,Minneapolis,
+Minnesota,June2019.AssociationforComputationalLinguistics. doi: 10.18653/v1/N19-1419.
+URLhttps://aclanthology.org/N19-1419.
+YuanHu,JianlongYuan,CongcongWen,XiaonanLu,andXiangLi. Rsgpt: Aremotesensingvision
+languagemodelandbenchmark,2023. URLhttps://arxiv.org/abs/2307.15266.
+QidongHuang,XiaoyiDong,PanZhang,BinWang,ConghuiHe,JiaqiWang,DahuaLin,Weiming
+Zhang,andNenghaiYu. Opera: Alleviatinghallucinationinmulti-modallargelanguagemodels
+viaover-trustpenaltyandretrospection-allocation,2024. URLhttps://arxiv.org/abs/
+2311.17911.
+JiahaoHuo,YiboYan,BorenHu,YutaoYue,andXumingHu. Mmneuron: Discoveringneuron-
+leveldomain-specificinterpretationinmultimodallargelanguagemodel, 2024. URLhttps:
+//arxiv.org/pdf/2406.11193v1.
+Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan Su, Yan Xu, Etsuko Ishii, Ye Jin Bang,
+AndreaMadotto,andPascaleFung. Surveyofhallucinationinnaturallanguagegeneration. ACM
+ComputingSurveys,55(12):1–38,March2023. ISSN1557-7341. doi: 10.1145/3571730. URL
+http://dx.doi.org/10.1145/3571730.
+GoroKobayashi,TatsukiKuribayashi,ShoYokoi,andKentaroInui. Attentionisnotonlyaweight:
+Analyzing transformers with vector norms. In Bonnie Webber, Trevor Cohn, Yulan He, and
+YangLiu(eds.),Proceedingsofthe2020ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing(EMNLP),pp.7057–7075,Online,November2020.AssociationforComputational
+Linguistics. doi: 10.18653/v1/2020.emnlp-main.574. URLhttps://aclanthology.org/
+2020.emnlp-main.574.
+12Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2: Bootstrapping language-image
+pre-trainingwith frozenimage encodersand largelanguage models, 2023a. URL https://
+arxiv.org/abs/2301.12597.
+KennethLi,AspenK.Hopkins,DavidBau,FernandaVie´gas,HanspeterPfister,andMartinWatten-
+berg. Emergentworldrepresentations: Exploringasequencemodeltrainedonasynthetictask,
+2024. URLhttps://arxiv.org/abs/2210.13382.
+Yifan Li, Yifan Du, Kun Zhou, Jinpeng Wang, Wayne Xin Zhao, and Ji-Rong Wen. Evaluating
+object hallucination in large vision-language models, 2023b. URL https://arxiv.org/
+abs/2305.10355.
+Tsung-YiLin,MichaelMaire,SergeBelongie,LubomirBourdev,RossGirshick,JamesHays,Pietro
+Perona,DevaRamanan,C.LawrenceZitnick,andPiotrDolla´r. Microsoftcoco: Commonobjects
+incontext,2015. URLhttps://arxiv.org/abs/1405.0312.
+HaotianLiu,ChunyuanLi,YuhengLi,andYongJaeLee. Improvedbaselineswithvisualinstruction
+tuning,2024. URLhttps://arxiv.org/abs/2310.03744.
+FuwenLuo,ChiChen,ZihaoWan,ZhaoluKang,QidongYan,YingjieLi,XiaolongWang,Siyu
+Wang, Ziyue Wang, Xiaoyue Mi, Peng Li, Ning Ma, Maosong Sun, and Yang Liu. Codis:
+Benchmarkingcontext-dependentvisualcomprehensionformultimodallargelanguagemodels,
+2024. URLhttps://arxiv.org/abs/2402.13607.
+Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. Locating and editing factual
+associationsingpt,2023. URLhttps://arxiv.org/abs/2202.05262.
+nostalgebraist. Interpreting GPT: The logit lens. LessWrong, Aug 2020.
+URL https://www.lesswrong.com/posts/AcKRB8wDpdaN6v6ru/
+interpreting-gpt-the-logit-lens.
+VedantPalit,RohanPandey,AryamanArora,andPaulPuLiang. Towardsvision-languagemecha-
+nisticinterpretability: Acausaltracingtoolforblip,2023. URLhttps://arxiv.org/pdf/
+2308.14179.
+VitaliPetsiuk,AbirDas,andKateSaenko. Rise: Randomizedinputsamplingforexplanationof
+black-boxmodels,2018. URLhttps://arxiv.org/pdf/1806.07421.
+AlecRadford, JongWookKim, ChrisHallacy, AdityaRamesh, GabrielGoh, SandhiniAgarwal,
+GirishSastry,AmandaAskell,PamelaMishkin,JackClark,GretchenKrueger,andIlyaSutskever.
+Learning transferable visual models from natural language supervision, 2021. URL https:
+//arxiv.org/pdf/2103.00020.
+ShauliRavfogel,MichaelTwiton,YoavGoldberg,andRyanCotterell. Linearadversarialconcept
+erasure,2024. URLhttps://arxiv.org/abs/2201.12091.
+Anna Rohrbach, Lisa Anne Hendricks, Kaylee Burns, Trevor Darrell, and Kate Saenko. Object
+hallucinationinimagecaptioning,2019. URLhttps://arxiv.org/abs/1809.02156.
+SarahSchwettmann,NeilChowdhury,SamuelKlein,andAntonioTorralba. Multimodalneuronsin
+pretrainedtext-onlytransformers,2023. URLhttps://arxiv.org/pdf/2308.01544.
+TamarRottShaham,SarahSchwettmann,FranklinWang,AchyutaRajaram,EvanHernandez,Jacob
+Andreas, and Antonio Torralba. A multimodal automated interpretability agent, 2024. URL
+https://arxiv.org/pdf/2404.14394.
+DaSong,XuanXie,JiayangSong,DeruiZhu,YuhengHuang,FelixJuefei-Xu,andLeiMa. Luna:
+A model-based universal analysis framework for large language models, 2024. URL https:
+//arxiv.org/abs/2310.14211.
+Weihang Su, Changyue Wang, Qingyao Ai, Yiran HU, Zhijing Wu, Yujia Zhou, and Yiqun Liu.
+Unsupervised real-time hallucination detection based on the internal states of large language
+models,2024. URLhttps://arxiv.org/abs/2403.06448.
+13MycalTucker,PengQian,andRogerLevy. Whatifthismodifiedthat? syntacticinterventionsvia
+counterfactualembeddings,2021. URLhttps://arxiv.org/abs/2105.14002.
+NeerajVarshney,WenlinYao,HongmingZhang,JianshuChen,andDongYu. Astitchintimesaves
+nine: Detectingandmitigatinghallucinationsofllmsbyvalidatinglow-confidencegeneration,
+2023. URLhttps://arxiv.org/abs/2307.03987.
+Dimitri von Rutte, Sotiris Anagnostidis, Gregor Bachmann, and Thomas Hofmann. A language
+model’sguidethroughlatentspace,2024. URLhttps://arxiv.org/pdf/2402.14433.
+Qinghao Ye, Haiyang Xu, Jiabo Ye, Ming Yan, Anwen Hu, Haowei Liu, Qi Qian, Ji Zhang, Fei
+Huang,andJingrenZhou. mplug-owl2: Revolutionizingmulti-modallargelanguagemodelwith
+modalitycollaboration,2023. URLhttps://arxiv.org/abs/2311.04257.
+ShukangYin,ChaoyouFu,SiruiZhao,TongXu,HaoWang,DianboSui,YunhangShen,KeLi,Xing
+Sun,andEnhongChen. Woodpecker: Hallucinationcorrectionformultimodallargelanguage
+models,2023. URLhttps://arxiv.org/abs/2310.16045.
+JinruiZhang,TengWang,HaigangZhang,PingLu,andFengZheng. Reflectiveinstructiontuning:
+Mitigatinghallucinationsinlargevision-languagemodels,2024a.URLhttps://arxiv.org/
+abs/2407.11422.
+ShaoleiZhang,TianYu,andYangFeng. Truthx: Alleviatinghallucinationsbyeditinglargelanguage
+modelsintruthfulspace,2024b. URLhttps://arxiv.org/pdf/2402.17811.
+YiyangZhou,ChenhangCui,JaehongYoon,LinjunZhang,ZhunDeng,ChelseaFinn,MohitBansal,
+andHuaxiuYao. Analyzingandmitigatingobjecthallucinationinlargevision-languagemodels,
+2024. URLhttps://arxiv.org/abs/2310.00754.
+14A APPENDIX
+A.1 MASS-REMOVINGOBJECTS
+Wemass-removementionedobjects(hallucinationsandcorrectlydetected)withPROJECTAWAYand
+tallyupthetotalnumberofuniquehallucinatedandCDobjectsinTable4.
+A.2 ABLATIONSFORINSTRUCTBLIP
+We show hidden layer and weight ablations for mass-removing hallucinations in InstructBLIP
+referencedinSection4.2. Thehiddenlayerablationsindicatethatmostoftheparameterspaceis
+toosensitivetoeditandleadstolossesincorrectlydetectedobjects. WefindthatsmallerlT andlI
+parametersarethemosteffectiveforreducinghallucinations. Ourbestparameters(lI =1,lT =2)
+reduce hallucinations by 38.5%. It is not fully understood why the majority of the parameter
+searchspaceisinvalidincomparisonwithLLaVAinFigure6. Itispossiblethatthefine-tuning
+stepinLLaVAsemanticallyalignshiddenimagerepresentationswithtextembeddingsmorethan
+InstructBLIP,allowinglineareditstohavetheprecise,intendedeffect.
+A.3 HALLUCINATIONDETECTION
+Weshowquantitativecomparisonsfromourhallucinationdetectionapproachusinginternalconfi-
+dence(Section5.1)tothebaselineinAppendixA.5. WealsoshowqualitativeexamplesforLLaVA
+inFigure12andforInstructBLIPinFigure13. Thesesamplesexhibitmodel-generatedcaptions,
+parsedobjects,andwhethertheyareclassifiedashallucinatedorcorrectlydetectedbasedontheir
+internalconfidencescore.
+A.4 HALLUCINATIONREDUCTION
+Weexhibitsampleresultsfromourhallucinationreductionapproach(Section5.2),whichlinearly
+removestextrepresentationsofhallucinationsfromimagerepresentations,inFigure15forInstruct-
+BLIP and Figure 14 for LLaVA. We show the image caption before and after our linear editing
+method,removingobjectsdetectedashallucinations.
+A.5 OBJECTLOCALIZATION
+Weshowqualitativeexamplesforlocalizationwithinternalconfidenceforspecificimagerepresenta-
+tions,specificallyfortheLLaVAmodel,inFigure16.
+EditScope Model Hallucinations CD
+InstructBLIP 4545 14178
+Noedits
+LLaVA 4372 15053
+InstructBLIP 2672 14189
+Hallucinations
+LLaVA 3348 15061
+InstructBLIP 5078 13864
+CD
+LLaVA 4583 14826
+Table4: SupplementalmetricsforTable1. Wemeasureuniquehallucinatedandcorrectlydetected
+(CD)objects.
+15InstructBLIP LLaVA
+Method mAP↑ ROCAUC↑ mAP↑ ROCAUC↑
+Baseline 0.53 0.55 0.49 0.47
+Ours 0.78 0.83 0.60 0.68
+Table5:ObjectPresenceClassificationperformance.Weuseinternalconfidencec asaconfidence
+o
+scoretoclassifywhethertheobjectispresentintheimage. WeevaluatethemAPandROCAUCof
+ourclassificationmethodagainstthebaselineforboththeInstructBLIPandLLaVAmodels.
+35
+100
+30
+80
+25
+Hallucinations
+20 60
+Correctly detected
+Mass removal rate
+15 40
+10
+20
+5
+0
+0 1 2 3 4 5 6 7 8
+0 Weight factor
+-1 1 3 5 7 9 11 13 15 17 19 21 23 25 27 29
+Text embedding hidden layer
+Figure 10: Hidden layer ablations for In- Figure11: WeightablationsforInstructBLIP.
+structBLIP. We track hallucination reduction Wevarytheweightfactorαandmeasurechanges
+(%)acrossdifferentlayerstoeditatandextractla- incorrectlydetectedobjects,objectremovalrate,
+tentembeddingsforthetextembedding,crossing andhallucinationreduction.Weobserveadecline
+out (red) parameters from consideration where inhallucinationsasweightincreasesandmarka
+thereisadecreaseincorrectlydetectedobjects. weightwherethereisnolossincorrectlydetected
+objects.
+16
+reyal
+neddih
+detidE
+92725232129171513111
+9
+7
+5
+3
+1
+1-
+egnahc
+egatnecrePInternal Internal
+Internal Confidences Confidences
+Confidences traffic light 97.61% clock 98.04%
+stop sign 99.27% truck 90.28% car 7.20%
+car 2.54% car 47.20% person 2.10%
+truck 2.34% fire hydrant 4.02%
+pedestrian 0.00% person 0.44%
+Baseline Caption Baseline Caption Baseline Caption
+The image depicts a street corner with a stop The image depicts a quiet city street on a The image features a large brick church with a
+sign prominently displayed on the right side of sunny day, with a few cars and trucks parked tall clock tower. The clock is situated on the side
+the scene. Next to the stop sign, there is a street along the side of the road. There are multiple of the tower, making it a prominent feature of
+sign that reads "Hell Canyon Rd." The street sign traffic lights at various points along the the building. The church has a steeple and a
+is positioned above the stop sign, making it street, ensuring safe passage for vehicles and cross on top of the tower, adding to its
+clearly visible for drivers and pedestrians. In the pedestrians. architectural charm.
+background, there is a car parked on the left There are two people visible in the scene, one
+side of the scene, and a truck can be seen In addition to the cars and trucks, there are a standing closer to the left side of the church and
+further back on the right side. few pedestrians walking along the sidewalk. the other closer to the right side. Additionally,
+One person can be seen near the center of there is a car parked in front of the church, likely
+the scene, while two others are closer to the belonging to one of the visitors.
+right side of the image. A fire hydrant is also
+visible on the right side of the street. Overall,
+the scene conveys a calm and peaceful
+atmosphere in the city.
+Internal Confidences Internal Confidences Internal Confidences
+cake 99.99% man 96.33% horse 96.33% man 60.63% oven 98.22% bottle 97.34%
+table 88.02% chair 57.04% girl 29.65% bench 9.58% woman 83.76% stove 71.44%
+cup 6.85% tv 0.686% dining table 2.43% spoon 64.54% refrigerator 6.61%
+microwave 4.93% bowl 3.02%
+Baseline Caption Baseline Caption Baseline Caption
+The image depicts a group of men in military The image features a man and a young girl The image features a woman standing in a
+uniforms gathered around a dining table, sitting on the back of a brown and white horse. kitchen, cooking a meal. She is wearing a green
+celebrating their 70th anniversary. They are The man is holding the reins of the horse, shirt and is focused on stirring a large pot on the
+shaking hands and posing for a picture in front ensuring the girl's safety while she enjoys the stove. The pot appears to be filled with food,
+of a large sheet cake. The cake is placed on the ride. The girl is wearing a pink dress, adding a and the woman is using a spoon to mix the
+table, taking up a significant portion of the touch of color to the scene. ingredients.
+space. In the background, there is a bench and a The kitchen is well-equipped with various
+There are multiple chairs surrounding the dining dining table, suggesting that the location might appliances and utensils. There is a refrigerator
+table, and several cups can be seen on the be a park or an outdoor gathering area. on the left side of the room, and an oven can be
+table as well. In the background, a TV is seen on the right side. A microwave is placed
+mounted on the wall, adding to the atmosphere above the oven, and a bowl is located on the
+of the celebration. countertop near the center of the kitchen.
+Additionally, there are two bottles, one on the
+left side and the other on the right side of the
+kitchen, possibly containing cooking ingredients
+or beverages.
+Figure12: LLaVAObjectPresenceClassification. SampleimagecaptionsfromLLaVAandthe
+internal confidence scores for objects in the caption used for classification as correctly detected
+objectsorhallucinations.
+17Internal Confidences Internal Confidences Internal Confidences
+cake 99.76% fork 97.46% cat 95.21% chair 88.33% table 98.78% chair 73.14%
+table 94.19% man 25.49% table 4.16% bowl 0.32% umbrella 4.15% person 0.47%
+knife 1.79% spoon 0.44% cup 0.13% car 0.18%
+bowl 0.4%
+Baseline Caption Baseline Caption Baseline Caption
+The image features a man sitting at a dining The image features a black cat sitting on a red The image features a small table and two
+table with a plate of chocolate cake in front of chair next to a pair of white shoes. The cat is chairs placed outside on a sidewalk. The table
+him. He is holding a fork and appears to be interacting with the shoes, possibly trying to has a vintage hair dryer sitting on top of it,
+about to take a bite from the cake. There are play with them or investigate them. There are adding a unique touch to the scene. The chairs
+several other utensils on the table, including several other objects in the room, such as a are positioned close to the table, creating a
+knives, forks, and spoons, suggesting that the bowl and a cup placed on a table near the cat's cozy seating area for two people. There is also
+man might be sharing the cake with someone position. Additionally, a window can be seen in an umbrella placed near the table, providing
+else. In the background, there is a bowl placed the background, adding to the overall additional protection from the sun or rain. A
+on the table, possibly containing additional food atmosphere of the scene. street can be seen in the background, with cars
+or drinks. Overall, the scene depicts a man passing by occasionally.
+enjoying a delicious slice of chocolate cake.
+Internal Confidences Internal Confidences Internal Confidences
+airplane 56.59% plane 19.46% table 99.85% vase 99.56% sink 97.07% spoon 5.19%
+person 0.53% fire hydrant chair 83.84% bench 3.69% knife 0.3% fork 0.07%
+0.23% person 0.22%
+Baseline Caption Baseline Caption Baseline Caption
+The image depicts an American Airlines The image features an outdoor patio with a The image depicts a kitchen sink area with
+airplane parked on a runway next to a body of glass-topped dining table surrounded by two sinks, one on the left side and the other
+water, possibly a lake or a river. The plane chairs. On the table, there is a vase filled with on the right side. The sink on the left is closer
+appears to be preparing for takeoff or landing. pink flowers, adding a touch of beauty and to the edge of the countertop, while the sink
+There are several people visible in the scene, elegance to the space. The vase is placed in on the right is positioned further away from
+some standing near the airplane, while others the center of the table, making it the focal point the edge. In addition to the sinks, there is a
+are positioned further away from it. In total, of the area. There are several chairs dishwasher located in the middle of the
+there are at least 10 people present in the surrounding the table, providing ample seating kitchen area. There are several utensils
+scene. Additionally, there is a fire hydrant for people to enjoy their meals or relax in the scattered throughout the scene, including a
+located close to the airplane, likely for sunshine. A bench can also be seen on the left spoon, a fork, and a knife, placed near the
+emergency purposes. side of the patio, offering additional seating sinks and the dishwasher.
+options. Overall, the scene radiates a warm and
+inviting atmosphere, perfect for outdoor
+gatherings and relaxation.
+Figure13: InstructBLIPObjectPresenceClassification.
+18Before: The image depicts a person wearing a Before: The image shows a person sitting Before: The image features a man wearing a dress shirt
+black shirt and gray pants, standing next to a on a bench, holding a donut in their hand. and tie, standing in a room. He is wearing a striped tie,
+skateboard. The skateboard is placed on the The donut appears to be half-eaten, with a and the shirt appears to be white. The man appears to be
+ground, with the person's hand resting on it. The bite taken out of it. The person seems to be looking down at his tie, possibly adjusting it or checking
+person appears to be in the process of picking enjoying their snack while sitting on the its appearance.
+
+
+up the skateboard or preparing to ride it.   bench.  
+In the room, there is a couch located towards the right
+In the background, there is a chair and a dining In addition to the person and the donut, side of the image, and a chair can be seen in the
+table, suggesting that the scene might be taking there is a handbag placed next to the background on the left side. The man is positioned in the
+place in an outdoor or semi-outdoor setting.
+
+ person on the bench, and a backpack can center of the scene, drawing attention to his attire.
+ 
+be seen in the background.
+
+
+After: In the image, a person is standing on a After: The image depicts a man wearing a dress shirt and
+sidewalk, holding a colorful skateboard in their After: In the image, a person is sitting on a tie, standing in a room. The shirt is white, and the tie is
+hand. The skateboard features a vibrant design, bench and holding a pastry in their hand. blue. The man is wearing a belt, which is visible around
+making it an eye-catching sight. The person The pastry appears to be a doughnut, and his waist. The room appears to be dimly lit, creating a
+appears to be either preparing to skate or taking the person is in the process of eating it. somewhat mysterious atmosphere.\n\nIn addition to the
+a break from their skateboarding session. The Another doughnut can be seen on the man, there are two other people in the room, one on the
+scene captures the essence of skateboarding bench, close to the person's hand. A chair is left side and the other on the right side of the image.
+culture and the enjoyment it brings to those who also visible in the scene, placed near the However, they are not the main focus of the scene, as the
+participate in it. bench where the person is sitting. man in the dress shirt and tie is the central figure.
+Before: The image captures a man in mid-air, Before: The image captures a heartwarming Before: The image depicts a clean and well-maintained
+leaping over a bed in a bedroom. He is wearing a scene of two elephants, an adult and a kitchen with a white stove top oven. The oven has two
+tie and appears to be in the middle of an baby, playing together in a body of water. burners, one on the left side and the other on the right
+energetic jump. There are several other people in The adult elephant is partially submerged in side. Above the oven, there is a light that illuminates the
+the room, with one person standing near the left the water, while the baby elephant is cooking area. The kitchen is equipped with various
+side of the bed and two others closer to the swimming nearby. They appear to be utensils, including multiple knives and a spoon. The
+right side. The bedroom is furnished with a enjoying their time in the water, splashing knives are placed in a knife block, while the spoon can be
+couch, a chair, and a dining table. A potted and interacting with each other.
+
+ found on the left side of the oven. Additionally, there is a
+plant can be seen on the right side of the room, bowl located on the left side of the kitchen, and a bottle
+adding a touch of greenery to the space. A clock In addition to the two elephants, there are a can be seen on the right side.
+
+
+is mounted on the wall, and a cup is placed on few other objects in the scene. A bench can
+the dining table.
+
+ be seen on the left side of the image, and a After: The image depicts a kitchen with an old-fashioned
+potted plant is located near the top left white stove top oven. The stove has four burners, with
+After: The image depicts a man in a white shirt corner.
+  two on the left side and two on the right side. Above the
+and a blue tie jumping in the air above a bed in a stove, there is a light that illuminates the cooking area.
+bedroom. He appears to be in the process of After: The image depicts two elephants in a The kitchen is well-equipped with various utensils and
+diving onto the bed. There are several other body of water, possibly a river or a lake. One appliances. There are two knives, one on the left side of
+people in the room, with some standing near the of the elephants appears to be an adult, the stove and the other on the right side. Additionally,
+bed and others scattered around the area. The while the other is a baby elephant. The baby there are two spoons, one near the left knife and the
+bedroom is furnished with a dining table, a elephant is swimming in the water, while the other near the right knife. A bottle can be seen on the left
+chair, and a potted plant. There is also a cup adult elephant is standing nearby. They side of the stove, and a clock is mounted on the wall
+placed on the dining table, and a handbag can seem to be enjoying their time together in above the oven.
+be seen near one of the people in the room. the water.
+Overall, the scene captures a lively and
+energetic atmosphere in the bedroom.
+Figure 14: Qualitative results for LLaVA hallucination intervention. Our algorithm removes
+hallucinationsand,attimes,addscorrectlydetectedobjects.
+19Before: The image depicts a young woman Before: The image features a young woman Before: The image depicts a group of people riding in
+sitting on a bench, leaning against a wall, and sitting on a bench outside, eating a hot dog an old-fashioned, open-air truck. The truck is carrying
+talking on her cell phone. She is wearing a white wrapped in a napkin. She appears to be enjoying a large number of people, with some sitting on the bed
+shirt and appears to be engrossed in her her food as she takes a big bite out of the hot of the truck and others standing around it. There are
+conversation. In the background, there are dog. There are several bottles scattered around several umbrellas in the scene, one of which is held by
+several other people walking around, some of the scene, including one close to the woman's a person in the back of the truck, providing shade for
+them carrying bags or purses. The scene takes left hand and another near her right foot. In the passengers. In addition to the umbrella, there are
+place at night, with streetlights illuminating the addition to the bottles, there are two cars visible several handbags scattered throughout the scene,
+area and casting shadows on the surroundings.
+
+ in the background, one on the left side and likely belonging to the passengers. The truck appears
+another on the right side of the image.
+
+ to be making its way through a wooded area,
+After: A young man is sitting on a railing, leaning surrounded by trees and foliage.
+ 
+against it while talking on his cell phone. He is After: The image depicts a young woman sitting
+wearing a backpack and appears to be on a bench outside, eating a hot dog wrapped in After: The image features a group of people riding in
+engrossed in his conversation. There are several a napkin. She appears to be enjoying her meal an old-fashioned, open-air vehicle, likely an old tractor
+other people in the scene, some of whom are while surrounded by other people who are or truck, on a dirt road surrounded by trees. They are
+standing or walking around. One person is closer walking around the area. There are several enjoying a leisurely ride through the countryside, with
+to the man on the railing, while others are bottles scattered throughout the scene, likely one person holding a purple umbrella to protect
+scattered throughout the area. A handbag can containing drinks or other beverages. In the themselves from the sun. There are several people in
+be seen nearby, possibly belonging to one of the background, there is a building with multiple the vehicle, with some seated in the front and others in
+people in the scene. windows visible. the back. The scene captures the essence of a relaxed
+and enjoyable day out in the countryside.
+Before: The image depicts a group of four young Before: The image depicts a city street with a red Before: The image depicts a cozy living room filled with
+men playing a game of frisbee on a grassy field. and white public transit bus parked on the side various furniture and decorations. There is a black
+They are all wearing orange shirts, and one of of the road. The bus is surrounded by other couch placed in the center of the room, surrounded by
+them is jumping up to catch the frisbee as it flies vehicles, including cars, trucks, and a several potted plants. On the left side of the room,
+through the air. There are several benches motorcycle. There are several people visible in there is a coffee table with two cups placed on it. A
+scattered around the field, providing seating the scene, some standing near the bus and television can be seen on the right side of the room,
+options for the players and spectators. In others walking along the sidewalk. A bicycle is positioned close to the wall. In addition to the couch
+addition to the benches, there are two also present in the scene, likely belonging to one and coffee table, there are several potted plants
+backpacks visible in the scene, likely belonging of the pedestrians. Overall, the scene showcases scattered throughout the room, adding a touch of
+to the players or spectators. Overall, the scene a busy urban environment with various modes of greenery to the space. Two bottles are also visible, one
+captures a lively and energetic game of frisbee transportation in use.
+  on the left side of the room and the other on the right
+among friends.
+
+ side, near the coffee table. Overall, the living room has
+After: A red and white city bus is parked on the a warm and inviting atmosphere, perfect for relaxing
+After: There is a group of young men playing a side of a street, waiting for passengers to board. and spending time with friends or family.
+
+
+game of frisbee on a soccer field. They are all There are several people in the vicinity of the
+wearing matching shirts, and one of them is bus, including one person standing near the front After: The image depicts a well-appointed living room
+jumping up to catch the frisbee as it flies through of the bus, another person walking towards the with a couch, coffee table, and a dining table. There
+the air. The other players are also actively bus, and a third person further away from the are several potted plants scattered throughout the
+participating in the game, trying to catch the bus. A bicycle is also visible in the scene, likely room, adding a touch of greenery to the space. A
+frisbee or block their opponents' attempts to belonging to one of the pedestrians. In the bookshelf is visible on the left side of the room,
+score. There are several benches scattered background, there is a car parked on the other showcasing various books and decorative items. In the
+around the field, providing seating for those side of the street. center of the room, there is a coffee table surrounded
+watching the game or taking a break from the by chairs, providing a comfortable seating area for
+action. guests. The room has a cozy and inviting atmosphere,
+perfect for relaxation and social gatherings.
+Figure15: QualitativeresultsforInstructBLIPhallucinationintervention.
+20Input Image raw attention (VLM) Ours Input Image raw attention (VLM) Ours
+Figure16: ObjectLocalizationSamples.
+21
