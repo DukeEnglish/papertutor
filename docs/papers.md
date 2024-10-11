@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03663v1 |
-|title| Enhance Reasoning by Learning from Mistakes: Peer-Review Knowledge Distillation from Multiple Large Language Models |
-|authors| Zhuochun LiYuelyu JiRui MengDaqing He
-|links| http://arxiv.org/abs/2410.03663v1 |
-|updated| 2024-10-04 17:59:41 UTC |
-|summary| Large language models LLMs have exhibited complex reasoning abilities bygenerating question rationales and demonstrated exceptional performance innatural language processing NLP tasks. However these reasoning capabilitiesgenerally emerge in models with tens of billions of parameters creatingsignificant computational challenges for real-world deployment. Recent researchhas concentrated on improving open-source smaller models through knowledgedistillation KD from commercial LLMs. Nevertheless most of these studiesrely solely on the responses from one single LLM as the gold rationale fortraining. In this paper we introduce a novel Mistake-Aware Peer-ReviewDistillation MAPD approach: 1 Instead of merely obtaining gold rationalesfrom teachers our method asks teachers to identify and explain the studentsmistakes providing customized instruction learning data. 2 We design asimulated peer-review process between teacher LLMs which selects only thegenerated rationales above the acceptance threshold. This reduces the chance ofteachers guessing correctly with flawed rationale improving instructional dataquality. Comprehensive experiments and analysis on mathematical commonsenseand logical reasoning tasks demonstrate the effectiveness of our method. |
+|idx| 2410.07176v1 |
+|title| Astute RAG: Overcoming Imperfect Retrieval Augmentation and Knowledge Conflicts for Large Language Models |
+|authors| Fei WangXingchen WanRuoxi SunJiefeng ChenSercan Ö. Arık
+|links| http://arxiv.org/abs/2410.07176v1 |
+|updated| 2024-10-09 17:59:58 UTC |
+|summary| Retrieval-Augmented Generation RAG while effective in integrating externalknowledge to address the limitations of large language models LLMs can beundermined by imperfect retrieval which may introduce irrelevant misleadingor even malicious information. Despite its importance previous studies haverarely explored the behavior of RAG through joint analysis on how errors fromimperfect retrieval attribute and propagate and how potential conflicts arisebetween the LLMs internal knowledge and external sources. We find thatimperfect retrieval augmentation might be inevitable and quite harmful throughcontrolled analysis under realistic conditions. We identify the knowledgeconflicts between LLM-internal and external knowledge from retrieval as abottleneck to overcome in the post-retrieval stage of RAG. To render LLMsresilient to imperfect retrieval we propose Astute RAG a novel RAG approachthat adaptively elicits essential information from LLMs internal knowledgeiteratively consolidates internal and external knowledge with source-awarenessand finalizes the answer according to information reliability. Our experimentsusing Gemini and Claude demonstrate that Astute RAG significantly outperformsprevious robustness-enhanced RAG methods. Notably Astute RAG is the onlyapproach that matches or exceeds the performance of LLMs without RAG underworst-case scenarios. Further analysis reveals that Astute RAG effectivelyresolves knowledge conflicts improving the reliability and trustworthiness ofRAG systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03659v1 |
-|title| Unraveling Cross-Modality Knowledge Conflict in Large Vision-Language Models |
-|authors| Tinghui ZhuQin LiuFei WangZhengzhong TuMuhao Chen
-|links| http://arxiv.org/abs/2410.03659v1 |
-|updated| 2024-10-04 17:59:28 UTC |
-|summary| Large Vision-Language Models LVLMs have demonstrated impressivecapabilities for capturing and reasoning over multimodal inputs. However thesemodels are prone to parametric knowledge conflicts which arise frominconsistencies of represented knowledge between their vision and languagecomponents. In this paper we formally define the problem oftextbfcross-modality parametric knowledge conflict and present asystematic approach to detect interpret and mitigate them. We introduce apipeline that identifies conflicts between visual and textual answers showinga persistently high conflict rate across modalities in recent LVLMs regardlessof the model size. We further investigate how these conflicts interfere withthe inference process and propose a contrastive metric to discern theconflicting samples from the others. Building on these insights we develop anovel dynamic contrastive decoding method that removes undesirable logitsinferred from the less confident modality components based on answerconfidence. For models that do not provide logits we also introduce twoprompt-based strategies to mitigate the conflicts. Our methods achievepromising improvements in accuracy on both the ViQuAE and InfoSeek datasets.Specifically using LLaVA-34B our proposed dynamic contrastive decodingimproves an average accuracy of 2.24. |
+|idx| 2410.07173v1 |
+|title| Do better language models have crisper vision? |
+|authors| Jona RuthardtGertjan J. BurghoutsSerge BelongieYuki M. Asano
+|links| http://arxiv.org/abs/2410.07173v1 |
+|updated| 2024-10-09 17:59:33 UTC |
+|summary| How well do text-only Large Language Models LLMs grasp the visual world AsLLMs are increasingly used in computer vision addressing this question becomesboth fundamental and pertinent. However existing studies have primarilyfocused on limited scenarios such as their ability to generate visual contentor cluster multimodal data. To this end we propose the Visual TextRepresentation Benchmark ViTeRB to isolate key properties that make languagemodels well-aligned with the visual world. With this we identify large-scaledecoder-based LLMs as ideal candidates for representing text in vision-centriccontexts counter to the current practice of utilizing text encoders. Buildingon these findings we propose ShareLock an ultra-lightweight CLIP-like model.By leveraging precomputable frozen features from strong vision and languagemodels ShareLock achieves an impressive 51 accuracy on ImageNet despiteutilizing just 563k image-caption pairs. Moreover training requires only 1 GPUhour or 10 hours including the precomputation of features - orders ofmagnitude less than prior methods. Code will be released. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03658v1 |
-|title| RAFT: Realistic Attacks to Fool Text Detectors |
-|authors| James WangRan LiJunfeng YangChengzhi Mao
-|links| http://arxiv.org/abs/2410.03658v1 |
-|updated| 2024-10-04 17:59:00 UTC |
-|summary| Large language models LLMs have exhibited remarkable fluency across varioustasks. However their unethical applications such as disseminatingdisinformation have become a growing concern. Although recent works haveproposed a number of LLM detection methods their robustness and reliabilityremain unclear. In this paper we present RAFT: a grammar error-free black-boxattack against existing LLM detectors. In contrast to previous attacks forlanguage models our method exploits the transferability of LLM embeddings atthe word-level while preserving the original text quality. We leverage anauxiliary embedding to greedily select candidate words to perturb against thetarget detector. Experiments reveal that our attack effectively compromises alldetectors in the study across various domains by up to 99 and aretransferable across source models. Manual human evaluation studies show ourattacks are realistic and indistinguishable from original human-written text.We also show that examples generated by RAFT can be used to train adversariallyrobust detectors. Our work shows that current LLM detectors are notadversarially robust underscoring the urgent need for more resilient detectionmechanisms. |
+|idx| 2410.07170v1 |
+|title| One Initialization to Rule them All: Fine-tuning via Explained Variance Adaptation |
+|authors| Fabian PaischerLukas HauzenbergerThomas SchmiedBenedikt AlkinMarc Peter DeisenrothSepp Hochreiter
+|links| http://arxiv.org/abs/2410.07170v1 |
+|updated| 2024-10-09 17:59:06 UTC |
+|summary| Foundation models FMs are pre-trained on large-scale datasets and thenfine-tuned on a downstream task for a specific application. The most successfuland most commonly used fine-tuning method is to update the pre-trained weightsvia a low-rank adaptation LoRA. LoRA introduces new weight matrices that areusually initialized at random with a uniform rank distribution across modelweights. Recent works focus on weight-driven initialization or learning ofadaptive ranks during training. Both approaches have only been investigated inisolation resulting in slow convergence or a uniform rank distribution inturn leading to sub-optimal performance. We propose to enhance LoRA byinitializing the new weights in a data-driven manner by computing singularvalue decomposition on minibatches of activation vectors. Then we initializethe LoRA matrices with the obtained right-singular vectors and re-distributeranks among all weight matrices to explain the maximal amount of variance andcontinue the standard LoRA fine-tuning procedure. This results in our newmethod Explained Variance Adaptation EVA. We apply EVA to a variety offine-tuning tasks ranging from language generation and understanding to imageclassification and reinforcement learning. EVA exhibits faster convergence thancompetitors and attains the highest average score across a multitude of tasksper domain. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03642v1 |
-|title| Aligning LLMs with Individual Preferences via Interaction |
-|authors| Shujin WuMay FungCheng QianJeonghwan KimDilek Hakkani-TurHeng Ji
-|links| http://arxiv.org/abs/2410.03642v1 |
-|updated| 2024-10-04 17:48:29 UTC |
-|summary| As large language models LLMs demonstrate increasingly advancedcapabilities aligning their behaviors with human values and preferencesbecomes crucial for their wide adoption. While previous research focuses ongeneral alignment to principles such as helpfulness harmlessness and honestythe need to account for individual and diverse preferences has been largelyoverlooked potentially undermining customized human experiences. To addressthis gap we train LLMs that can interact to align essentially cultivatingthe meta-skill of LLMs to implicitly infer the unspoken personalizedpreferences of the current user through multi-turn conversations and thendynamically align their following behaviors and responses to these inferredpreferences. Our approach involves establishing a diverse pool of 3310distinct user personas by initially creating seed examples which are thenexpanded through iterative self-generation and filtering. Guided by distinctuser personas we leverage multi-LLM collaboration to develop a multi-turnpreference dataset containing 3K multi-turn conversations in tree structures.Finally we apply supervised fine-tuning and reinforcement learning to enhanceLLMs using this dataset. For evaluation we establish the ALOE ALign WithCustOmized PrEferences benchmark consisting of 100 carefully selectedexamples and well-designed metrics to measure the customized alignmentperformance during conversations. Experimental results demonstrate theeffectiveness of our method in enabling dynamic personalized alignment viainteraction. |
+|idx| 2410.07167v1 |
+|title| Deciphering Cross-Modal Alignment in Large Vision-Language Models with Modality Integration Rate |
+|authors| Qidong HuangXiaoyi DongPan ZhangYuhang ZangYuhang CaoJiaqi WangDahua LinWeiming ZhangNenghai Yu
+|links| http://arxiv.org/abs/2410.07167v1 |
+|updated| 2024-10-09 17:59:04 UTC |
+|summary| We present the Modality Integration Rate MIR an effective robust andgeneralized metric to indicate the multi-modal pre-training quality of LargeVision Language Models LVLMs. Large-scale pre-training plays a critical rolein building capable LVLMs while evaluating its training quality without thecostly supervised fine-tuning stage is under-explored. Loss perplexity andin-context evaluation results are commonly used pre-training metrics for LargeLanguage Models LLMs while we observed that these metrics are lessindicative when aligning a well-trained LLM with a new modality. Due to thelack of proper metrics the research of LVLMs in the critical pre-trainingstage is hindered greatly including the training data choice efficient moduledesign etc. In this paper we propose evaluating the pre-training quality fromthe inter-modal distribution distance perspective and present MIR the ModalityIntegration Rate which is 1 textbfEffective to represent the pre-trainingquality and show a positive relation with the benchmark performance aftersupervised fine-tuning. 2 textbfRobust toward different training/evaluationdata. 3 textbfGeneralize across training configurations and architecturechoices. We conduct a series of pre-training experiments to explore theeffectiveness of MIR and observe satisfactory results that MIR is indicativeabout training data selection training strategy schedule and modelarchitecture design to get better pre-training results. We hope MIR could be ahelpful metric for building capable LVLMs and inspire the following researchabout modality alignment in different areas. Our code is at:https://github.com/shikiw/Modality-Integration-Rate. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03617v1 |
-|title| What Matters for Model Merging at Scale? |
-|authors| Prateek YadavTu VuJonathan LaiAlexandra ChronopoulouManaal FaruquiMohit BansalTsendsuren Munkhdalai
-|links| http://arxiv.org/abs/2410.03617v1 |
-|updated| 2024-10-04 17:17:19 UTC |
-|summary| Model merging aims to combine multiple expert models into a more capablesingle model offering benefits such as reduced storage and serving costsimproved generalization and support for decentralized model development.Despite its promise previous studies have primarily focused on merging a fewsmall models. This leaves many unanswered questions about the effect of scalingmodel size and how it interplays with other key factors -- like the base modelquality and number of expert models --  to affect the merged modelsperformance. This work systematically evaluates the utility of model merging atscale examining the impact of these different factors. We experiment withmerging fully fine-tuned models using 4 popular merging methods -- AveragingTaskArithmetic Dare and TIES -- across model sizes ranging from 1B-64Bparameters and merging up to 8 different expert models. We evaluate the mergedmodels on both held-in tasks i.e. the experts training tasks and zero-shotgeneralization to unseen held-out tasks. Our experiments provide several newinsights about model merging at scale and the interplay between differentfactors. First we find that merging is more effective when experts are createdfrom strong base models i.e. models with good zero-shot performance. Secondlarger models facilitate easier merging. Third merging consistently improvesgeneralization capabilities. Notably when merging 8 large expert models themerged models often generalize better compared to the multitask trained models.Fourth we can better merge more expert models when working with larger models.Fifth different merging methods behave very similarly at larger scales.Overall our findings shed light on some interesting properties of modelmerging while also highlighting some limitations. We hope that this study willserve as a reference point on large-scale merging for upcoming research. |
+|idx| 2410.07168v1 |
+|title| Sylber: Syllabic Embedding Representation of Speech from Raw Audio |
+|authors| Cheol Jun ChoNicholas LeeAkshat GuptaDhruv AgarwalEthan ChenAlan W BlackGopala K. Anumanchipalli
+|links| http://arxiv.org/abs/2410.07168v1 |
+|updated| 2024-10-09 17:59:04 UTC |
+|summary| Syllables are compositional units of spoken language that play a crucial rolein human speech perception and production. However current neural speechrepresentations lack structure resulting in dense token sequences that arecostly to process. To bridge this gap we propose a new model Sylber thatproduces speech representations with clean and robust syllabic structure.Specifically we propose a self-supervised model that regresses features onsyllabic segments distilled from a teacher model which is an exponential movingaverage of the model in training. This results in a highly structuredrepresentation of speech features offering three key benefits: 1 a fastlinear-time syllable segmentation algorithm 2 efficient syllabic tokenizationwith an average of 4.27 tokens per second and 3 syllabic units better suitedfor lexical and syntactic understanding. We also train token-to-speechgenerative models with our syllabic units and show that fully intelligiblespeech can be reconstructed from these tokens. Lastly we observe thatcategorical perception a linguistic phenomenon of speech perception emergesnaturally in our model making the embedding space more categorical and sparsethan previous self-supervised learning approaches. Together we present a novelself-supervised approach for representing speech as syllables with significantpotential for efficient speech tokenization and spoken language modeling. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03665v1 |
-|title| Estimating Body and Hand Motion in an Ego-sensed World |
-|authors| Brent YiVickie YeMaya ZhengLea MüllerGeorgios PavlakosYi MaJitendra MalikAngjoo Kanazawa
-|links| http://arxiv.org/abs/2410.03665v1 |
-|updated| 2024-10-04 17:59:57 UTC |
-|summary| We present EgoAllo a system for human motion estimation from a head-mounteddevice. Using only egocentric SLAM poses and images EgoAllo guides samplingfrom a conditional diffusion model to estimate 3D body pose height and handparameters that capture the wearers actions in the allocentric coordinateframe of the scene. To achieve this our key insight is in representation: wepropose spatial and temporal invariance criteria for improving modelperformance from which we derive a head motion conditioning parameterizationthat improves estimation by up to 18. We also show how the bodies estimated byour system can improve the hands: the resulting kinematic and temporalconstraints result in over 40 lower hand estimation errors compared to noisymonocular estimates. Project page: https://egoallo.github.io/ |
+|idx| 2410.07177v1 |
+|title| MM-Ego: Towards Building Egocentric Multimodal LLMs |
+|authors| Hanrong YeHaotian ZhangErik DaxbergerLin ChenZongyu LinYanghao LiBowen ZhangHaoxuan YouDan XuZhe GanJiasen LuYinfei Yang
+|links| http://arxiv.org/abs/2410.07177v1 |
+|updated| 2024-10-09 17:59:59 UTC |
+|summary| This research aims to comprehensively explore building a multimodalfoundation model for egocentric video understanding. To achieve this goal wework on three fronts. First as there is a lack of QA data for egocentric videounderstanding we develop a data engine that efficiently generates 7Mhigh-quality QA samples for egocentric videos ranging from 30 seconds to onehour long based on human-annotated data. This is currently the largestegocentric QA dataset. Second we contribute a challenging egocentric QAbenchmark with 629 videos and 7026 questions to evaluate the models abilityin recognizing and memorizing visual details across videos of varying lengths.We introduce a new de-biasing evaluation method to help mitigate theunavoidable language bias present in the models being evaluated. Third wepropose a specialized multimodal architecture featuring a novel Memory PointerPrompting mechanism. This design includes a global glimpse step to gain anoverarching understanding of the entire video and identify key visualinformation followed by a fallback step that utilizes the key visualinformation to generate responses. This enables the model to more effectivelycomprehend extended video content. With the data benchmark and model wesuccessfully build MM-Ego an egocentric multimodal LLM that shows powerfulperformance on egocentric video understanding. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03663v1 |
-|title| Enhance Reasoning by Learning from Mistakes: Peer-Review Knowledge Distillation from Multiple Large Language Models |
-|authors| Zhuochun LiYuelyu JiRui MengDaqing He
-|links| http://arxiv.org/abs/2410.03663v1 |
-|updated| 2024-10-04 17:59:41 UTC |
-|summary| Large language models LLMs have exhibited complex reasoning abilities bygenerating question rationales and demonstrated exceptional performance innatural language processing NLP tasks. However these reasoning capabilitiesgenerally emerge in models with tens of billions of parameters creatingsignificant computational challenges for real-world deployment. Recent researchhas concentrated on improving open-source smaller models through knowledgedistillation KD from commercial LLMs. Nevertheless most of these studiesrely solely on the responses from one single LLM as the gold rationale fortraining. In this paper we introduce a novel Mistake-Aware Peer-ReviewDistillation MAPD approach: 1 Instead of merely obtaining gold rationalesfrom teachers our method asks teachers to identify and explain the studentsmistakes providing customized instruction learning data. 2 We design asimulated peer-review process between teacher LLMs which selects only thegenerated rationales above the acceptance threshold. This reduces the chance ofteachers guessing correctly with flawed rationale improving instructional dataquality. Comprehensive experiments and analysis on mathematical commonsenseand logical reasoning tasks demonstrate the effectiveness of our method. |
+|idx| 2410.07176v1 |
+|title| Astute RAG: Overcoming Imperfect Retrieval Augmentation and Knowledge Conflicts for Large Language Models |
+|authors| Fei WangXingchen WanRuoxi SunJiefeng ChenSercan Ö. Arık
+|links| http://arxiv.org/abs/2410.07176v1 |
+|updated| 2024-10-09 17:59:58 UTC |
+|summary| Retrieval-Augmented Generation RAG while effective in integrating externalknowledge to address the limitations of large language models LLMs can beundermined by imperfect retrieval which may introduce irrelevant misleadingor even malicious information. Despite its importance previous studies haverarely explored the behavior of RAG through joint analysis on how errors fromimperfect retrieval attribute and propagate and how potential conflicts arisebetween the LLMs internal knowledge and external sources. We find thatimperfect retrieval augmentation might be inevitable and quite harmful throughcontrolled analysis under realistic conditions. We identify the knowledgeconflicts between LLM-internal and external knowledge from retrieval as abottleneck to overcome in the post-retrieval stage of RAG. To render LLMsresilient to imperfect retrieval we propose Astute RAG a novel RAG approachthat adaptively elicits essential information from LLMs internal knowledgeiteratively consolidates internal and external knowledge with source-awarenessand finalizes the answer according to information reliability. Our experimentsusing Gemini and Claude demonstrate that Astute RAG significantly outperformsprevious robustness-enhanced RAG methods. Notably Astute RAG is the onlyapproach that matches or exceeds the performance of LLMs without RAG underworst-case scenarios. Further analysis reveals that Astute RAG effectivelyresolves knowledge conflicts improving the reliability and trustworthiness ofRAG systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03662v1 |
-|title| System 2 reasoning capabilities are nigh |
-|authors| Scott C. Lowe
-|links| http://arxiv.org/abs/2410.03662v1 |
-|updated| 2024-10-04 17:59:36 UTC |
-|summary| In recent years machine learning models have made strides towards human-likereasoning capabilities from several directions. In this work we review thecurrent state of the literature and describe the remaining steps to achieve aneural model which can perform System 2 reasoning analogous to a human. Weargue that if current models are insufficient to be classed as performingreasoning there remains very little additional progress needed to attain thatgoal. |
+|idx| 2410.07174v1 |
+|title| Neural Circuit Architectural Priors for Quadruped Locomotion |
+|authors| Nikhil X. BhattasaliVenkatesh PattabiramanLerrel PintoGrace W. Lindsay
+|links| http://arxiv.org/abs/2410.07174v1 |
+|updated| 2024-10-09 17:59:45 UTC |
+|summary| Learning-based approaches to quadruped locomotion commonly adopt genericpolicy architectures like fully connected MLPs. As such architectures containfew inductive biases it is common in practice to incorporate priors in theform of rewards training curricula imitation data or trajectory generators.In nature animals are born with priors in the form of their nervous systemsarchitecture which has been shaped by evolution to confer innate ability andefficient learning. For instance a horse can walk within hours of birth andcan quickly improve with practice. Such architectural priors can also be usefulin ANN architectures for AI. In this work we explore the advantages of abiologically inspired ANN architecture for quadruped locomotion based on neuralcircuits in the limbs and spinal cord of mammals. Our architecture achievesgood initial performance and comparable final performance to MLPs while usingless data and orders of magnitude fewer parameters. Our architecture alsoexhibits better generalization to task variations even admitting deployment ona physical robot without standard sim-to-real methods. This work shows thatneural circuits can provide valuable architectural priors for locomotion andencourages future work in other sensorimotor skills. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03655v1 |
-|title| Geometric Representation Condition Improves Equivariant Molecule Generation |
-|authors| Zian LiCai ZhouXiyuan WangXingang PengMuhan Zhang
-|links| http://arxiv.org/abs/2410.03655v1 |
-|updated| 2024-10-04 17:57:35 UTC |
-|summary| Recent advancements in molecular generative models have demonstratedsubstantial potential in accelerating scientific discovery particularly indrug design. However these models often face challenges in generatinghigh-quality molecules especially in conditional scenarios where specificmolecular properties must be satisfied. In this work we introduce GeoRCG ageneral framework to enhance the performance of molecular generative models byintegrating geometric representation conditions. We decompose the moleculegeneration process into two stages: first generating an informative geometricrepresentation second generating a molecule conditioned on therepresentation. Compared to directly generating a molecule the relativelyeasy-to-generate representation in the first-stage guides the second-stagegeneration to reach a high-quality molecule in a more goal-oriented and muchfaster way. Leveraging EDM as the base generator we observe significantquality improvements in unconditional molecule generation on the widely-usedQM9 and GEOM-DRUG datasets. More notably in the challenging conditionalmolecular generation task our framework achieves an average 31 performanceimprovement over state-of-the-art approaches highlighting the superiority ofconditioning on semantically rich geometric representations over conditioningon individual property values as in previous approaches. Furthermore we showthat with such representation guidance the number of diffusion steps can bereduced to as small as 100 while maintaining superior generation quality thanthat achieved with 1000 steps thereby significantly accelerating thegeneration process. |
+|idx| 2410.07173v1 |
+|title| Do better language models have crisper vision? |
+|authors| Jona RuthardtGertjan J. BurghoutsSerge BelongieYuki M. Asano
+|links| http://arxiv.org/abs/2410.07173v1 |
+|updated| 2024-10-09 17:59:33 UTC |
+|summary| How well do text-only Large Language Models LLMs grasp the visual world AsLLMs are increasingly used in computer vision addressing this question becomesboth fundamental and pertinent. However existing studies have primarilyfocused on limited scenarios such as their ability to generate visual contentor cluster multimodal data. To this end we propose the Visual TextRepresentation Benchmark ViTeRB to isolate key properties that make languagemodels well-aligned with the visual world. With this we identify large-scaledecoder-based LLMs as ideal candidates for representing text in vision-centriccontexts counter to the current practice of utilizing text encoders. Buildingon these findings we propose ShareLock an ultra-lightweight CLIP-like model.By leveraging precomputable frozen features from strong vision and languagemodels ShareLock achieves an impressive 51 accuracy on ImageNet despiteutilizing just 563k image-caption pairs. Moreover training requires only 1 GPUhour or 10 hours including the precomputation of features - orders ofmagnitude less than prior methods. Code will be released. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03645v1 |
-|title| GenSim2: Scaling Robot Data Generation with Multi-modal and Reasoning LLMs |
-|authors| Pu HuaMinghuan LiuAnnabella MacalusoYunfeng LinWeinan ZhangHuazhe XuLirui Wang
-|links| http://arxiv.org/abs/2410.03645v1 |
-|updated| 2024-10-04 17:51:33 UTC |
-|summary| Robotic simulation today remains challenging to scale up due to the humanefforts required to create diverse simulation tasks and scenes.Simulation-trained policies also face scalability issues as many sim-to-realmethods focus on a single task. To address these challenges this work proposesGenSim2 a scalable framework that leverages coding LLMs with multi-modal andreasoning capabilities for complex and realistic simulation task creationincluding long-horizon tasks with articulated objects. To automaticallygenerate demonstration data for these tasks at scale we propose planning andRL solvers that generalize within object categories. The pipeline can generatedata for up to 100 articulated tasks with 200 objects and reduce the requiredhuman efforts. To utilize such data we propose an effective multi-tasklanguage-conditioned policy architecture dubbed proprioceptive point-cloudtransformer PPT that learns from the generated demonstrations and exhibitsstrong sim-to-real zero-shot transfer. Combining the proposed pipeline and thepolicy architecture we show a promising usage of GenSim2 that the generateddata can be used for zero-shot transfer or co-train with real-world collecteddata which enhances the policy performance by 20 compared with trainingexclusively on limited real data. |
+|idx| 2410.07170v1 |
+|title| One Initialization to Rule them All: Fine-tuning via Explained Variance Adaptation |
+|authors| Fabian PaischerLukas HauzenbergerThomas SchmiedBenedikt AlkinMarc Peter DeisenrothSepp Hochreiter
+|links| http://arxiv.org/abs/2410.07170v1 |
+|updated| 2024-10-09 17:59:06 UTC |
+|summary| Foundation models FMs are pre-trained on large-scale datasets and thenfine-tuned on a downstream task for a specific application. The most successfuland most commonly used fine-tuning method is to update the pre-trained weightsvia a low-rank adaptation LoRA. LoRA introduces new weight matrices that areusually initialized at random with a uniform rank distribution across modelweights. Recent works focus on weight-driven initialization or learning ofadaptive ranks during training. Both approaches have only been investigated inisolation resulting in slow convergence or a uniform rank distribution inturn leading to sub-optimal performance. We propose to enhance LoRA byinitializing the new weights in a data-driven manner by computing singularvalue decomposition on minibatches of activation vectors. Then we initializethe LoRA matrices with the obtained right-singular vectors and re-distributeranks among all weight matrices to explain the maximal amount of variance andcontinue the standard LoRA fine-tuning procedure. This results in our newmethod Explained Variance Adaptation EVA. We apply EVA to a variety offine-tuning tasks ranging from language generation and understanding to imageclassification and reinforcement learning. EVA exhibits faster convergence thancompetitors and attains the highest average score across a multitude of tasksper domain. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03662v1 |
-|title| System 2 reasoning capabilities are nigh |
-|authors| Scott C. Lowe
-|links| http://arxiv.org/abs/2410.03662v1 |
-|updated| 2024-10-04 17:59:36 UTC |
-|summary| In recent years machine learning models have made strides towards human-likereasoning capabilities from several directions. In this work we review thecurrent state of the literature and describe the remaining steps to achieve aneural model which can perform System 2 reasoning analogous to a human. Weargue that if current models are insufficient to be classed as performingreasoning there remains very little additional progress needed to attain thatgoal. |
+|idx| 2410.07177v1 |
+|title| MM-Ego: Towards Building Egocentric Multimodal LLMs |
+|authors| Hanrong YeHaotian ZhangErik DaxbergerLin ChenZongyu LinYanghao LiBowen ZhangHaoxuan YouDan XuZhe GanJiasen LuYinfei Yang
+|links| http://arxiv.org/abs/2410.07177v1 |
+|updated| 2024-10-09 17:59:59 UTC |
+|summary| This research aims to comprehensively explore building a multimodalfoundation model for egocentric video understanding. To achieve this goal wework on three fronts. First as there is a lack of QA data for egocentric videounderstanding we develop a data engine that efficiently generates 7Mhigh-quality QA samples for egocentric videos ranging from 30 seconds to onehour long based on human-annotated data. This is currently the largestegocentric QA dataset. Second we contribute a challenging egocentric QAbenchmark with 629 videos and 7026 questions to evaluate the models abilityin recognizing and memorizing visual details across videos of varying lengths.We introduce a new de-biasing evaluation method to help mitigate theunavoidable language bias present in the models being evaluated. Third wepropose a specialized multimodal architecture featuring a novel Memory PointerPrompting mechanism. This design includes a global glimpse step to gain anoverarching understanding of the entire video and identify key visualinformation followed by a fallback step that utilizes the key visualinformation to generate responses. This enables the model to more effectivelycomprehend extended video content. With the data benchmark and model wesuccessfully build MM-Ego an egocentric multimodal LLM that shows powerfulperformance on egocentric video understanding. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03658v1 |
-|title| RAFT: Realistic Attacks to Fool Text Detectors |
-|authors| James WangRan LiJunfeng YangChengzhi Mao
-|links| http://arxiv.org/abs/2410.03658v1 |
-|updated| 2024-10-04 17:59:00 UTC |
-|summary| Large language models LLMs have exhibited remarkable fluency across varioustasks. However their unethical applications such as disseminatingdisinformation have become a growing concern. Although recent works haveproposed a number of LLM detection methods their robustness and reliabilityremain unclear. In this paper we present RAFT: a grammar error-free black-boxattack against existing LLM detectors. In contrast to previous attacks forlanguage models our method exploits the transferability of LLM embeddings atthe word-level while preserving the original text quality. We leverage anauxiliary embedding to greedily select candidate words to perturb against thetarget detector. Experiments reveal that our attack effectively compromises alldetectors in the study across various domains by up to 99 and aretransferable across source models. Manual human evaluation studies show ourattacks are realistic and indistinguishable from original human-written text.We also show that examples generated by RAFT can be used to train adversariallyrobust detectors. Our work shows that current LLM detectors are notadversarially robust underscoring the urgent need for more resilient detectionmechanisms. |
+|idx| 2410.07176v1 |
+|title| Astute RAG: Overcoming Imperfect Retrieval Augmentation and Knowledge Conflicts for Large Language Models |
+|authors| Fei WangXingchen WanRuoxi SunJiefeng ChenSercan Ö. Arık
+|links| http://arxiv.org/abs/2410.07176v1 |
+|updated| 2024-10-09 17:59:58 UTC |
+|summary| Retrieval-Augmented Generation RAG while effective in integrating externalknowledge to address the limitations of large language models LLMs can beundermined by imperfect retrieval which may introduce irrelevant misleadingor even malicious information. Despite its importance previous studies haverarely explored the behavior of RAG through joint analysis on how errors fromimperfect retrieval attribute and propagate and how potential conflicts arisebetween the LLMs internal knowledge and external sources. We find thatimperfect retrieval augmentation might be inevitable and quite harmful throughcontrolled analysis under realistic conditions. We identify the knowledgeconflicts between LLM-internal and external knowledge from retrieval as abottleneck to overcome in the post-retrieval stage of RAG. To render LLMsresilient to imperfect retrieval we propose Astute RAG a novel RAG approachthat adaptively elicits essential information from LLMs internal knowledgeiteratively consolidates internal and external knowledge with source-awarenessand finalizes the answer according to information reliability. Our experimentsusing Gemini and Claude demonstrate that Astute RAG significantly outperformsprevious robustness-enhanced RAG methods. Notably Astute RAG is the onlyapproach that matches or exceeds the performance of LLMs without RAG underworst-case scenarios. Further analysis reveals that Astute RAG effectivelyresolves knowledge conflicts improving the reliability and trustworthiness ofRAG systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03655v1 |
-|title| Geometric Representation Condition Improves Equivariant Molecule Generation |
-|authors| Zian LiCai ZhouXiyuan WangXingang PengMuhan Zhang
-|links| http://arxiv.org/abs/2410.03655v1 |
-|updated| 2024-10-04 17:57:35 UTC |
-|summary| Recent advancements in molecular generative models have demonstratedsubstantial potential in accelerating scientific discovery particularly indrug design. However these models often face challenges in generatinghigh-quality molecules especially in conditional scenarios where specificmolecular properties must be satisfied. In this work we introduce GeoRCG ageneral framework to enhance the performance of molecular generative models byintegrating geometric representation conditions. We decompose the moleculegeneration process into two stages: first generating an informative geometricrepresentation second generating a molecule conditioned on therepresentation. Compared to directly generating a molecule the relativelyeasy-to-generate representation in the first-stage guides the second-stagegeneration to reach a high-quality molecule in a more goal-oriented and muchfaster way. Leveraging EDM as the base generator we observe significantquality improvements in unconditional molecule generation on the widely-usedQM9 and GEOM-DRUG datasets. More notably in the challenging conditionalmolecular generation task our framework achieves an average 31 performanceimprovement over state-of-the-art approaches highlighting the superiority ofconditioning on semantically rich geometric representations over conditioningon individual property values as in previous approaches. Furthermore we showthat with such representation guidance the number of diffusion steps can bereduced to as small as 100 while maintaining superior generation quality thanthat achieved with 1000 steps thereby significantly accelerating thegeneration process. |
+|idx| 2410.07174v1 |
+|title| Neural Circuit Architectural Priors for Quadruped Locomotion |
+|authors| Nikhil X. BhattasaliVenkatesh PattabiramanLerrel PintoGrace W. Lindsay
+|links| http://arxiv.org/abs/2410.07174v1 |
+|updated| 2024-10-09 17:59:45 UTC |
+|summary| Learning-based approaches to quadruped locomotion commonly adopt genericpolicy architectures like fully connected MLPs. As such architectures containfew inductive biases it is common in practice to incorporate priors in theform of rewards training curricula imitation data or trajectory generators.In nature animals are born with priors in the form of their nervous systemsarchitecture which has been shaped by evolution to confer innate ability andefficient learning. For instance a horse can walk within hours of birth andcan quickly improve with practice. Such architectural priors can also be usefulin ANN architectures for AI. In this work we explore the advantages of abiologically inspired ANN architecture for quadruped locomotion based on neuralcircuits in the limbs and spinal cord of mammals. Our architecture achievesgood initial performance and comparable final performance to MLPs while usingless data and orders of magnitude fewer parameters. Our architecture alsoexhibits better generalization to task variations even admitting deployment ona physical robot without standard sim-to-real methods. This work shows thatneural circuits can provide valuable architectural priors for locomotion andencourages future work in other sensorimotor skills. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03654v1 |
-|title| Learning Humanoid Locomotion over Challenging Terrain |
-|authors| Ilija RadosavovicSarthak KamatTrevor DarrellJitendra Malik
-|links| http://arxiv.org/abs/2410.03654v1 |
-|updated| 2024-10-04 17:57:09 UTC |
-|summary| Humanoid robots can in principle use their legs to go almost anywhere.Developing controllers capable of traversing diverse terrains however remainsa considerable challenge. Classical controllers are hard to generalize broadlywhile the learning-based methods have primarily focused on gentle terrains.Here we present a learning-based approach for blind humanoid locomotioncapable of traversing challenging natural and man-made terrain. Our method usesa transformer model to predict the next action based on the history ofproprioceptive observations and actions. The model is first pre-trained on adataset of flat-ground trajectories with sequence modeling and then fine-tunedon uneven terrain using reinforcement learning. We evaluate our model on a realhumanoid robot across a variety of terrains including rough deformable andsloped surfaces. The model demonstrates robust performance in-contextadaptation and emergent terrain representations. In real-world case studiesour humanoid robot successfully traversed over 4 miles of hiking trails inBerkeley and climbed some of the steepest streets in San Francisco. |
+|idx| 2410.07172v1 |
+|title| Glider: Global and Local Instruction-Driven Expert Router |
+|authors| Pingzhi LiPrateek YadavJaehong YoonJie PengYi-Lin SungMohit BansalTianlong Chen
+|links| http://arxiv.org/abs/2410.07172v1 |
+|updated| 2024-10-09 17:59:14 UTC |
+|summary| The availability of performant pre-trained models has led to a proliferationof fine-tuned expert models that are specialized to particular domains. Thishas enabled the creation of powerful and adaptive routing-based ModelMoErging methods with the goal of using expert modules to create an aggregatesystem with improved performance or generalization. However existing MoErgingmethods often prioritize generalization to unseen tasks at the expense ofperformance on held-in tasks which limits its practical applicability inreal-world deployment scenarios. We observe that current token-level routingmechanisms neglect the global semantic context of the input task. Thistoken-wise independence hinders effective expert selection for held-in tasksas routing decisions fail to incorporate the semantic properties of the task.To address this we propose Global and Local Instruction Driven Expert RouterGLIDER that integrates a multi-scale routing mechanism encompassing asemantic global router and a learned local router. The global router leveragesLLMs advanced reasoning capabilities for semantic-related contexts to enhanceexpert selection. Given the input query and LLM the router generates semantictask instructions that guide the retrieval of the most relevant experts acrossall layers. This global guidance is complemented by a local router thatfacilitates token-level routing decisions within each module enabling finercontrol and enhanced performance on unseen tasks. Our experiments usingT5-based models for T0 and FLAN tasks demonstrate that GLIDER achievessubstantially improved held-in performance while maintaining stronggeneralization on held-out tasks. We also perform ablations experiments to divedeeper into the components of GLIDER. Our experiments highlight the importanceof our multi-scale routing that leverages LLM-driven semantic reasoning forMoErging methods. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03651v1 |
-|title| Minimax-optimal trust-aware multi-armed bandits |
-|authors| Changxiao CaiJiacheng Zhang
-|links| http://arxiv.org/abs/2410.03651v1 |
-|updated| 2024-10-04 17:55:31 UTC |
-|summary| Multi-armed bandit MAB algorithms have achieved significant success insequential decision-making applications under the premise that humansperfectly implement the recommended policy. However existing methods oftenoverlook the crucial factor of human trust in learning algorithms. When trustis lacking humans may deviate from the recommended policy leading toundesired learning performance. Motivated by this gap we study the trust-awareMAB problem by integrating a dynamic trust model into the standard MABframework. Specifically it assumes that the recommended and actuallyimplemented policy differs depending on human trust which in turn evolves withthe quality of the recommended policy. We establish the minimax regret in thepresence of the trust issue and demonstrate the suboptimality of vanilla MABalgorithms such as the upper confidence bound UCB algorithm. To overcome thislimitation we introduce a novel two-stage trust-aware procedure that provablyattains near-optimal statistical guarantees. A simulation study is conducted toillustrate the benefits of our proposed algorithm when dealing with the trustissue. |
+|idx| 2410.07170v1 |
+|title| One Initialization to Rule them All: Fine-tuning via Explained Variance Adaptation |
+|authors| Fabian PaischerLukas HauzenbergerThomas SchmiedBenedikt AlkinMarc Peter DeisenrothSepp Hochreiter
+|links| http://arxiv.org/abs/2410.07170v1 |
+|updated| 2024-10-09 17:59:06 UTC |
+|summary| Foundation models FMs are pre-trained on large-scale datasets and thenfine-tuned on a downstream task for a specific application. The most successfuland most commonly used fine-tuning method is to update the pre-trained weightsvia a low-rank adaptation LoRA. LoRA introduces new weight matrices that areusually initialized at random with a uniform rank distribution across modelweights. Recent works focus on weight-driven initialization or learning ofadaptive ranks during training. Both approaches have only been investigated inisolation resulting in slow convergence or a uniform rank distribution inturn leading to sub-optimal performance. We propose to enhance LoRA byinitializing the new weights in a data-driven manner by computing singularvalue decomposition on minibatches of activation vectors. Then we initializethe LoRA matrices with the obtained right-singular vectors and re-distributeranks among all weight matrices to explain the maximal amount of variance andcontinue the standard LoRA fine-tuning procedure. This results in our newmethod Explained Variance Adaptation EVA. We apply EVA to a variety offine-tuning tasks ranging from language generation and understanding to imageclassification and reinforcement learning. EVA exhibits faster convergence thancompetitors and attains the highest average score across a multitude of tasksper domain. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03665v1 |
-|title| Estimating Body and Hand Motion in an Ego-sensed World |
-|authors| Brent YiVickie YeMaya ZhengLea MüllerGeorgios PavlakosYi MaJitendra MalikAngjoo Kanazawa
-|links| http://arxiv.org/abs/2410.03665v1 |
-|updated| 2024-10-04 17:59:57 UTC |
-|summary| We present EgoAllo a system for human motion estimation from a head-mounteddevice. Using only egocentric SLAM poses and images EgoAllo guides samplingfrom a conditional diffusion model to estimate 3D body pose height and handparameters that capture the wearers actions in the allocentric coordinateframe of the scene. To achieve this our key insight is in representation: wepropose spatial and temporal invariance criteria for improving modelperformance from which we derive a head motion conditioning parameterizationthat improves estimation by up to 18. We also show how the bodies estimated byour system can improve the hands: the resulting kinematic and temporalconstraints result in over 40 lower hand estimation errors compared to noisymonocular estimates. Project page: https://egoallo.github.io/ |
+|idx| 2410.07177v1 |
+|title| MM-Ego: Towards Building Egocentric Multimodal LLMs |
+|authors| Hanrong YeHaotian ZhangErik DaxbergerLin ChenZongyu LinYanghao LiBowen ZhangHaoxuan YouDan XuZhe GanJiasen LuYinfei Yang
+|links| http://arxiv.org/abs/2410.07177v1 |
+|updated| 2024-10-09 17:59:59 UTC |
+|summary| This research aims to comprehensively explore building a multimodalfoundation model for egocentric video understanding. To achieve this goal wework on three fronts. First as there is a lack of QA data for egocentric videounderstanding we develop a data engine that efficiently generates 7Mhigh-quality QA samples for egocentric videos ranging from 30 seconds to onehour long based on human-annotated data. This is currently the largestegocentric QA dataset. Second we contribute a challenging egocentric QAbenchmark with 629 videos and 7026 questions to evaluate the models abilityin recognizing and memorizing visual details across videos of varying lengths.We introduce a new de-biasing evaluation method to help mitigate theunavoidable language bias present in the models being evaluated. Third wepropose a specialized multimodal architecture featuring a novel Memory PointerPrompting mechanism. This design includes a global glimpse step to gain anoverarching understanding of the entire video and identify key visualinformation followed by a fallback step that utilizes the key visualinformation to generate responses. This enables the model to more effectivelycomprehend extended video content. With the data benchmark and model wesuccessfully build MM-Ego an egocentric multimodal LLM that shows powerfulperformance on egocentric video understanding. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03659v1 |
-|title| Unraveling Cross-Modality Knowledge Conflict in Large Vision-Language Models |
-|authors| Tinghui ZhuQin LiuFei WangZhengzhong TuMuhao Chen
-|links| http://arxiv.org/abs/2410.03659v1 |
-|updated| 2024-10-04 17:59:28 UTC |
-|summary| Large Vision-Language Models LVLMs have demonstrated impressivecapabilities for capturing and reasoning over multimodal inputs. However thesemodels are prone to parametric knowledge conflicts which arise frominconsistencies of represented knowledge between their vision and languagecomponents. In this paper we formally define the problem oftextbfcross-modality parametric knowledge conflict and present asystematic approach to detect interpret and mitigate them. We introduce apipeline that identifies conflicts between visual and textual answers showinga persistently high conflict rate across modalities in recent LVLMs regardlessof the model size. We further investigate how these conflicts interfere withthe inference process and propose a contrastive metric to discern theconflicting samples from the others. Building on these insights we develop anovel dynamic contrastive decoding method that removes undesirable logitsinferred from the less confident modality components based on answerconfidence. For models that do not provide logits we also introduce twoprompt-based strategies to mitigate the conflicts. Our methods achievepromising improvements in accuracy on both the ViQuAE and InfoSeek datasets.Specifically using LLaVA-34B our proposed dynamic contrastive decodingimproves an average accuracy of 2.24. |
+|idx| 2410.07173v1 |
+|title| Do better language models have crisper vision? |
+|authors| Jona RuthardtGertjan J. BurghoutsSerge BelongieYuki M. Asano
+|links| http://arxiv.org/abs/2410.07173v1 |
+|updated| 2024-10-09 17:59:33 UTC |
+|summary| How well do text-only Large Language Models LLMs grasp the visual world AsLLMs are increasingly used in computer vision addressing this question becomesboth fundamental and pertinent. However existing studies have primarilyfocused on limited scenarios such as their ability to generate visual contentor cluster multimodal data. To this end we propose the Visual TextRepresentation Benchmark ViTeRB to isolate key properties that make languagemodels well-aligned with the visual world. With this we identify large-scaledecoder-based LLMs as ideal candidates for representing text in vision-centriccontexts counter to the current practice of utilizing text encoders. Buildingon these findings we propose ShareLock an ultra-lightweight CLIP-like model.By leveraging precomputable frozen features from strong vision and languagemodels ShareLock achieves an impressive 51 accuracy on ImageNet despiteutilizing just 563k image-caption pairs. Moreover training requires only 1 GPUhour or 10 hours including the precomputation of features - orders ofmagnitude less than prior methods. Code will be released. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03645v1 |
-|title| GenSim2: Scaling Robot Data Generation with Multi-modal and Reasoning LLMs |
-|authors| Pu HuaMinghuan LiuAnnabella MacalusoYunfeng LinWeinan ZhangHuazhe XuLirui Wang
-|links| http://arxiv.org/abs/2410.03645v1 |
-|updated| 2024-10-04 17:51:33 UTC |
-|summary| Robotic simulation today remains challenging to scale up due to the humanefforts required to create diverse simulation tasks and scenes.Simulation-trained policies also face scalability issues as many sim-to-realmethods focus on a single task. To address these challenges this work proposesGenSim2 a scalable framework that leverages coding LLMs with multi-modal andreasoning capabilities for complex and realistic simulation task creationincluding long-horizon tasks with articulated objects. To automaticallygenerate demonstration data for these tasks at scale we propose planning andRL solvers that generalize within object categories. The pipeline can generatedata for up to 100 articulated tasks with 200 objects and reduce the requiredhuman efforts. To utilize such data we propose an effective multi-tasklanguage-conditioned policy architecture dubbed proprioceptive point-cloudtransformer PPT that learns from the generated demonstrations and exhibitsstrong sim-to-real zero-shot transfer. Combining the proposed pipeline and thepolicy architecture we show a promising usage of GenSim2 that the generateddata can be used for zero-shot transfer or co-train with real-world collecteddata which enhances the policy performance by 20 compared with trainingexclusively on limited real data. |
+|idx| 2410.07171v1 |
+|title| IterComp: Iterative Composition-Aware Feedback Learning from Model Gallery for Text-to-Image Generation |
+|authors| Xinchen ZhangLing YangGuohao LiYaqi CaiJiake XieYong TangYujiu YangMengdi WangBin Cui
+|links| http://arxiv.org/abs/2410.07171v1 |
+|updated| 2024-10-09 17:59:13 UTC |
+|summary| Advanced diffusion models like RPG Stable Diffusion 3 and FLUX have madenotable strides in compositional text-to-image generation. However thesemethods typically exhibit distinct strengths for compositional generation withsome excelling in handling attribute binding and others in spatialrelationships. This disparity highlights the need for an approach that canleverage the complementary strengths of various models to comprehensivelyimprove the composition capability. To this end we introduce IterComp a novelframework that aggregates composition-aware model preferences from multiplemodels and employs an iterative feedback learning approach to enhancecompositional generation. Specifically we curate a gallery of six powerfulopen-source diffusion models and evaluate their three key compositionalmetrics: attribute binding spatial relationships and non-spatialrelationships. Based on these metrics we develop a composition-aware modelpreference dataset comprising numerous image-rank pairs to traincomposition-aware reward models. Then we propose an iterative feedbacklearning method to enhance compositionality in a closed-loop manner enablingthe progressive self-refinement of both the base diffusion model and rewardmodels over multiple iterations. Theoretical proof demonstrates theeffectiveness and extensive experiments show our significant superiority overprevious SOTA methods e.g. Omost and FLUX particularly in multi-categoryobject composition and complex semantic alignment. IterComp opens new researchavenues in reward feedback learning for diffusion models and compositionalgeneration. Code: https://github.com/YangLing0818/IterComp |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03644v1 |
-|title| Unlearnable 3D Point Clouds: Class-wise Transformation Is All You Need |
-|authors| Xianlong WangMinghui LiWei LiuHangtao ZhangShengshan HuYechao ZhangZiqi ZhouHai Jin
-|links| http://arxiv.org/abs/2410.03644v1 |
-|updated| 2024-10-04 17:49:32 UTC |
-|summary| Traditional unlearnable strategies have been proposed to prevent unauthorizedusers from training on the 2D image data. With more 3D point cloud datacontaining sensitivity information unauthorized usage of this new type datahas also become a serious concern. To address this we propose the firstintegral unlearnable framework for 3D point clouds including two processes: iwe propose an unlearnable data protection scheme involving a class-wisesetting established by a category-adaptive allocation strategy andmulti-transformations assigned to samples ii we propose a data restorationscheme that utilizes class-wise inverse matrix transformation thus enablingauthorized-only training for unlearnable data. This restoration process is apractical issue overlooked in most existing unlearnable literature ie evenauthorized users struggle to gain knowledge from 3D unlearnable data. Boththeoretical and empirical results including 6 datasets 16 models and 2tasks demonstrate the effectiveness of our proposed unlearnable framework. Ourcode is available at urlhttps://github.com/CGCL-codes/UnlearnablePC |
+|idx| 2410.07167v1 |
+|title| Deciphering Cross-Modal Alignment in Large Vision-Language Models with Modality Integration Rate |
+|authors| Qidong HuangXiaoyi DongPan ZhangYuhang ZangYuhang CaoJiaqi WangDahua LinWeiming ZhangNenghai Yu
+|links| http://arxiv.org/abs/2410.07167v1 |
+|updated| 2024-10-09 17:59:04 UTC |
+|summary| We present the Modality Integration Rate MIR an effective robust andgeneralized metric to indicate the multi-modal pre-training quality of LargeVision Language Models LVLMs. Large-scale pre-training plays a critical rolein building capable LVLMs while evaluating its training quality without thecostly supervised fine-tuning stage is under-explored. Loss perplexity andin-context evaluation results are commonly used pre-training metrics for LargeLanguage Models LLMs while we observed that these metrics are lessindicative when aligning a well-trained LLM with a new modality. Due to thelack of proper metrics the research of LVLMs in the critical pre-trainingstage is hindered greatly including the training data choice efficient moduledesign etc. In this paper we propose evaluating the pre-training quality fromthe inter-modal distribution distance perspective and present MIR the ModalityIntegration Rate which is 1 textbfEffective to represent the pre-trainingquality and show a positive relation with the benchmark performance aftersupervised fine-tuning. 2 textbfRobust toward different training/evaluationdata. 3 textbfGeneralize across training configurations and architecturechoices. We conduct a series of pre-training experiments to explore theeffectiveness of MIR and observe satisfactory results that MIR is indicativeabout training data selection training strategy schedule and modelarchitecture design to get better pre-training results. We hope MIR could be ahelpful metric for building capable LVLMs and inspire the following researchabout modality alignment in different areas. Our code is at:https://github.com/shikiw/Modality-Integration-Rate. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03624v1 |
-|title| HyperCMR: Enhanced Multi-Contrast CMR Reconstruction with Eagle Loss |
-|authors| Ruru XuCaner ÖzerIlkay Oksuz
-|links| http://arxiv.org/abs/2410.03624v1 |
-|updated| 2024-10-04 17:29:38 UTC |
-|summary| Accelerating image acquisition for cardiac magnetic resonance imaging CMRIis a critical task. CMRxRecon2024 challenge aims to set the state of the artfor multi-contrast CMR reconstruction. This paper presents HyperCMR a novelframework designed to accelerate the reconstruction of multi-contrast cardiacmagnetic resonance CMR images. HyperCMR enhances the existing PromptMR modelby incorporating advanced loss functions notably the innovative Eagle Losswhich is specifically designed to recover missing high-frequency information inundersampled k-space. Extensive experiments conducted on the CMRxRecon2024challenge dataset demonstrate that HyperCMR consistently outperforms thebaseline across multiple evaluation metrics achieving superior SSIM and PSNRscores. |
+|idx| 2410.07164v1 |
+|title| AvatarGO: Zero-shot 4D Human-Object Interaction Generation and Animation |
+|authors| Yukang CaoLiang PanKai HanKwan-Yee K. WongZiwei Liu
+|links| http://arxiv.org/abs/2410.07164v1 |
+|updated| 2024-10-09 17:58:56 UTC |
+|summary| Recent advancements in diffusion models have led to significant improvementsin the generation and animation of 4D full-body human-object interactionsHOI. Nevertheless existing methods primarily focus on SMPL-based motiongeneration which is limited by the scarcity of realistic large-scaleinteraction data. This constraint affects their ability to create everyday HOIscenes. This paper addresses this challenge using a zero-shot approach with apre-trained diffusion model. Despite this potential achieving our goals isdifficult due to the diffusion models lack of understanding of where andhow objects interact with the human body. To tackle these issues weintroduce AvatarGO a novel framework designed to generate animatable 4D HOIscenes directly from textual inputs. Specifically 1 for the wherechallenge we propose LLM-guided contact retargeting which employs Lang-SAM toidentify the contact body part from text prompts ensuring preciserepresentation of human-object spatial relations. 2 For the how challengewe introduce correspondence-aware motion optimization that constructs motionfields for both human and object models using the linear blend skinningfunction from SMPL-X. Our framework not only generates coherent compositionalmotions but also exhibits greater robustness in handling penetration issues.Extensive experiments with existing methods validate AvatarGOs superiorgeneration and animation capabilities on a variety of human-object pairs anddiverse poses. As the first attempt to synthesize 4D avatars with objectinteractions we hope AvatarGO could open new doors for human-centric 4Dcontent creation. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03651v1 |
-|title| Minimax-optimal trust-aware multi-armed bandits |
-|authors| Changxiao CaiJiacheng Zhang
-|links| http://arxiv.org/abs/2410.03651v1 |
-|updated| 2024-10-04 17:55:31 UTC |
-|summary| Multi-armed bandit MAB algorithms have achieved significant success insequential decision-making applications under the premise that humansperfectly implement the recommended policy. However existing methods oftenoverlook the crucial factor of human trust in learning algorithms. When trustis lacking humans may deviate from the recommended policy leading toundesired learning performance. Motivated by this gap we study the trust-awareMAB problem by integrating a dynamic trust model into the standard MABframework. Specifically it assumes that the recommended and actuallyimplemented policy differs depending on human trust which in turn evolves withthe quality of the recommended policy. We establish the minimax regret in thepresence of the trust issue and demonstrate the suboptimality of vanilla MABalgorithms such as the upper confidence bound UCB algorithm. To overcome thislimitation we introduce a novel two-stage trust-aware procedure that provablyattains near-optimal statistical guarantees. A simulation study is conducted toillustrate the benefits of our proposed algorithm when dealing with the trustissue. |
+|idx| 2410.07170v1 |
+|title| One Initialization to Rule them All: Fine-tuning via Explained Variance Adaptation |
+|authors| Fabian PaischerLukas HauzenbergerThomas SchmiedBenedikt AlkinMarc Peter DeisenrothSepp Hochreiter
+|links| http://arxiv.org/abs/2410.07170v1 |
+|updated| 2024-10-09 17:59:06 UTC |
+|summary| Foundation models FMs are pre-trained on large-scale datasets and thenfine-tuned on a downstream task for a specific application. The most successfuland most commonly used fine-tuning method is to update the pre-trained weightsvia a low-rank adaptation LoRA. LoRA introduces new weight matrices that areusually initialized at random with a uniform rank distribution across modelweights. Recent works focus on weight-driven initialization or learning ofadaptive ranks during training. Both approaches have only been investigated inisolation resulting in slow convergence or a uniform rank distribution inturn leading to sub-optimal performance. We propose to enhance LoRA byinitializing the new weights in a data-driven manner by computing singularvalue decomposition on minibatches of activation vectors. Then we initializethe LoRA matrices with the obtained right-singular vectors and re-distributeranks among all weight matrices to explain the maximal amount of variance andcontinue the standard LoRA fine-tuning procedure. This results in our newmethod Explained Variance Adaptation EVA. We apply EVA to a variety offine-tuning tasks ranging from language generation and understanding to imageclassification and reinforcement learning. EVA exhibits faster convergence thancompetitors and attains the highest average score across a multitude of tasksper domain. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03601v1 |
-|title| How Discrete and Continuous Diffusion Meet: Comprehensive Analysis of Discrete Diffusion Models via a Stochastic Integral Framework |
-|authors| Yinuo RenHaoxuan ChenGrant M. RotskoffLexing Ying
-|links| http://arxiv.org/abs/2410.03601v1 |
-|updated| 2024-10-04 16:59:29 UTC |
-|summary| Discrete diffusion models have gained increasing attention for their abilityto model complex distributions with tractable sampling and inference. Howeverthe error analysis for discrete diffusion models remains less well-understood.In this work we propose a comprehensive framework for the error analysis ofdiscrete diffusion models based on Levy-type stochastic integrals. Bygeneralizing the Poisson random measure to that with a time-independent andstate-dependent intensity we rigorously establish a stochastic integralformulation of discrete diffusion models and provide the corresponding changeof measure theorems that are intriguingly analogous to Ito integrals andGirsanovs theorem for their continuous counterparts. Our framework unifies andstrengthens the current theoretical results on discrete diffusion models andobtains the first error bound for the tau-leaping scheme in KL divergence.With error sources clearly identified our analysis gives new insight into themathematical properties of discrete diffusion models and offers guidance forthe design of efficient and accurate algorithms for real-world discretediffusion model applications. |
+|idx| 2410.07091v1 |
+|title| Collusion Detection with Graph Neural Networks |
+|authors| Lucas GomesJannis KueckMara MattesMartin SpindlerAlexey Zaytsev
+|links| http://arxiv.org/abs/2410.07091v1 |
+|updated| 2024-10-09 17:31:41 UTC |
+|summary| Collusion is a complex phenomenon in which companies secretly collaborate toengage in fraudulent practices. This paper presents an innovative methodologyfor detecting and predicting collusion patterns in different national marketsusing neural networks NNs and graph neural networks GNNs. GNNs areparticularly well suited to this task because they can exploit the inherentnetwork structures present in collusion and many other economic problems. Ourapproach consists of two phases: In Phase I we develop and train models onindividual market datasets from Japan the United States two regions inSwitzerland Italy and Brazil focusing on predicting collusion in singlemarkets. In Phase II we extend the models applicability through zero-shotlearning employing a transfer learning approach that can detect collusion inmarkets in which training data is unavailable. This phase also incorporatesout-of-distribution OOD generalization to evaluate the models performance onunseen datasets from other countries and regions. In our empirical study weshow that GNNs outperform NNs in detecting complex collusive patterns. Thisresearch contributes to the ongoing discourse on preventing collusion andoptimizing detection methodologies providing valuable guidance on the use ofNNs and GNNs in economic applications to enhance market fairness and economicwelfare. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03581v1 |
-|title| Nonstationary Sparse Spectral Permanental Process |
-|authors| Zicheng SunYixuan ZhangZenan LingXuhui FanFeng Zhou
-|links| http://arxiv.org/abs/2410.03581v1 |
-|updated| 2024-10-04 16:40:56 UTC |
-|summary| Existing permanental processes often impose constraints on kernel types orstationarity limiting the models expressiveness. To overcome theselimitations we propose a novel approach utilizing the sparse spectralrepresentation of nonstationary kernels. This technique relaxes the constraintson kernel types and stationarity allowing for more flexible modeling whilereducing computational complexity to the linear level. Additionally weintroduce a deep kernel variant by hierarchically stacking multiple spectralfeature mappings further enhancing the models expressiveness to capturecomplex patterns in data. Experimental results on both synthetic and real-worlddatasets demonstrate the effectiveness of our approach particularly inscenarios with pronounced data nonstationarity. Additionally ablation studiesare conducted to provide insights into the impact of various hyperparameters onmodel performance. |
+|idx| 2410.07021v1 |
+|title| Do Contemporary CATE Models Capture Real-World Heterogeneity? Findings from a Large-Scale Benchmark |
+|authors| Haining YuYizhou Sun
+|links| http://arxiv.org/abs/2410.07021v1 |
+|updated| 2024-10-09 16:04:40 UTC |
+|summary| We present unexpected findings from a large-scale benchmark study evaluatingConditional Average Treatment Effect CATE estimation algorithms. By running16 modern CATE models across 43200 datasets we find that: a 62 of CATEestimates have a higher Mean Squared Error MSE than a trivial zero-effectpredictor rendering them ineffective b in datasets with at least one usefulCATE estimate 80 still have higher MSE than a constant-effect model and cOrthogonality-based models outperform other models only 30 of the timedespite widespread optimism about their performance. These findings exposesignificant limitations in current CATE models and suggest ample opportunitiesfor further research.  Our findings stem from a novel application of textitobservationalsampling originally developed to evaluate Average Treatment Effect ATEestimates from observational methods with experiment data. To adaptobservational sampling for CATE evaluation we introduce a statisticalparameter Q equal to MSE minus a constant and preserves the ranking ofmodels by their MSE. We then derive a family of sample statistics collectivelycalled hatQ that can be computed from real-world data. We prove thathatQ is a consistent estimator of Q under mild technical conditions.When used in observational sampling hatQ is unbiased and asymptoticallyselects the model with the smallest MSE. To ensure the benchmark reflectsreal-world heterogeneity we handpick datasets where outcomes come from fieldrather than simulation. By combining the new observational sampling method newstatistics and real-world datasets the benchmark provides a uniqueperspective on CATE estimator performance and uncover gaps in capturingreal-world heterogeneity. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03477v1 |
-|title| On the Hardness of Learning One Hidden Layer Neural Networks |
-|authors| Shuchen LiIlias ZadikManolis Zampetakis
-|links| http://arxiv.org/abs/2410.03477v1 |
-|updated| 2024-10-04 14:48:13 UTC |
-|summary| In this work we consider the problem of learning one hidden layer ReLUneural networks with inputs from mathbbRd. We show that this learningproblem is hard under standard cryptographic assumptions even when: 1 thesize of the neural network is polynomial in d 2 its input distribution isa standard Gaussian and 3 the noise is Gaussian and polynomially small ind. Our hardness result is based on the hardness of the Continuous Learningwith Errors CLWE problem and in particular is based on the largely believedworst-case hardness of approximately solving the shortest vector problem up toa multiplicative polynomial factor. |
+|idx| 2410.07014v1 |
+|title| Optimizing Estimators of Squared Calibration Errors in Classification |
+|authors| Sebastian G. GruberFrancis Bach
+|links| http://arxiv.org/abs/2410.07014v1 |
+|updated| 2024-10-09 15:58:06 UTC |
+|summary| In this work we propose a mean-squared error-based risk that enables thecomparison and optimization of estimators of squared calibration errors inpractical settings. Improving the calibration of classifiers is crucial forenhancing the trustworthiness and interpretability of machine learning modelsespecially in sensitive decision-making scenarios. Although various calibrationerror estimators exist in the current literature there is a lack of guidanceon selecting the appropriate estimator and tuning its hyperparameters. Byleveraging the bilinear structure of squared calibration errors we reformulatecalibration estimation as a regression problem with independent and identicallydistributed i.i.d. input pairs. This reformulation allows us to quantify theperformance of different estimators even for the most challenging calibrationcriterion known as canonical calibration. Our approach advocates for atraining-validation-testing pipeline when estimating a calibration error on anevaluation dataset. We demonstrate the effectiveness of our pipeline byoptimizing existing calibration estimators and comparing them with novel kernelridge regression-based estimators on standard image classification tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03462v1 |
-|title| Linear Transformer Topological Masking with Graph Random Features |
-|authors| Isaac ReidKumar Avinava DubeyDeepali JainWill WhitneyAmr AhmedJoshua AinslieAlex BewleyMithun JacobAranyak MehtaDavid RendlemanConnor SchenckRichard E. TurnerRené WagnerAdrian WellerKrzysztof Choromanski
-|links| http://arxiv.org/abs/2410.03462v1 |
-|updated| 2024-10-04 14:24:06 UTC |
-|summary| When training transformers on graph-structured data incorporatinginformation about the underlying topology is crucial for good performance.Topological masking a type of relative position encoding achieves this byupweighting or downweighting attention depending on the relationship betweenthe query and keys in a graph. In this paper we propose to parameterisetopological masks as a learnable function of a weighted adjacency matrix -- anovel flexible approach which incorporates a strong structural inductive bias.By approximating this mask with graph random features for which we prove thefirst known concentration bounds we show how this can be made fullycompatible with linear attention preserving mathcalON time and spacecomplexity with respect to the number of input tokens. The fastest previousalternative was mathcalON log N and only suitable for specific graphs.Our efficient masking algorithms provide strong performance gains for tasks onimage and point cloud data including with 30k nodes. |
+|idx| 2410.06993v1 |
+|title| Efficient Distribution Matching of Representations via Noise-Injected Deep InfoMax |
+|authors| Ivan ButakovAlexander SememenkoAlexander TolmachevAndrey GladkovMarina MunkhoevaAlexey Frolov
+|links| http://arxiv.org/abs/2410.06993v1 |
+|updated| 2024-10-09 15:40:04 UTC |
+|summary| Deep InfoMax DIM is a well-established method for self-supervisedrepresentation learning SSRL based on maximization of the mutual informationbetween the input and the output of a deep neural network encoder. Despite theDIM and contrastive SSRL in general being well-explored the task of learningrepresentations conforming to a specific distribution i.e. distributionmatching DM is still under-addressed. Motivated by the importance of DM toseveral downstream tasks including generative modeling disentanglementoutliers detection and other we enhance DIM to enable automatic matching oflearned representations to a selected prior distribution. To achieve this wepropose injecting an independent noise into the normalized outputs of theencoder while keeping the same InfoMax training objective. We show that suchmodification allows for learning uniformly and normally distributedrepresentations as well as representations of other absolutely continuousdistributions. Our approach is tested on various downstream tasks. The resultsindicate a moderate trade-off between the performance on the downstream tasksand quality of DM. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03642v1 |
-|title| Aligning LLMs with Individual Preferences via Interaction |
-|authors| Shujin WuMay FungCheng QianJeonghwan KimDilek Hakkani-TurHeng Ji
-|links| http://arxiv.org/abs/2410.03642v1 |
-|updated| 2024-10-04 17:48:29 UTC |
-|summary| As large language models LLMs demonstrate increasingly advancedcapabilities aligning their behaviors with human values and preferencesbecomes crucial for their wide adoption. While previous research focuses ongeneral alignment to principles such as helpfulness harmlessness and honestythe need to account for individual and diverse preferences has been largelyoverlooked potentially undermining customized human experiences. To addressthis gap we train LLMs that can interact to align essentially cultivatingthe meta-skill of LLMs to implicitly infer the unspoken personalizedpreferences of the current user through multi-turn conversations and thendynamically align their following behaviors and responses to these inferredpreferences. Our approach involves establishing a diverse pool of 3310distinct user personas by initially creating seed examples which are thenexpanded through iterative self-generation and filtering. Guided by distinctuser personas we leverage multi-LLM collaboration to develop a multi-turnpreference dataset containing 3K multi-turn conversations in tree structures.Finally we apply supervised fine-tuning and reinforcement learning to enhanceLLMs using this dataset. For evaluation we establish the ALOE ALign WithCustOmized PrEferences benchmark consisting of 100 carefully selectedexamples and well-designed metrics to measure the customized alignmentperformance during conversations. Experimental results demonstrate theeffectiveness of our method in enabling dynamic personalized alignment viainteraction. |
+|idx| 2410.07119v1 |
+|title| Thing2Reality: Transforming 2D Content into Conditioned Multiviews and 3D Gaussian Objects for XR Communication |
+|authors| Erzhen HuMingyi LiJungtaek HongXun QianAlex OlwalDavid KimSeongkook HeoRuofei Du
+|links| http://arxiv.org/abs/2410.07119v1 |
+|updated| 2024-10-09 17:49:06 UTC |
+|summary| During remote communication participants often share both digital andphysical content such as product designs digital assets and environments toenhance mutual understanding. Recent advances in augmented communication havefacilitated users to swiftly create and share digital 2D copies of physicalobjects from video feeds into a shared space. However conventional 2Drepresentations of digital objects restricts users ability to spatiallyreference items in a shared immersive environment. To address this we proposeThing2Reality an Extended Reality XR communication platform that enhancesspontaneous discussions of both digital and physical items during remotesessions. With Thing2Reality users can quickly materialize ideas or physicalobjects in immersive environments and share them as conditioned multiviewrenderings or 3D Gaussians. Thing2Reality enables users to interact with remoteobjects or discuss concepts in a collaborative manner. Our user study revealedthat the ability to interact with and manipulate 3D representations of objectssignificantly enhances the efficiency of discussions with the potential toaugment discussion of 2D artifacts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03608v1 |
-|title| TICKing All the Boxes: Generated Checklists Improve LLM Evaluation and Generation |
-|authors| Jonathan CookTim RocktäschelJakob FoersterDennis AumillerAlex Wang
-|links| http://arxiv.org/abs/2410.03608v1 |
-|updated| 2024-10-04 17:09:08 UTC |
-|summary| Given the widespread adoption and usage of Large Language Models LLMs itis crucial to have flexible and interpretable evaluations of theirinstruction-following ability. Preference judgments between model outputs havebecome the de facto evaluation standard despite distilling complexmulti-faceted preferences into a single ranking. Furthermore as humanannotation is slow and costly LLMs are increasingly used to make thesejudgments at the expense of reliability and interpretability. In this work wepropose TICK Targeted Instruct-evaluation with ChecKlists a fully automatedinterpretable evaluation protocol that structures evaluations withLLM-generated instruction-specific checklists. We first show that given aninstruction LLMs can reliably produce high-quality tailored evaluationchecklists that decompose the instruction into a series of YES/NO questions.Each question asks whether a candidate response meets a specific requirement ofthe instruction. We demonstrate that using TICK leads to a significant increase46.4 to 52.2 in the frequency of exact agreements between LLM judgementsand human preferences as compared to having an LLM directly score an output.We then show that STICK Self-TICK can be used to improve generation qualityacross multiple benchmarks via self-refinement and Best-of-N selection. STICKself-refinement on LiveBench reasoning tasks leads to an absolute gain of7.8 whilst Best-of-N selection with STICK attains 6.3 absoluteimprovement on the real-world instruction dataset WildBench. In light of thisstructured multi-faceted self-improvement is shown to be a promising way tofurther advance LLM capabilities. Finally by providing LLM-generatedchecklists to human evaluators tasked with directly scoring LLM responses toWildBench instructions we notably increase inter-annotator agreement 0.194to 0.256. |
+|idx| 2410.07053v1 |
+|title| Robots in the Middle: Evaluating LLMs in Dispute Resolution |
+|authors| Jinzhe TanHannes WestermannNikhil Reddy PottanigariJaromír ŠavelkaSébastien MeeùsMia GodetKarim Benyekhlef
+|links| http://arxiv.org/abs/2410.07053v1 |
+|updated| 2024-10-09 16:51:10 UTC |
+|summary| Mediation is a dispute resolution method featuring a neutral third-partymediator who intervenes to help the individuals resolve their dispute. Inthis paper we investigate to which extent large language models LLMs areable to act as mediators. We investigate whether LLMs are able to analyzedispute conversations select suitable intervention types and generateappropriate intervention messages. Using a novel manually created dataset of50 dispute scenarios we conduct a blind evaluation comparing LLMs with humanannotators across several key metrics. Overall the LLMs showed strongperformance even outperforming our human annotators across dimensions.Specifically in 62 of the cases the LLMs chose intervention types that wererated as better than or equivalent to those chosen by humans. Moreover in 84of the cases the intervention messages generated by the LLMs were rated asbetter than or equal to the intervention messages written by humans. LLMslikewise performed favourably on metrics such as impartiality understandingand contextualization. Our results demonstrate the potential of integrating AIin online dispute resolution ODR platforms. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03571v1 |
-|title| Generative AI in the Software Engineering Domain: Tensions of Occupational Identity and Patterns of Identity Protection |
-|authors| Anuschka SchmittKrzysztof Z. GajosOsnat Mokryn
-|links| http://arxiv.org/abs/2410.03571v1 |
-|updated| 2024-10-04 16:20:39 UTC |
-|summary| The adoption of generative Artificial Intelligence GAI in organizationalsettings calls into question workers roles and relatedly the implicationsfor their long-term skill development and domain expertise. In our qualitativestudy in the software engineering domain we build on the theoretical lenses ofoccupational identity and self-determination theory to understand how and whysoftware engineers make sense of GAI for their work. We find that engineerssense-making is contingent on domain expertise as juniors and seniors felttheir needs for competence autonomy and relatedness to be differentlyimpacted by GAI. We shed light on the importance of the individuals role inpreserving tacit domain knowledge as engineers engaged in sense-making thatprotected their occupational identity. We illustrate how organizations play anactive role in shaping workers sense-making process and propose designguidelines on how organizations and system designers can facilitate the impactof technological change on workers occupational identity. |
+|idx| 2410.06972v1 |
+|title| Diamond of Thought: A Design Thinking-Based Framework for LLMs in Wearable Design |
+|authors| Qiyang MiaoJiang XuZhihao SongChengrui WangYu Cui
+|links| http://arxiv.org/abs/2410.06972v1 |
+|updated| 2024-10-09 15:10:00 UTC |
+|summary| Wearable design is an interdisciplinary field that balances technologicalinnovation human factors and human-computer interactions. Despitecontributions from various disciplines many projects lack stableinterdisciplinary teams which often leads to design failures. Large languagemodels LLMs integrate diverse information and generate innovative solutionsmaking them a valuable tool for enhancing design processes. Thus we haveexplored the use of LLMs in wearable design by combining design-thinkingprinciples with LLM capabilities. We have developed the Diamond of Thoughtframework and analysed 1603 prototypes and 1129 products from a body-centricperspective to create a comprehensive database. We employed retrieval-augmentedgeneration to input database details into the LLMs ensuring applicability towearable design challenges and integration of embodied cognition into theprocess. Our LLM-based methodology for wearables has been experimentallyvalidated demonstrating the potential of LLMs for the advancement of designpractices. This study offers new tools and methods for future wearable designs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03525v1 |
-|title| Artificial Human Lecturers: Initial Findings From Asia's First AI Lecturers in Class to Promote Innovation in Education |
-|authors| Ching Christie PangYawei ZhaoZhizhuo YinJia SunReza Hadi MogaviPan Hui
-|links| http://arxiv.org/abs/2410.03525v1 |
-|updated| 2024-10-04 15:45:41 UTC |
-|summary| In recent years artificial intelligence AI has become increasinglyintegrated into education reshaping traditional learning environments. Despitethis there has been limited investigation into fully operational artificialhuman lecturers. To the best of our knowledge our paper presents the worldsfirst study examining their deployment in a real-world educational setting.Specifically we investigate the use of digital teachers AI-powered virtuallecturers in a postgraduate course at the Hong Kong University of Science andTechnology HKUST. Our study explores how features such as appearancenon-verbal cues voice and verbal expression impact students learningexperiences. Findings suggest that students highly value naturalnessauthenticity and interactivity in digital teachers highlighting areas forimprovement such as increased responsiveness personalized avatars andintegration with larger learning platforms. We conclude that digital teachershave significant potential to enhance education by providing a more flexibleengaging personalized and accessible learning experience for students. |
+|idx| 2410.06857v1 |
+|title| Digital Dotted Lines: Design and Evaluation of a Prototype for Digitally Signing Documents Using Identity Wallets |
+|authors| Yorick LastJorrit GeelsHanna Schraffenberger
+|links| http://dx.doi.org/10.1145/3613905.3650977 |
+|updated| 2024-10-09 13:20:13 UTC |
+|summary| Documents are largely stored and shared digitally. Yet digital documents arestill commonly signed using copies of handwritten signatures which aresensitive to fraud. Though secure cryptography-based signature solutionsexist they are hardly used due to usability issues. This paper proposes to usedigital identity wallets for securely and intuitively signing digital documentswith verified personal data. Using expert feedback we implemented this visionin an interactive prototype. The prototype was assessed in a moderatedusability test N  15 and a subsequent unmoderated remote usability test N 99. While participants generally expressed satisfaction with the system theyalso misunderstood how to interpret the signature information displayed by theprototype. Specifically signed documents were also trusted when the documentwas signed with irrelevant personal data of the signer. We conclude that suchunwarranted trust forms a threat to usable digital signatures and requiresattention by the usable security community. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03448v1 |
-|title| How Toxicity Classifiers and Large Language Models Respond to Ableism |
-|authors| Mahika PhutaneAnanya SeelamAditya Vashistha
-|links| http://arxiv.org/abs/2410.03448v1 |
-|updated| 2024-10-04 14:09:12 UTC |
-|summary| People with disabilities PwD regularly encounter ableist hate andmicroaggressions online. While online platforms use machine learning models tomoderate online harm there is little research investigating how these modelsinteract with ableism. In this paper we curated a dataset of 100 social mediacomments targeted towards PwD and recruited 160 participants to rate andexplain how toxic and ableist these comments were. We then promptedstate-of-the art toxicity classifiers TCs and large language models LLMs torate and explain the harm. Our analysis revealed that TCs and LLMs ratedtoxicity significantly lower than PwD but LLMs rated ableism generally on parwith PwD. However ableism explanations by LLMs overlooked emotional harm andlacked specificity and acknowledgement of context important facets of PwDexplanations. Going forward we discuss challenges in designingdisability-aware toxicity classifiers and advocate for the shift from ableismdetection to ableism interpretation and explanation. |
+|idx| 2410.06854v1 |
+|title| Focal Surface Holographic Light Transport using Learned Spatially Adaptive Convolutions |
+|authors| Chuanjun ZhengYicheng ZhanLiang ShiOzan CakmakciKaan Akşit
+|links| http://arxiv.org/abs/2410.06854v1 |
+|updated| 2024-10-09 13:17:22 UTC |
+|summary| Computer-Generated Holography CGH is a set of algorithmic methods foridentifying holograms that reconstruct Three-Dimensi-onal 3D scenes inholographic displays. CGH algorithms decompose 3D scenes into multiplanes atdifferent depth levels and rely on simulations of light that propagated from asource plane to a targeted plane. Thus for n planes CGH typically optimizesholograms using n plane-to-plane light transport simulations leading to majortime and computational demands. Our work replaces multiple planes with a focalsurface and introduces a learned light transport model that could propagate alight field from a source plane to the focal surface in a single inference. Ourlearned light transport model leverages spatially adaptive convolution toachieve depth-varying propagation demanded by targeted focal surfaces. Theproposed model reduces the hologram optimization process up to 1.5x whichcontributes to hologram dataset generation and the training of future learnedCGH models. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03403v1 |
-|title| Distributed Networked Multi-task Learning |
-|authors| Lingzhou HongAlfredo Garcia
-|links| http://arxiv.org/abs/2410.03403v1 |
-|updated| 2024-10-04 13:10:31 UTC |
-|summary| We consider a distributed multi-task learning scheme that accounts formultiple linear model estimation tasks with heterogeneous and/or correlateddata streams. We assume that nodes can be partitioned into groups correspondingto different learning tasks and communicate according to a directed networktopology. Each node estimates a linear model asynchronously and is subject tolocal within-group regularization and global across groups regularizationterms targeting noise reduction and generalization performance improvementrespectively. We provide a finite-time characterization of convergence of theestimators and task relation and illustrate the schemes general applicabilityin two examples: random field temperature estimation and modeling studentperformance from different academic districts. |
+|idx| 2410.07109v1 |
+|title| I Want to Break Free! Anti-Social Behavior and Persuasion Ability of LLMs in Multi-Agent Settings with Social Hierarchy |
+|authors| Gian Maria CampedelliNicolò PenzoMassimo StefanRoberto DessìMarco GueriniBruno LepriJacopo Staiano
+|links| http://arxiv.org/abs/2410.07109v1 |
+|updated| 2024-10-09 17:45:47 UTC |
+|summary| As Large Language Model LLM-based agents become increasingly autonomous andwill more freely interact with each other studying interactions between thembecomes crucial to anticipate emergent phenomena and potential risks. Drawinginspiration from the widely popular Stanford Prison Experiment we contributeto this line of research by studying interaction patterns of LLM agents in acontext characterized by strict social hierarchy. We do so by specificallystudying two types of phenomena: persuasion and anti-social behavior insimulated scenarios involving a guard and a prisoner agent who seeks to achievea specific goal i.e. obtaining additional yard time or escape from prison.Leveraging 200 experimental scenarios for a total of 2000 machine-machineconversations across five different popular LLMs we provide a set ofnoteworthy findings. We first document how some models consistently fail incarrying out a conversation in our multi-agent setup where power dynamics areat play. Then for the models that were able to engage in successfulinteractions we empirically show how the goal that an agent is set to achieveimpacts primarily its persuasiveness while having a negligible effect withrespect to the agents anti-social behavior. Third we highlight how agentspersonas and particularly the guards personality drive both the likelihoodof successful persuasion from the prisoner and the emergence of anti-socialbehaviors. Fourth we show that even without explicitly prompting for specificpersonalities anti-social behavior emerges by simply assigning agents roles.These results bear implications for the development of interactive LLM agentsas well as the debate on their societal impact. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.03072v1 |
-|title| Multi-Robot Motion Planning with Diffusion Models |
-|authors| Yorai ShaoulItamar MishaniShivam VatsJiaoyang LiMaxim Likhachev
-|links| http://arxiv.org/abs/2410.03072v1 |
-|updated| 2024-10-04 01:31:13 UTC |
-|summary| Diffusion models have recently been successfully applied to a wide range ofrobotics applications for learning complex multi-modal behaviors from data.However prior works have mostly been confined to single-robot and small-scaleenvironments due to the high sample complexity of learning multi-robotdiffusion models. In this paper we propose a method for generatingcollision-free multi-robot trajectories that conform to underlying datadistributions while using only single-robot data. Our algorithm Multi-robotMulti-model planning Diffusion MMD does so by combining learned diffusionmodels with classical search-based techniques -- generating data-driven motionsunder collision constraints. Scaling further we show how to compose multiplediffusion models to plan in large environments where a single diffusion modelfails to generalize well. We demonstrate the effectiveness of our approach inplanning for dozens of robots in a variety of simulated scenarios motivated bylogistics environments. View video demonstrations in our supplementarymaterial and our code at: https://github.com/yoraish/mmd. |
+|idx| 2410.06845v1 |
+|title| MentalArena: Self-play Training of Language Models for Diagnosis and Treatment of Mental Health Disorders |
+|authors| Cheng LiMay FungQingyun WangChi HanManling LiJindong WangHeng Ji
+|links| http://arxiv.org/abs/2410.06845v1 |
+|updated| 2024-10-09 13:06:40 UTC |
+|summary| Mental health disorders are one of the most serious diseases in the world.Most people with such a disease lack access to adequate care which highlightsthe importance of training models for the diagnosis and treatment of mentalhealth disorders. However in the mental health domain privacy concerns limitthe accessibility of personalized treatment data making it challenging tobuild powerful models. In this paper we introduce MentalArena a self-playframework to train language models by generating domain-specific personalizeddata where we obtain a better model capable of making a personalized diagnosisand treatment as a therapist and providing information as a patient. Toaccurately model human-like mental health patients we devise Symptom Encoderwhich simulates a real patient from both cognition and behavior perspectives.To address intent bias during patient-therapist interactions we proposeSymptom Decoder to compare diagnosed symptoms with encoded symptoms anddynamically manage the dialogue between patient and therapist according to theidentified deviations. We evaluated MentalArena against 6 benchmarks includingbiomedicalQA and mental health tasks compared to 6 advanced models. Ourmodels fine-tuned on both GPT-3.5 and Llama-3-8b significantly outperformtheir counterparts including GPT-4o. We hope that our work can inspire futureresearch on personalized care. Code is available inhttps://github.com/Scarelette/MentalArena/tree/main |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.02958v1 |
-|title| AutoML-Agent: A Multi-Agent LLM Framework for Full-Pipeline AutoML |
-|authors| Patara TriratWonyong JeongSung Ju Hwang
-|links| http://arxiv.org/abs/2410.02958v1 |
-|updated| 2024-10-03 20:01:09 UTC |
-|summary| Automated machine learning AutoML accelerates AI development by automatingtasks in the development pipeline such as optimal model search andhyperparameter tuning. Existing AutoML systems often require technicalexpertise to set up complex tools which is in general time-consuming andrequires a large amount of human effort. Therefore recent works have startedexploiting large language models LLM to lessen such burden and increase theusability of AutoML frameworks via a natural language interface allowingnon-expert users to build their data-driven solutions. These methods howeverare usually designed only for a particular process in the AI developmentpipeline and do not efficiently use the inherent capacity of the LLMs. Thispaper proposes AutoML-Agent a novel multi-agent framework tailored forfull-pipeline AutoML i.e. from data retrieval to model deployment.AutoML-Agent takes users task descriptions facilitates collaboration betweenspecialized LLM agents and delivers deployment-ready models. Unlike existingwork instead of devising a single plan we introduce a retrieval-augmentedplanning strategy to enhance exploration to search for more optimal plans. Wealso decompose each plan into sub-tasks e.g. data preprocessing and neuralnetwork design each of which is solved by a specialized agent we build viaprompting executing in parallel making the search process more efficient.Moreover we propose a multi-stage verification to verify executed results andguide the code generation LLM in implementing successful solutions. Extensiveexperiments on seven downstream tasks using fourteen datasets show thatAutoML-Agent achieves a higher success rate in automating the full AutoMLprocess yielding systems with good performance throughout the diverse domains. |
+|idx| 2410.06101v1 |
+|title| Coevolving with the Other You: Fine-Tuning LLM with Sequential Cooperative Multi-Agent Reinforcement Learning |
+|authors| Hao MaTianyi HuZhiqiang PuBoyin LiuXiaolin AiYanyan LiangMin Chen
+|links| http://arxiv.org/abs/2410.06101v1 |
+|updated| 2024-10-08 14:55:26 UTC |
+|summary| Reinforcement learning RL has emerged as a pivotal technique forfine-tuning large language models LLMs on specific tasks. However prevailingRL fine-tuning methods predominantly rely on PPO and its variants. Though thesealgorithms are effective in general RL settings they often exhibit suboptimalperformance and vulnerability to distribution collapse when applied to thefine-tuning of LLMs. In this paper we propose CORY extending the RLfine-tuning of LLMs to a sequential cooperative multi-agent reinforcementlearning framework to leverage the inherent coevolution and emergentcapabilities of multi-agent systems. In CORY the LLM to be fine-tuned isinitially duplicated into two autonomous agents: a pioneer and an observer. Thepioneer generates responses based on queries while the observer generatesresponses using both the queries and the pioneers responses. The two agentsare trained together. During training the agents exchange roles periodicallyfostering cooperation and coevolution between them. Experiments evaluate CORYsperformance by fine-tuning GPT-2 and Llama-2 under subjective and objectivereward functions on the IMDB Review and GSM8K datasets respectively. Resultsshow that CORY outperforms PPO in terms of policy optimality resistance todistribution collapse and training robustness thereby underscoring itspotential as a superior methodology for refining LLMs in real-worldapplications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.02664v1 |
-|title| Grounded Answers for Multi-agent Decision-making Problem through Generative World Model |
-|authors| Zeyang LiuXinrui YangShiguang SunLong QianLipeng WanXingyu ChenXuguang Lan
-|links| http://arxiv.org/abs/2410.02664v1 |
-|updated| 2024-10-03 16:49:59 UTC |
-|summary| Recent progress in generative models has stimulated significant innovationsin many fields such as image generation and chatbots. Despite their successthese models often produce sketchy and misleading solutions for complexmulti-agent decision-making problems because they miss the trial-and-errorexperience and reasoning as humans. To address this limitation we explore aparadigm that integrates a language-guided simulator into the multi-agentreinforcement learning pipeline to enhance the generated answer. The simulatoris a world model that separately learns dynamics and reward where the dynamicsmodel comprises an image tokenizer as well as a causal transformer to generateinteraction transitions autoregressively and the reward model is abidirectional transformer learned by maximizing the likelihood of trajectoriesin the expert demonstrations under language guidance. Given an image of thecurrent state and the task description we use the world model to train thejoint policy and produce the image sequence as the answer by running theconverged policy on the dynamics model. The empirical results demonstrate thatthis framework can improve the answers for multi-agent decision-making problemsby showing superior performance on the training and unseen tasks of theStarCraft Multi-Agent Challenge benchmark. In particular it can generateconsistent interaction sequences and explainable reward functions atinteraction states opening the path for training generative models of thefuture. |
+|idx| 2410.06052v1 |
+|title| Concurrent-Learning Based Relative Localization in Shape Formation of Robot Swarms |
+|authors| Jinhu LüKunrui ZeShuoyu YueKexin LiuWei WangGuibin Sun
+|links| http://arxiv.org/abs/2410.06052v1 |
+|updated| 2024-10-08 13:54:04 UTC |
+|summary| In this paper we address the shape formation problem for massive robotswarms in environments where external localization systems are unavailable.Achieving this task effectively with solely onboard measurements is stillscarcely explored and faces some practical challenges. To solve thischallenging problem we propose the following novel results. Firstly toestimate the relative positions among neighboring robots a concurrent-learningbased estimator is proposed. It relaxes the persistent excitation conditionrequired in the classical ones such as least-square estimator. Secondly weintroduce a finite-time agreement protocol to determine the shape location.This is achieved by estimating the relative position between each robot and arandomly assigned seed robot. The initial position of the seed one marks theshape location. Thirdly based on the theoretical results of the relativelocalization a novel behavior-based control strategy is devised. This strategynot only enables adaptive shape formation of large group of robots but alsoenhances the observability of inter-robot relative localization. Numericalsimulation results are provided to verify the performance of our proposedstrategy compared to the state-of-the-art ones. Additionally outdoorexperiments on real robots further demonstrate the practical effectiveness androbustness of our methods. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.02603v1 |
-|title| Agents' Room: Narrative Generation through Multi-step Collaboration |
-|authors| Fantine HuotReinald Kim AmplayoJennimaria PalomakiAlice Shoshana JakobovitsElizabeth ClarkMirella Lapata
-|links| http://arxiv.org/abs/2410.02603v1 |
-|updated| 2024-10-03 15:44:42 UTC |
-|summary| Writing compelling fiction is a multifaceted process combining elements suchas crafting a plot developing interesting characters and using evocativelanguage. While large language models LLMs show promise for story writingthey currently rely heavily on intricate prompting which limits their use. Wepropose Agents Room a generation framework inspired by narrative theory thatdecomposes narrative writing into subtasks tackled by specialized agents. Toillustrate our method we introduce Tell Me A Story a high-quality dataset ofcomplex writing prompts and human-written stories and a novel evaluationframework designed specifically for assessing long narratives. We show thatAgents Room generates stories that are preferred by expert evaluators overthose produced by baseline systems by leveraging collaboration andspecialization to decompose the complex story writing task into tractablecomponents. We provide extensive analysis with automated and human-basedmetrics of the generated output. |
+|idx| 2410.05538v1 |
+|title| Online Dynamic Pricing for Electric Vehicle Charging Stations with Reservations |
+|authors| Jan MrkosAntonín KomendaDavid FiedlerJiří Vokřínek
+|links| http://arxiv.org/abs/2410.05538v1 |
+|updated| 2024-10-07 22:36:40 UTC |
+|summary| The transition to electric vehicles EVs coupled with the rise of renewableenergy sources will significantly impact the electric grid. Unlikeconventional fuel sources electricity for EVs is constrained by grid capacityprice fluctuations and long EV charging times requiring new pricing solutionsto manage demand and supply. This paper proposes a model for online dynamicpricing of reserved EV charging services including reservation parking andcharging as a bundled service priced as a whole. Our approach focuses on theindividual charging station operator employing a stochastic demand model andonline dynamic pricing based on expected demand. The proposed model uses aMarkov Decision Process MDP formulation to optimize sequential pricingdecisions for charging session requests. A key contribution is the noveldefinition and quantification of discretization error introduced by thediscretization of the Poisson process for use in the MDP. The models viabilityis demonstrated with a heuristic solution method based on Monte-Carlo treesearch offering a viable path for real-world application. |
 
 

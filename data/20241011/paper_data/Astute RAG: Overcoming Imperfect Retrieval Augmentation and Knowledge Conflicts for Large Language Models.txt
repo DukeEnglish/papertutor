@@ -1,0 +1,645 @@
+Astute RAG: Overcoming Imperfect
+Retrieval Augmentation and Knowledge
+Conflicts for Large Language Models
+FeiWang12*,XingchenWan1,RuoxiSun1,JiefengChen1 andSercanÖ.Arık1
+1GoogleCloudAIResearch,2UniversityofSouthernCalifornia
+Retrieval-AugmentedGeneration(RAG),whileeffectiveinintegratingexternalknowledgetoaddress
+thelimitationsoflargelanguagemodels(LLMs),canbeunderminedbyimperfectretrieval,whichmay
+introduceirrelevant,misleading,orevenmaliciousinformation. Despiteitsimportance,previousstudies
+haverarelyexploredthebehaviorofRAGthroughjointanalysisonhowerrorsfromimperfectretrieval
+attributeandpropagate,andhowpotentialconflictsarisebetweentheLLMs’internalknowledgeand
+externalsources. Wefindthatimperfectretrievalaugmentationmightbeinevitableandquiteharmful,
+throughcontrolledanalysisunderrealisticconditions. WeidentifytheknowledgeconflictsbetweenLLM-
+internalandexternalknowledgefromretrievalasabottlenecktoovercomeinthepost-retrievalstageof
+RAG.TorenderLLMsresilienttoimperfectretrieval,wepropose Astute RAG,anovelRAGapproach
+that adaptively elicits essential information from LLMs’ internal knowledge, iteratively consolidates
+internalandexternalknowledgewithsource-awareness,andfinalizestheansweraccordingtoinformation
+reliability. Our experiments using Gemini and Claude demonstrate that Astute RAG significantly
+outperformspreviousrobustness-enhancedRAGmethods. Notably, Astute RAG istheonlyapproach
+that matches or exceeds the performance of LLMs without RAG under worst-case scenarios. Further
+analysisrevealsthat Astute RAG effectivelyresolvesknowledgeconflicts,improvingthereliability
+andtrustworthinessofRAGsystems.
+1. Introduction
+Retrievalaugmentedgeneration(RAG)hasbecomethestandardapproachforlargelanguagemodels
+(LLMs) to tackle knowledge-intensive tasks (Guu et al., 2020; Lewis et al., 2020). Prior works mainly
+leverage RAG to address the inherent knowledge limitations of LLMs, effectively integrating missing
+information and grounding to reliable sources. However, recent research has highlighted a significant
+drawback that RAG might rely on imperfect retrieval results, including irrelevant, misleading, or even
+maliciousinformation,whicheventuallyleadstoinaccurateLLMresponses(Chenetal.,2024a;Xiang
+et al., 2024; Zou et al., 2024). For example, when asked about the practice of eating rocks, LLMs
+might cite misleading information, such as a satirical news source claiming that one should consume
+atleastonerockperday.1 Theoccurrenceofimperfectretrievalaugmentationisinevitable,drivenby
+factors such as corpus quality limitations (Shao et al., 2024), the reliability of retrievers (Dai et al.,
+2024), and the complexity of the queries (Su et al., 2024). This poses a significant challenge to the
+trustworthiness of RAG.
+While there have been independent analyses of information retrieval and RAG in the context of
+LLMs (Mallen et al., 2023; Su et al., 2024), previous studies have rarely connected the behaviors of
+retrieval and subsequent generation, particularly regarding the propagation of information retrieval
+errors,whichmayleadtoknowledgeconflicts(Longpreetal.,2021;Wangetal.,2023a;Xuetal.,2024b)
+between LLMs and context. To this end, we conduct comprehensive analyses on the occurrence of
+1https://www.bbc.com/news/articles/cd11gzejgz4o.
+Correspondingauthor(s):fwang598@usc.edu,soarik@google.com
+*ThisworkwasdonewhileFeiwasaresearchinternatGoogleCloudAIResearch.
+4202
+tcO
+9
+]LC.sc[
+1v67170.0142:viXraAstute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Figure 1 | Knowledge conflicts between the LLMs’ internal knowledge and retrieved knowledge from
+external sources. We report the overall results with Claude under the setting in Section 4.1.
+imperfectretrievalaugmentationanditsimpactonLLMbehaviorunderrealisticconditions(Section2).
+We conduct controlled experiments on a diverse range of general, domain-specific, and long-tail
+questions from NQ (Kwiatkowski et al., 2019), TriviaQA (Joshi et al., 2017), BioASQ (Tsatsaronis
+et al., 2015), and PopQA (Mallen et al., 2023). We observe that imperfect retrieval augmentation is
+widespread even with adept real-world search engine (such as Google Search with Web as corpus)
+– roughly 70% retrieved passages do not directly contain true answers, leading to the impeded
+performance of LLM with RAG augmentation.2
+These findings underscore the potential severity of the imperfect retrieval issue in real-world
+RAG and highlight the widespread existence of knowledge conflicts as the bottleneck to overcome
+it (Figure 1). Recent studies demonstrate that LLM-internal and external knowledge offer distinct
+advantages, but LLMs often struggle to consolidate conflicting information reliably, failing to respond
+basedoncollectiveknowledge(Jinetal.,2024;Mallenetal.,2023;Tanetal.,2024;Xieetal.,2024).
+Thisraisesthefollowingresearchquestion: Isthereaneffectivemethodtocombineinternal(fromLLMs’
+pretrained weights) and external (from specific corpora or knowledge bases) knowledge for more reliable
+RAG? Previous work has widely explored using external knowledge to enhance LLMs through RAG.
+We seek to further leverage LLMs’ internal knowledge to recover from RAG failures
+Motivated by these important real-world challenges, we propose Astute RAG (Section 3), a
+novel RAG approach designed to be resilient to imperfect retrieval augmentation, while preserving
+RAGgroundingeffectwhenRAGisreliable. Tothisend, Astute RAG needseffectivelydifferentiate
+thereliabilityoftheLLM’sintrinsicknowledgeandtheexternalinformationretrievedinRAG,utilizing
+each only when trustworthy and ensuring proper integration. Specifically, Astute RAG initially
+elicits information from LLMs’ internal knowledge to explicitly complement the passages retrieved
+from external sources. Then, Astute RAG conducts source-aware knowledge consolidation of
+information from various internal and external sources. The desiderata is combining consistent
+information, identifying conflicting information, and filtering out irrelevant information. Finally,
+Astute RAG proposes answers based on each group of consistent passages and compares the an-
+swersfromdifferentpassagegroupstodeterminethefinalanswer. OurexperimentsinvolvingGemini
+andClaude3 onvariousdatasets(Section4)demonstratethesuperiorperformanceof Astute RAG
+compared to previous RAG approaches designed to be robust against retrieval corruptions. Moreover,
+Astute RAG consistently outperforms baselines across different retrieval quality levels. Notably,
+2Notethatsomepassagesmaycontaininformationindirectlyrelevanttotheanswer,butmayunintentionallymisleador
+distractLLMs.
+3https://www.anthropic.com/claude
+2Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Figure 2 | Imperfect retrieval (samples with low retrieval precision) is prevalent in real-world RAG.
+Astute RAG is the only RAG method that achieves performance comparable to or even surpassing
+conventional use of LLMs under the worst-case scenario where all retrieved passages are unhelpful.
+Further analysis reveals the effectiveness of Astute RAG in resolving knowledge conflicts between
+internal and external knowledge.
+To conclude, our core contributions are threefold. First, we analyze RAG under realistic condi-
+tions, identifying imperfect retrieval augmentation as a significant contributor to RAG failures and
+pinpointing knowledge conflicts as the primary bottleneck in overcoming it. Second, we propose
+Astute RAG, which explicitly addresses conflicts between LLM-internal and external knowledge,
+therebyrecoveringfromRAGfailures. Third,experimentswithvariousLLMsanddatasetsdemonstrate
+the effectiveness of Astute RAG, even in the most challenging scenarios.
+2. Imperfect Retrieval: The Pitfall of RAG
+To better showcase the common real-world challenges and to make better motivate for improved
+methodological designs, we evaluate retrieval quality, end-to-end RAG performance, and knowledge
+conflicts on a controlled set of data. The selected data encompass a diverse range of general, domain-
+specific, and long-tail questions from NQ (Kwiatkowski et al., 2019), TriviaQA (Joshi et al., 2017),
+BioASQ (Tsatsaronis et al., 2015), and PopQA (Mallen et al., 2023). Our analysis is based on realistic
+retrieval results with Google Search4 as the retriever and the Web as the corpus. This setting allows
+us to analyze the severity of imperfect retrieval in real-world RAG. Overall, we sample 1K short-form
+QA instances from these datasets, and pair each instance with 10 retrieved passages.
+Imperfect retrieval is common. Weexaminetheoccurrenceofcorrectanswersinretrievedpassages
+as an approximation of retrieval quality. Since we mainly focus on short-form QA which provides
+most variants of the correct answer for each question, the approximation through string matching
+can give us a rouge intuition of how precise the retrieval result is. Specifically, we define the retrieval
+precision as the ratio of passages containing the correct answer for each instance:
+{number of retrieved passages containing correct answer}
+Retrieval Precision =
+{number of total retrieved passages}
+As shown in Figure 2, although instances from different datasets exhibit different data distributions,
+imperfect retrieval is prevalent. Specifically, ∼20% of the overall data have no mentions of the correct
+answer within any retrieved passage, including 34% on NQ, 18% on TriviaQA, 24% on BioASQ, and
+50% on PopQA. This finding also aligns with previous observation on information retrieval (Thakur
+et al., 2024), that highlights that the number of positive passages can be very limited.
+4https://developers.google.com/custom-search/v1/overview
+3Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Figure3 | Overviewoftheproposed Astute RAG framework. Astute RAG isdesignedtobetter
+combine the information from the external sources (e.g. web, domain-specific corpora, knowledge
+bases) and internal knowledge of the LLMs by employing a consolidation mechanism to address the
+information conflicts, which eventually leads to better quality generated outputs.
+Imperfect retrieval leads to RAG failures. Wefurtheranalyze therelationbetweenretrievalquality
+and RAG performance. We compare the performance of Claude 3.5 Sonnet, with and without RAG
+and report the results by retrieval precision in Figure 4. In general, RAG is helpful when the retrieval
+precision is not lower than 20%. When the retrieval precision is close to 0, the model with RAG
+performs much worse than without RAG, indicating that imperfect retrieval augmentation can be the
+cause of RAG failures. This finding aligns with the previous observation from Yu et al. (2024) that
+adding more retrieved passages does not necessarily lead to better performance, as the additional
+passages might reduce the retrieval precision.
+Knowledge conflicts widely exist in RAG failures. We provide an in-depth analyses of knowledge
+conflicts between LLMs’ internal knowledge and retrieved passages from external sources. With
+Claude 3.5 Sonnet as the LLM, Figure 1 shows that 19.2% of the overall data exhibit knowledge
+conflicts, where either the answer with or without RAG is correct. Among the conflicting cases, the
+internal knowledge is correct on 47.4% of them, while the external knowledge is correct on the
+remaining 52.6%. These results emphasize the importance of effectively combining the internal and
+external knowledge to overcome the inherent limitation of relying solely on either source. However,
+previouswork(Jinetal.,2024;Tanetal.,2024;Xieetal.,2024)showthatLLMsmightrespondbased
+on misleading information rather than comprehensive understanding of the conflicting knowledge in
+this context.
+3. Astute RAG: Overcoming the Pitfall
+We begin with formulating the problem of imperfect retrieval in RAG (Section 3.1). We then provide
+an overview of Astute RAG, designed to overcome this problem (Section 3.2). Subsequently,
+we delve into the three major steps of Astute RAG, including adaptive generation of internal
+knowledge(Section3.3),source-awareknowledgeconsolidation(Section3.4),andanswerfinalization
+(Section 3.5).
+4Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Algorithm 1 Astute RAG
+Require: Query𝑞,RetrievedPassages𝐸 = [𝑒 1,...,𝑒 𝑛],LargeLanguageModelM,NumberofIteration
+𝑡, Max Number of Generated Passages 𝑚ˆ, Prompt Templates 𝑝 𝑔𝑒𝑛,𝑝 𝑐𝑜𝑛,𝑝 𝑎𝑛𝑠
+1: Adaptively generate passages: 𝐼 ← M(𝑝 𝑔𝑒𝑛,𝑞,𝑚ˆ) ⊲ Section 3.3
+2: Combine internal and external passages: 𝐷 0 ← 𝐸 ⊕ 𝐼
+3: Assign passage sources: 𝑆 0 ← [1 {𝑑∈𝐸}for 𝑑 in 𝐷 0]
+4: if 𝑡 > 1 then
+5: for 𝑗 = 1,...,𝑡−1 do ⊲ Section 3.4
+6: Consolidate knowledge: ⟨𝐷 𝑗+1,𝑆 𝑗+1⟩ ← M(𝑝 𝑐𝑜𝑛,𝑞,⟨𝐷 0,𝑆 0⟩,⟨𝐷 𝑗,𝑆 𝑗⟩)
+7: end for
+8: Finally consolidate and answer: 𝑎 ← M(𝑝 𝑎𝑛𝑠,𝑞,⟨𝐷 0,𝑆 0⟩,⟨𝐷 𝑡−1,𝑆 𝑡−1⟩) ⊲ Section 3.5
+9: else
+10: Consolidate knowledge and finalize the answer: 𝑎 ← M(𝑝 𝑎𝑛𝑠,𝑞,⟨𝐷 0,𝑆 0⟩)
+11: end if
+12: return 𝑎
+3.1. Problem Formulation
+Ourobjectiveistomitigatetheeffectsofimperfectretrievalaugmentation,resolveknowledgeconflicts
+between the LLM’s internal knowledge and external sources (such as custom/public corpora and
+knowledge bases), and ultimately produce more accurate and reliable responses from LLMs.
+Given a set of retrieved passages from external sources 𝐸 = [𝑒 1,...,𝑒 𝑛], a pre-trained LLM M
+(accessible through prediction-only APIs, encompassing commercial black-box ones), and a query 𝑞,
+the task is to generate the corresponding correct answer 𝑎∗. Notably, this setting is orthogonal to
+prior work on improving the retriever, training LLMs, or conducting adaptive retrieval, which are
+mainly preliminary steps.
+3.2. Overview of the Framework
+Astute RAG is designed to better leverage collective knowledge from both internal knowledge
+of LLMs and external corpus, for more reliable responses. As shown in Figure 3 and Algorithm 1,
+Astute RAG starts from acquiring the most accurate, relevant, and thorough passage set from the
+LLMs’internalknowledge. Then,internalandexternalknowledgeareconsolidatedinaniterativeway,
+by comparing the generated and retrieved passages. Finally, the reliability of conflicting information
+is compared and the final output is generated according to the most reliable knowledge.
+3.3. Adaptive Generation of Internal Knowledge
+In the first step, we elicit internal knowledge from LLMs. This LLM-internal knowledge, reflecting
+the consensus from extensive pre-training and instruction-tuning data, can supplement any missing
+information from the limited set of retrieved passages and enable mutual confirmation between
+LLM-internal and external knowledge. This is especially valuable when the majority of retrieved
+passages might be irrelevant or misleading. Specifically, we prompt LLMs to generate passages based
+on the given question 𝑞, following Yu et al. (2023a). While Yu et al. (2023a) primarily focused on
+generating diverse internal passages, we emphasize the importance of reliability and trustworthiness
+of generated passages. To achieve this goal, we enhance the original method with constitutional
+principles and adaptive generation.
+Inspired by Constitutional AI (Bai et al., 2022), we provide constitutional principles indicating
+5Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+thedesiredpropertiesofinternalpassagesintheprompt 𝑝 𝑔𝑒𝑛(seeAppendixAfordetails)toguidetheir
+generation, emphasizing that the generated passages should be accurate, relevant, and hallucination-
+free. Moreover,weallowtheLLMtoperformadaptivegenerationofpassagesinitsinternalknowledge.
+The LLM can decide how many passages to generate by itself. Rather generating a fix number of
+passages, we request the LLM to generate at most 𝑚ˆ passages, each covering distinct information,
+and to directly indicate if no more reliable information is available. This adaptive approach allows
+the LLM to generate fewer passages (or even no passages at all) when the useful information within
+internal knowledge is limited and more passages when there are multiple feasible answers in the
+internal knowledge. In this step, the LLM generates 𝑚 ≤ 𝑚ˆ passages based on its internal knowledge:
+𝐼 = [𝑖 1,...𝑖 𝑚] = M(𝑝 𝑔𝑒𝑛,𝑞,𝑚ˆ).
+3.4. Iterative Source-aware Knowledge Consolidation
+In the second step, we employ the LLM to explicitly consolidate information from both passages
+generated from its internal knowledge and passages retrieved from external sources. Initially, we
+combine passages from both internal and external knowledge sources 𝐷 = 𝐸 ⊕ 𝐼.
+0
+We additionally ensure source-awareness by providing the source of each passage to LLMs when
+consolidatingknowledge. Thesourceinformation(internalorexternal,suchasawebsite)ishelpfulin
+assessing the reliability of passages. Here, we provide the passage source as𝑆 = [1 for 𝑑 in 𝐷 ].
+0 {𝑑∈𝐸} 0
+To consolidate knowledge, we prompt the LLM (with 𝑝 𝑐𝑜𝑛 in Appendix A) to identify consistent
+informationacrosspassages,detectconflictinginformationbetweeneachgroupofconsistentpassages,
+and filter out irrelevant information. This step would regroup the unreliable knowledge in input
+passages into fewer refined passages. The regrouped passages will also attribute their source to the
+corresponding one or more input passages
+⟨𝐷 ,𝑆 ⟩ = M(𝑝 ,𝑞,⟨𝐷 ,𝑆 ⟩,⟨𝐷 ,𝑆 ⟩).
+𝑗+1 𝑗+1 𝑐𝑜𝑛 0 0 𝑗 𝑗
+We find that this is especially helpful in comparing the reliability of conflicting knowledge and
+addressing knowledge conflicts. Moreover, this knowledge consolidation process can run iteratively
+for 𝑡 times to improve the context to be more and more useful. Users can assign a larger number of
+iterations when the context is lengthy.
+3.5. Answer Finalization
+In the last step, we prompt the LLM (with 𝑝 𝑎𝑛𝑠 in Appendix A) to generate one answer based on each
+group of passages (⟨𝐷 𝑡,𝑆 𝑡⟩), and then compare their reliability and select the most reliable one as
+the final answer. This comparison allows the LLM to comprehensively consider knowledge source,
+cross-source confirmation, frequency, and information thoroughness when making the final decision.
+Notably, this step can be merged into the last knowledge consolidation step to reduce the inference
+complexity (the amount of prediction API calls) using a combined prompt:
+𝑎 = M(𝑝 ,𝑞,⟨𝐷 ,𝑆 ⟩,⟨𝐷 ,𝑆 ⟩).
+𝑎𝑛𝑠 0 0 𝑡 𝑡
+When 𝑡 = 1, the initial passages will be fed into the model directly for knowledge consolidation and
+subsequent answering: 𝑎 = M(𝑝 𝑎𝑛𝑠,𝑞,⟨𝐷 0,𝑆 0⟩).
+4. Experiments
+Weevaluatethe effectivenessof Astute RAG onovercoming imperfect retrieval augmentation and
+addressing knowledge conflicts. In this section, we first introduce the experiment setting in detail
+6Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Method #APICalls NQ TriviaQA BioASQ PopQA Overall
+Claude3.5Sonnet(20240620)
+NoRAG 1 47.12 81.98 50.35 29.78 54.51
+RAG 1 44.41 76.68 58.04 35.96 55.47
+USC(Chenetal.,2024b) 4 48.14 80.21 61.54 37.64 58.73
+GenRead(Yuetal.,2023a) 2 42.03 74.20 56.99 34.27 53.55
+RobustRAG(Xiangetal.,2024) 11 47.80 78.09 56.29 37.08 56.53
+InstructRAG(Weietal.,2024) 1 47.12 83.04 58.04 41.01 58.83
+Self-Route(Xuetal.,2024a) 1-2 47.46 78.80 59.09 41.01 58.06
+Astute RAG (t=1) 2 52.20 84.10 60.14 44.38 61.71
+Astute RAG (t=2) 3 53.22 84.45 61.89 44.94 62.67
+Astute RAG (t=3) 4 53.56 84.45 62.24 44.94 62.86
+Table1 | MainresultsonClaudeunderzero-shotsetting,showingtheaccuracyofdifferentbenchmark
+methodsvs. Astute RAG,alongwiththeirpredictioncomplexity,innumberofpredictionAPIcalls.
+Best scores are in bold.
+(Section4.1). Then,wecomparetheperformanceof Astute RAG withvariousbaselinesondiverse
+datasets (Section 4.2). Finally, we provide in-depth analyses (Section 4.3).
+4.1. Experimental Settings
+Datasets and metrics. We conduct experiments on the data collected in Section 2 consisting of
+data from NQ, TriviaQA, BioASQ, and PopQA. For each instance from these datasets, we provide 10
+passages collected under a realistic retrieval setting: for each question in our benchmark, we query
+Google Search to retrieve the top 30 results and select the first 10 accessible websites. From each
+retrieved website, we extract the paragraph corresponding to the snippet provided in Google Search
+results as the retrieved passage.. Most of the retrieval results contains natural noise with irrelevant
+or misleading information. We do not consider enhancements to the retrieval side, such as query
+rewriting, as such enhancements are typically already incorporated into commercial information
+retrieval systems. Notably, we do not select questions or annotate answers based on the retrieval
+results. This setting allows us to analyze the severity of imperfect retrieval in real-world RAG. It
+distinguishes our benchmark from previous ones that employ synthetic retrieval corruptions or that
+unintentionally reduce the frequency of imperfect retrieval with biased construction protocols (Chen
+et al., 2024a; Yang et al., 2024). We also evaluate our method on RGB (Chen et al., 2024a), a RAG
+diagnostic benchmark evaluating several crucial RAG abilities. Specifically, we choose the English
+subset of RGB focusing on noise robustness. The benchmark have positive and negative passage sets
+for each question. We select five negative documents per question as the context to form a worst-case
+scenario. All the data in these datasets are short-form QA. Following previous work (Mallen et al.,
+2023; Wei et al., 2024; Xiang et al., 2024), a model response is considered correct if it contains the
+ground-truth answer. To enhance evaluation reliability, we prompt LLMs to enclose the exact answer
+within special tokens, extracting them as the final responses.
+GeneralSettingsofLLMsandRAG.WeconductexperimentsontwoadvancedLLMs,includingGem-
+ini 1.5 Pro5 (gemini-1.5-pro-002) and Claude 3.5 Sonnet6 (claude-3-5-sonnet@20240620).
+The generation temperature is set to 0 and the maximum output tokens is set to 1,024, if not
+specified otherwise. By default, the passages are presented in the prompt by reversed order. All
+5https://deepmind.google/technologies/gemini/pro/
+6https://www.anthropic.com/news/claude-3-5-sonnet
+7Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Method #APICalls NQ TriviaQA BioASQ PopQA Overall
+Gemini1.5Pro(002)
+NoRAG 1 44.75 80.21 45.80 25.28 51.34
+RAG 1 42.71 75.97 55.24 33.71 53.65
+USC(Chenetal.,2024b) 4 46.44 76.68 58.39 37.64 56.43
+GenRead(Yuetal.,2023a) 2 45.08 77.39 54.90 34.27 54.70
+RobustRAG(Xiangetal.,2024)8 11 34.24 67.49 44.06 32.02 45.59
+InstructRAG(Weietal.,2024) 1 46.78 80.57 54.90 34.83 56.14
+Self-Route(Xuetal.,2024a) 1-2 47.46 79.86 58.04 38.20 57.58
+Astute RAG (t=1) 2 50.17 81.63 58.04 40.45 59.21
+Astute RAG (t=2) 3 51.53 81.27 58.74 40.45 59.69
+Astute RAG (t=3) 4 48.47 80.21 60.14 42.13 59.21
+Table2|MainresultsonGeminiunderzero-shotsetting,showingtheaccuracyofdifferentbenchmark
+methodsvs. Astute RAG,alongwiththeirpredictioncomplexity,innumberofpredictionAPIcalls.
+Best scores are in bold.
+experiments are under the zero-shot setting for controlled evaluation, where no demonstrations for
+QA or method-specific steps are provided.
+Baselines. Wecompare Astute RAG withvariousRAGmethodsdesignedforenhancedrobustness
+and representative inference strategies designed to improve response trustworthiness. USC (Chen
+et al., 2024b) is the universal self-consistency method that samples multiple LLM responses given
+the same context and aggregates the answers. It provides a reference of naive improvements using
+additional API calls. The temperature for sampling responses in this baseline is set to 0.7. Genread
+(Yu et al., 2023a) augments retrieved passages with LLM-generated passages. It provide a reference
+of presenting passages from both internal and external knowledge in the prompt without effectively
+combining them. RobustRAG (Xiang et al., 2024) aggregates answers from each independent passage
+to provide certifiable robustness. We use the keyword aggregation variant as it is shown to be the
+best-performing variant on advanced LLMs. InstructRAG (Wei et al., 2024) instructs the LLM to
+provide a rationale connecting the answer with information in passages. For a fair comparison, we
+use the instructions without training or in-context learning. Self-Route (Xu et al., 2024a) adaptively
+switches between LLMs with and without RAG.7 This baseline provides a reference of switching
+between LLMs’ internal and external knowledge.
+Implementation Details of Astute RAG. Theprompttemplatesfor Astute RAG canbefound
+in Appendix A. By default, we use 2 API calls per query, setting 𝑡 = 1 to merge the prompt for
+knowledge consolidation and answer finalization. For adaptive generation of internal knowledge, we
+prompt the LLM to generate no more than one passage.
+4.2. Main Results
+Table1andTable2presentstheresultsondatawithrealisticretrievalaugmentationforeachdataset.
+By comparing RAG and No RAG, we find that retrieved passages might not always bring benefits to
+downstreamperformance–onNQandTriviaQA,RAGperformancelagsbehindNoRAG.Weattribute
+this to that the questions being covered by the LLM’s internal knowledge and the noise in retrieval
+7TheoriginalSelf-RouteswitchesbetweenRAGandlong-contextLLMs,whileourimplementationswitchesbetween
+LLMswithandwithoutRAGtobetteralignwiththeproblemformulationinthispaper.
+8WeobserveahighrefusalrateinresponsesofRobustRAG.
+8Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+results misleading the LLM. In contrast, on BioASQ and PopQA, which focus on domain-specific and
+long-tailquestions,RAGsignificantlyimprovesLLMperformance. However,duetoimperfectretrieval
+augmentation, the absolute performance still remains to be unsatisfactory. Among all baselines, no
+single method consistently outperforms others across all datasets. This observation highlights that
+these baselines are tailored to distinct settings and may not be universally applicable. For instance,
+InstructRAG is more effective on TriviaQA, achieving the best performance among all baselines with
+both Claude and Gemini. In contrast, Self-Route performs better than InstructRAG on both NQ and
+BioASQ. Moreover, RobustRAG achieves very different performance when applied to Gemini and
+Claude. Through in-depth analysis, we find that RobustRAG with Gemini exhibits a high refusal rate
+(refuse to answer) in responses. We attribute this instability to the varying method designs of the
+baselines, which are tailored for different scenarios, resulting in inconsistent improvement across
+datasets. Overall,InstructRAGandSelf-Routedemonstratesthebestperformanceamongallbaselines
+whenappliedtoClaudeandGeminirespectively. WealsonotethatincreasingthenumberofAPIcalls
+does not necessarily correlate with improved performance.
+Astute RAG consistently outperforms baselines across all datasets of different properties. The
+overall improvement compared with the best baseline is relatively 6.85% on Claude and 4.13% on
+Gemini, and the improvements in domain-specific questions are much higher. These results highlight
+the effectiveness of Astute RAG in overcoming imperfect retrieval augmentation. On Claude,
+adding more iteration of knowledge consolidation leads to consist improvement. The improvement
+margin becomes lower when 𝑡 becomes larger. This is because after each iteration, the remaining
+improvement space for knowledge consolidation becomes smaller. On Gemini, increasing 𝑡 primarily
+benefitsBioASQandPopQA.Thesetwodatasetsrelymoreheavilyonexternalknowledge,anditerative
+knowledge consolidation helps mitigate noise within this external information. Performance on NQ
+and TriviaQA does not improve further when 𝑡 reaches 3. We attribute this to the less critical role of
+external knowledge in these datasets. For setting consistency and efficiency, we set the parameter 𝑚ˆ
+to a smaller value, limiting the influence of internal knowledge.
+4.3. Analyses
+Performance by retrieval precision. We compare the performance of Astute RAG and baselines
+acrossdifferentsubsetspartitionedbytheirretrievalprecision,onourcollecteddatawithClaudeasthe
+LLM.AsshowninFigure4, Astute RAG achievesconsistentlybetterperformancethanallbaselines
+across different retrieval precision, indicating its effectiveness in improving RAG trustworthiness in
+broad scenarios. Notably, Astute RAG does not sacrifice performance gain under high retrieval
+quality in exchange for improvement under low retrieval quality. When the retrieval quality is
+extremely low (close to zero retrieval precision), all other RAG variants underperforms the ’No RAG’
+baseline, except for the proposed Astute RAG. This observation aligns with the worst-case results
+onRGB.Itdemonstratesthedifficultyinovercomingimperfectretrievalaugmentation,andverifythe
+effectiveness of Astute RAG in doing so.
+Effectiveness in addressing knowledge conflicts. We split our collected data in to three subset
+according to the answers from Claude, with and without RAG. The answers from two inference
+methodscanbebothcorrect,bothincorrect,orconflictingwithonebeingcorrect. Thesethreesubsets
+represents the three situations between internal and external knowledge. The results are shown
+in Figure 4. On the conflicting subset, Astute RAG successfully chooses the correct answer in
+approximately 80% of cases, being the most effective method in addressing knowledge conflicts.
+Notably, Astute RAG even brings performance improvement on the subset where neither internal
+nor external knowledge alone leads to the correct answer. This indicates that Astute RAG can
+effectively combine partially-correct information from LLM-internal and external knowledge, to
+9Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+(a) PerformancebyRetrievalPrecision (b) PerformancebyKnowledgeConflicts (c) Worst-casePerformanceonRGB
+Figure 4 | Analysis results. (a) Performance of Claude across different buckets ranked by retrieval
+precision. (b) Performance of Claude on conflicting and consistent instances between No RAG
+and RAG. (c) Worst-case performance of Claude on RGB, where all retrieved passages are negative.
+Astute RAG reaches a performance close to No RAG, while other RAG systems are far behind.
+achieve the correct answer through collective information across them.
+Worst-case performance on RGB.. Figure4presentstheresultsundertheworst-casesettingonRGB
+where all retrieved documents are negative. It demonstrates the noise robustness of Astute RAG
+and baseline RAG methods. The performance gap between RAG and No RAG exceeds 50 points,
+highlighting the detrimental impact of imperfect retrieval results and emphasizing the importance of
+providingrobustsafeguardsagainstworst-casescenarios. WhilethebaselineRAGmethodsoutperform
+the original RAG, they still obviously fall behind No RAG. Astute RAG is the only RAG method
+that reaches a performance close to No RAG under the worst-case scenario, further supporting its
+effectiveness in addressing imperfect retrieval augmentation.
+Qualitative study. In Figure 5, we present two representative examples showing the intermediate
+outputs of Astute RAG. In the first example, LLM without RAG generates a wrong answer, while
+RAG returns a correct answer. Astute RAG successfully identified the incorrect information in
+its generated passage and an external passage, avoiding confirmation bias Tan et al. (2024). In
+the second example, LLM alone is correct, while RAG is incorrect due to the noisy retrieval results.
+Astute RAG detected the correct answer from noisy retrieved information by checking with its
+internal knowledge.
+5. Related Work
+Retrieval augmented generation (RAG) seeks to address the inherent knowledge limitation of LLMs
+with passages retrieved from external sources of information such as private corpora or public
+knowledge bases (Borgeaud et al., 2022; Guu et al., 2020; Lewis et al., 2020). Given the widespread
+adoption of RAG in various real-world applications, including risk-sensitive domains, the negative
+impact of noisy information within retrieved passages has garnered increasing attention (Cuconasu
+et al., 2024). Recent work has sought to enhance the robustness of RAG systems against noise from
+various perspectives, including training LLMs with noisy context (Fang et al., 2024; Pan et al., 2024;
+Yoran et al., 2024; Yu et al., 2023b), training small models to filter out irrelevant passages (Wang
+et al., 2023c; Xu et al., 2023), passage reranking (Glass et al., 2022; Yu et al., 2024), dynamic and
+iterative retrieval (Asai et al., 2023; Jiang et al., 2023; Yan et al., 2024), query rewriting (Ma et al.,
+10Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Figure 5 | Qualitative examples. Top: Astute RAG identified the error in internal knowledge (i.e.,
+generatedpassage)byconfirmingwithexternalsources. Bottom: Astute RAG detectedthecorrect
+answerfromnoisyretrievedinformationbycheckingwithitsinternalknowledge. StandardRAGdoes
+not provide an answer because the retrieved passages are too noisy.
+2023),andspeculativedrafting(Wangetal.,2024). Thesestudiesfocusondistinctmodulesorstages
+of RAG systems and are orthogonal to our work.
+OurworkfocusesonenhancingRAGrobustnessatthepost-retrievalstage,afterretrievedpassages
+have been provided. On this topic, RobustRAG (Xiang et al., 2024) aggregates answers from each
+independent passage to provide certifiable robustness. InstructRAG (Wei et al., 2024) instructs the
+LLM to provide a rationale connecting the answer with information in passages. MADRA (Wang
+et al., 2023b) applies multi-agent debate to select helpful evidence. However, these works do not
+explicitly incorporate internal knowledge to recover from RAG failures and may therefore collapse
+when the majority of retrieved passages are negative. In terms of emphasizing internal knowledge of
+LLMs in RAG, recent work has explored using LLM-generated passage as context (Yu et al., 2023a;
+Zhang et al., 2023), adaptively switching between LLMs with and without RAG (Jeong et al., 2024;
+Mallen et al., 2023; Xu et al., 2024a), and combining answers from internal and external knowledge
+11Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+through contrastive decoding (Jin et al., 2024; Zhao et al., 2024). We focus on a black-box setting
+where no further training is required, directly addressing knowledge conflicts to combine the helpful
+information from both sides and achieve more reliable answers.
+6. Conclusion
+Our paper investigates the impact of imperfect retrieval on the performance of RAG systems and
+identifies knowledge conflicts as a key challenge. To address this, we introduce Astute RAG, a
+novel approach that leverages the internal knowledge of LLMs and iteratively refines the generated
+responses by consolidating internal and external knowledge in a source way. Our empirical results
+demonstratetheeffectivenessofAstute RAGinmitigatingthenegativeeffectsofimperfectretrieval
+and improving the robustness of RAG systems, particularly in challenging scenarios with unreliable
+external sources.
+Amongthelimitations, Astute RAG’seffectivenesshingesonthecapabilitiesofadvancedLLMs
+with strong instruction-following and reasoning abilities, hence potentially more limited applicability
+with less sophisticated LLMs. As an important future direction, extending the experimental setup to
+includelongeroutputswouldbeimportant,wherethechallengesofimperfectretrievalandknowledge
+conflicts may be even more pronounced. Furthermore, a comprehensive analysis of the impact of
+various context types (Balachandran et al., 2024) would enhance the understanding of the proposed
+method’s effectiveness. Future work can also extend our method beyond LLMs and RAG, such as
+addressing knowledge conflicts in multimodal settings (Zhu et al., 2024).
+Acknowledgement
+We would like to thank Jinsung Yoon for valuable discussions and insights that helped to improve
+this paper. We would also like to thank all other colleagues from Google Cloud AI Research for their
+valuable feedback.
+References
+A.Asai,Z.Wu,Y.Wang,A.Sil,andH.Hajishirzi. Self-rag: Learningtoretrieve,generate,andcritique
+through self-reflection. In The Twelfth International Conference on Learning Representations, 2023.
+Y.Bai,S.Kadavath,S.Kundu,A.Askell,J.Kernion,A.Jones,A.Chen,A.Goldie,A.Mirhoseini,C.McK-
+innon, et al. Constitutional ai: Harmlessness from ai feedback. arXiv preprint arXiv:2212.08073,
+2022.
+V. Balachandran, J. Chen, N. Joshi, B. Nushi, H. Palangi, E. Salinas, V. Vineet, J. Woffinden-Luey,
+and S. Yousefi. Eureka: Evaluating and understanding large foundation models. arXiv preprint
+arXiv:2409.10566, 2024.
+S. Borgeaud, A. Mensch, J. Hoffmann, T. Cai, E. Rutherford, K. Millican, G. B. Van Den Driessche,
+J.-B. Lespiau, B. Damoc, A. Clark, et al. Improving language models by retrieving from trillions of
+tokens. In International conference on machine learning, pages 2206–2240. PMLR, 2022.
+J. Chen, H. Lin, X. Han, and L. Sun. Benchmarking large language models in retrieval-augmented
+generation. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 38, pages
+17754–17762, 2024a.
+12Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+X. Chen, R. Aksitov, U. Alon, J. Ren, K. Xiao, P. Yin, S. Prakash, C. Sutton, X. Wang, and D. Zhou.
+Universalself-consistencyforlargelanguagemodels.InICML2024WorkshoponIn-ContextLearning,
+2024b.
+F. Cuconasu, G. Trappolini, F. Siciliano, S. Filice, C. Campagnano, Y. Maarek, N. Tonellotto, and
+F. Silvestri. The power of noise: Redefining retrieval for rag systems. In Proceedings of the 47th
+International ACM SIGIR Conference on Research and Development in Information Retrieval, pages
+719–729, 2024.
+S. Dai, C. Xu, S. Xu, L. Pang, Z. Dong, and J. Xu. Unifying bias and unfairness in information
+retrieval: A survey of challenges and opportunities with large language models. arXiv preprint
+arXiv:2404.11457, 2024.
+F.Fang,Y.Bai,S.Ni,M.Yang,X.Chen,andR.Xu. Enhancingnoiserobustnessofretrieval-augmented
+language models with adaptive adversarial training. arXiv preprint arXiv:2405.20978, 2024.
+M. Glass, G. Rossiello, M. F. M. Chowdhury, A. Naik, P. Cai, and A. Gliozzo. Re2g: Retrieve, rerank,
+generate. In Proceedings of the 2022 Conference of the North American Chapter of the Association for
+Computational Linguistics: Human Language Technologies, pages 2701–2715, 2022.
+K.Guu,K.Lee,Z.Tung,P.Pasupat,andM.Chang. Retrievalaugmentedlanguagemodelpre-training.
+In International conference on machine learning, pages 3929–3938. PMLR, 2020.
+S. Jeong, J. Baek, S. Cho, S. J. Hwang, and J. C. Park. Adaptive-rag: Learning to adapt retrieval-
+augmented large language models through question complexity. In Proceedings of the 2024 Confer-
+enceoftheNorthAmericanChapteroftheAssociationforComputationalLinguistics: HumanLanguage
+Technologies (Volume 1: Long Papers), pages 7029–7043, 2024.
+Z. Jiang, F. F. Xu, L. Gao, Z. Sun, Q. Liu, J. Dwivedi-Yu, Y. Yang, J. Callan, and G. Neubig. Active
+retrieval augmented generation. In Proceedings of the 2023 Conference on Empirical Methods in
+Natural Language Processing, pages 7969–7992, 2023.
+Z.Jin,P.Cao,Y.Chen,K.Liu,X.Jiang,J.Xu,L.Qiuxia,andJ.Zhao. Tug-of-warbetweenknowledge:
+Exploringandresolvingknowledgeconflictsinretrieval-augmentedlanguagemodels.InProceedings
+of the 2024 Joint International Conference on Computational Linguistics, Language Resources and
+Evaluation (LREC-COLING 2024), pages 16867–16878, 2024.
+M.Joshi,E.Choi,D.S.Weld,andL.Zettlemoyer. Triviaqa: Alargescaledistantlysupervisedchallenge
+dataset for reading comprehension. In Proceedings of the 55th Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pages 1601–1611, 2017.
+T. Kwiatkowski, J. Palomaki, O. Redfield, M. Collins, A. Parikh, C. Alberti, D. Epstein, I. Polosukhin,
+J.Devlin,K.Lee,etal.Naturalquestions: abenchmarkforquestionansweringresearch.Transactions
+of the Association for Computational Linguistics, 7:453–466, 2019.
+P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W.-t. Yih,
+T. Rocktäschel, et al. Retrieval-augmented generation for knowledge-intensive nlp tasks. Advances
+in Neural Information Processing Systems, 33:9459–9474, 2020.
+S. Longpre, K. Perisetla, A. Chen, N. Ramesh, C. DuBois, and S. Singh. Entity-based knowledge
+conflicts in question answering. In Proceedings of the 2021 Conference on Empirical Methods in
+Natural Language Processing, 2021.
+13Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+X. Ma, Y. Gong, P. He, H. Zhao, and N. Duan. Query rewriting in retrieval-augmented large language
+models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing,
+pages 5303–5315, 2023.
+A. Mallen, A. Asai, V. Zhong, R. Das, D. Khashabi, and H. Hajishirzi. When not to trust language
+models: Investigating effectiveness of parametric and non-parametric memories. In Proceedings of
+the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),
+pages 9802–9822, 2023.
+R. Pan, B. Cao, H. Lin, X. Han, J. Zheng, S. Wang, X. Cai, and L. Sun. Not all contexts are equal:
+Teaching llms credibility-aware generation. arXiv preprint arXiv:2404.06809, 2024.
+R. Shao, J. He, A. Asai, W. Shi, T. Dettmers, S. Min, L. Zettlemoyer, and P. W. Koh. Scaling retrieval-
+based language models with a trillion-token datastore. arXiv preprint arXiv:2407.12854, 2024.
+H. Su, H. Yen, M. Xia, W. Shi, N. Muennighoff, H.-y. Wang, H. Liu, Q. Shi, Z. S. Siegel, M. Tang, et al.
+Bright: A realistic and challenging benchmark for reasoning-intensive retrieval. arXiv preprint
+arXiv:2407.12883, 2024.
+H. Tan, F. Sun, W. Yang, Y. Wang, Q. Cao, and X. Cheng. Blinded by generated contexts: How
+language models merge generated and retrieved contexts for open-domain qa? arXiv preprint
+arXiv:2401.11911, 2024.
+N.Thakur,N.Reimers,A.Rücklé,A.Srivastava,andI.Gurevych. Beir: Aheterogeneousbenchmarkfor
+zero-shotevaluationofinformationretrievalmodels.InThirty-fifthConferenceonNeuralInformation
+Processing Systems Datasets and Benchmarks Track (Round 2), 2024.
+G. Tsatsaronis, G. Balikas, P. Malakasiotis, I. Partalas, M. Zschunke, M. R. Alvers, D. Weissenborn,
+A.Krithara,S.Petridis,D.Polychronopoulos,etal. Anoverviewofthebioasqlarge-scalebiomedical
+semantic indexing and question answering competition. BMC bioinformatics, 16:1–28, 2015.
+F. Wang, W. Mo, Y. Wang, W. Zhou, and M. Chen. A causal view of entity bias in (large) language
+models. In Findings of the Association for Computational Linguistics: EMNLP 2023, pages 15173–
+15184, 2023a.
+H. Wang, X. Du, W. Yu, Q. Chen, K. Zhu, Z. Chu, L. Yan, and Y. Guan. Apollo’s oracle: Retrieval-
+augmented reasoning in multi-agent debates. arXiv preprint arXiv:2312.04854, 2023b.
+Z. Wang, J. Araki, Z. Jiang, M. R. Parvez, and G. Neubig. Learning to filter context for retrieval-
+augmented generation. arXiv preprint arXiv:2311.08377, 2023c.
+Z. Wang, Z. Wang, L. Le, H. S. Zheng, S. Mishra, V. Perot, Y. Zhang, A. Mattapalli, A. Taly, J. Shang,
+et al. Speculative rag: Enhancing retrieval augmented generation through drafting. arXiv preprint
+arXiv:2407.08223, 2024.
+Z.Wei,W.-L.Chen,andY.Meng. Instructrag: Instructingretrieval-augmentedgenerationwithexplicit
+denoising. arXiv preprint arXiv:2406.13629, 2024.
+C. Xiang, T. Wu, Z. Zhong, D. Wagner, D. Chen, and P. Mittal. Certifiably robust rag against retrieval
+corruption. arXiv preprint arXiv:2405.15556, 2024.
+J. Xie, K. Zhang, J. Chen, R. Lou, and Y. Su. Adaptive chameleon or stubborn sloth: Revealing the
+behavior of large language models in knowledge conflicts. In The Twelfth International Conference
+on Learning Representations, 2024.
+14Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+F. Xu, W. Shi, and E. Choi. Recomp: Improving retrieval-augmented lms with compression and
+selective augmentation. arXiv preprint arXiv:2310.04408, 2023.
+P. Xu, W. Ping, X. Wu, L. McAfee, C. Zhu, Z. Liu, S. Subramanian, E. Bakhturina, M. Shoeybi, and
+B. Catanzaro. Retrieval meets long context large language models. In The Twelfth International
+Conference on Learning Representations, 2024a.
+R. Xu, Z. Qi, C. Wang, H. Wang, Y. Zhang, and W. Xu. Knowledge conflicts for llms: A survey. arXiv
+preprint arXiv:2403.08319, 2024b.
+S.-Q. Yan, J.-C. Gu, Y. Zhu, and Z.-H. Ling. Corrective retrieval augmented generation. arXiv preprint
+arXiv:2401.15884, 2024.
+X. Yang, K. Sun, H. Xin, Y. Sun, N. Bhalla, X. Chen, S. Choudhary, R. D. Gui, Z. W. Jiang, Z. Jiang,
+et al. Crag–comprehensive rag benchmark. arXiv preprint arXiv:2406.04744, 2024.
+O. Yoran, T. Wolfson, O. Ram, and J. Berant. Making retrieval-augmented language models robust to
+irrelevant context. In The Twelfth International Conference on Learning Representations, 2024.
+W. Yu, D. Iter, S. Wang, Y. Xu, M. Ju, S. Sanyal, C. Zhu, M. Zeng, and M. Jiang. Generate rather
+than retrieve: Large language models are strong context generators. In The Eleventh International
+Conference on Learning Representations, 2023a.
+W. Yu, H. Zhang, X. Pan, K. Ma, H. Wang, and D. Yu. Chain-of-note: Enhancing robustness in
+retrieval-augmented language models. arXiv preprint arXiv:2311.09210, 2023b.
+Y. Yu, W. Ping, Z. Liu, B. Wang, J. You, C. Zhang, M. Shoeybi, and B. Catanzaro. Rankrag: Unifying
+context ranking with retrieval-augmented generation in llms. arXiv preprint arXiv:2407.02485,
+2024.
+Y. Zhang, M. Khalifa, L. Logeswaran, M. Lee, H. Lee, and L. Wang. Merging generated and retrieved
+knowledge for open-domain qa. In The 2023 Conference on Empirical Methods in Natural Language
+Processing, 2023.
+Z.Zhao,E.Monti,J.Lehmann,andH.Assem. Enhancingcontextualunderstandinginlargelanguage
+models through contrastive decoding. In Proceedings of the 2024 Conference of the North American
+Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1:
+Long Papers), pages 4225–4237, 2024.
+T. Zhu, Q. Liu, F. Wang, Z. Tu, and M. Chen. Unraveling cross-modality knowledge conflict in large
+vision-language models. arXiv preprint arXiv:2410.03659, 2024.
+W. Zou, R. Geng, B. Wang, and J. Jia. Poisonedrag: Knowledge poisoning attacks to retrieval-
+augmented generation of large language models. arXiv preprint arXiv:2402.07867, 2024.
+15Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+A. Prompt Template for Astute RAG
+Prompt for Adaptive Passage Generation (𝑝 𝑔𝑒𝑛)
+Generate a document that provides accurate and relevant information to answer the given
+question. If the information is unclear or uncertain, explicitly state ’I don’t know’ to avoid any
+hallucinations.
+Question: {question} Document:
+Prompt for Iterative Knowledge Consolidation (𝑝 𝑐𝑜𝑛)
+Task: Consolidate information from both your own memorized documents and externally
+retrieved documents in response to the given question.
+* For documents that provide consistent information, cluster them together and sum-
+marize the key details into a single, concise document.
+*Fordocumentswithconflictinginformation,separatethemintodistinctdocuments,ensuring
+each captures the unique perspective or data.
+* Exclude any information irrelevant to the query.
+For each new document created, clearly indicate:
+* Whether the source was from memory or an external retrieval.
+* The original document numbers for transparency.
+Initial Context: {context}
+Last Context: {context}
+Question: {question}
+New Context:
+16Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Prompt for Knowledge Consolidation and Answer Finalization (𝑝 𝑎𝑛𝑠)
+Task: Answer a given question using the consolidated information from both your own
+memorized documents and externally retrieved documents.
+Step 1: Consolidate information
+* For documents that provide consistent information, cluster them together and summarize
+the key details into a single, concise document.
+*Fordocumentswithconflictinginformation,separatethemintodistinctdocuments,ensuring
+each captures the unique perspective or data.
+* Exclude any information irrelevant to the query.
+For each new document created, clearly indicate:
+* Whether the source was from memory or an external retrieval.
+* The original document numbers for transparency.
+Step 2: Propose Answers and Assign Confidence
+For each group of documents, propose a possible answer and assign a confidence score based
+on the credibility and agreement of the information.
+Step 3: Select the Final Answer
+After evaluating all groups, select the most accurate and well-supported answer.
+Highlight your exact answer within <ANSWER> your answer </ANSWER>.
+Initial Context: {context_init}
+[Consolidated Context: {context}] # optional
+Question: {question}
+Answer:
+B. Data Collection
+Encompassingadiverserangeofnaturalquestions,ourbenchmarkconsistsofrealisticretrievalresults
+with Google Search9 as the retriever and the Web as the corpus. Notably, we do not select questions
+or annotate answers based on the retrieval results. This setting allows us to analyze the severity of
+imperfectretrievalinreal-worldRAG.Itdistinguishesourbenchmarkfrompreviousonesthatemploy
+synthetic retrieval corruptions or that unintentionally reduce the frequency of imperfect retrieval
+with biased construction protocols (Chen et al., 2024a; Yang et al., 2024). Overall, our benchmark
+contains 1,042 short-form question-answer pairs, each paired with 10 retrieved passages.
+Question-answer pairs. We consider question-answer pairs from four datasets of different
+properties spanning across general questions, domain-specific questions, and long-tail questions. NQ
+(Kwiatkowskietal.,2019)andTriviaQA(Joshietal.,2017)aretwowidely-studiedquestion-answering
+(QA) datasets in general domains. BioASQ (Tsatsaronis et al., 2015) is from biomedical domain
+that has demonstrated significant benefits from RAG when general-purpose LLMs are considered.
+PopQA (Mallen et al., 2023) focuses on long-tail knowledge and has been shown to be challenging
+for even advanced LLMs to solve without external knowledge. All these datasets contain questions
+with short-form answers and most of them list all valid answer variants. This format can support
+automatic verification of answer appearance in retrieved passages and model responses, leading to
+more precise evaluations.
+9https://developers.google.com/custom-search/v1/overview
+17Astute RAG:OvercomingImperfectRetrievalAugmentationandKnowledgeConflictsforLargeLanguageModels
+Retrieval process. For each question in our benchmark, we query Google Search to retrieve the
+top 30 results and select the first 10 accessible websites. From each retrieved website, we extract the
+paragraph corresponding to the snippet provided in Google Search results as the retrieved passage.
+Wedonotconsiderenhancementstotheretrievalside,suchasqueryrewriting,assuchenhancements
+are typically already incorporated into commercial information retrieval systems.
+18

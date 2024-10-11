@@ -1,0 +1,925 @@
+GLIDER: GLOBAL AND LOCAL INSTRUCTION-DRIVEN
+EXPERT ROUTER
+PingzhiLi*1 PrateekYadav*1 JaehongYoon1 JiePeng2 Yi-LinSung1
+MohitBansal1 TianlongChen1
+1TheUniversityofNorthCarolinaatChapelHill 2UniversityofScienceandTechnologyofChina
+ABSTRACT
+The availability of performant pre-trained models has led to a proliferation of
+fine-tunedexpertmodelsthatarespecializedtoaparticulardomainortask. This
+hasenabledthecreationofpowerfulandadaptiverouting-based“ModelMoErg-
+ing"(Yadavetal.,2024)methodswiththegoalofusingexpertmodulestocreate
+anaggregatesystemwithimprovedperformanceorgeneralization. However,ex-
+istingMoErgingmethodsoftenprioritizegeneralizationtounseentasksattheex-
+penseofperformanceonheld-intasks.Thislimitationadverselyimpactspractical
+applicability, as real-world deployments require robust performance across both
+knownandnoveltasks. Weobservethatcurrenttoken-levelroutingmechanisms
+neglect the global semantic context of the input task. This token-wise indepen-
+dencehinderseffectiveexpertselection, particularlyforheld-intasks, asrouting
+decisionsfailtoincorporatetheholisticsemanticpropertiesofthetask.Toaddress
+this, we propose a novel method, Global and Local Instruction Driven Expert
+Router(GLIDER)thatintegratesamulti-scaleroutingmechanism,encompassing
+asemanticglobalrouterandalearnedlocalrouter. AsrecentLLMsdemonstrate
+advanced reasoning capabilities for semantic-related contexts, the global router
+leveragesthisabilitytoenhanceexpertselection. Byutilizingtheinputqueryand
+an LLM, the router generates semantic task instructions that guide the retrieval
+of the most relevant experts across all layers. This global guidance is comple-
+mentedbyalocalrouterthatfacilitatestoken-levelroutingdecisionswithineach
+module, enabling finer control and enhanced performance on unseen and chal-
+lengingtasks. OurexperimentsusingT5-basedexpertmodelsforT0andFLAN
+tasks demonstrate that GLIDER achieves substantially improved held-in perfor-
+mance while maintaining strong generalization on held-out tasks. Additionally,
+weperformablationsexperimentstodivedeeperintothecomponentsofGLIDER
+andplotroutingdistributionstoshowthatGLIDERcaneffectivelyretrievethecor-
+rect expert for held-in tasks while also demonstrating compositional capabilities
+for held-out tasks. Our experiments highlight the importance of our multi-scale
+routing that leverages LLM-driven semantic reasoning for MoErging methods.
+Ourcodeisavailableathttps://github.com/UNITES-Lab/glider.
+1 INTRODUCTION
+The emergence of highly capable large language models (LLMs) has marked an increased atten-
+tionindownstreamtaskspecialization. Thisspecializationoftenleveragesparameter-efficientfine-
+tuning(PEFT)techniques,suchasLoRA(Huetal.,2021),whichintroduceminimaltrainablepa-
+rameters(“adapters")toadaptpre-trainedLLMsforspecifictasks. Thecompactsizeofthesespe-
+cializedPEFTmodulesenableseasysharingofthesemodules,whichhasledtothedistributionof
+anevergrowingnumberofadaptersonvariousplatforms.
+Thisproliferationofexpertmodels,i.e.specializedadapters,hasledtothedevelopmentofmethods
+forre-usingsuchexpertstoimproveperformanceorgeneralization(Muqeethetal.,2024;Ostapenko
+et al., 2024; Huang et al., 2024a). Central to these approaches are routing mechanisms that adap-
+tivelyselectrelevantexpertsforaparticulartaskorquery.Theseroutingmethodshavebeenreferred
+*Equalcontribution
+1
+4202
+tcO
+9
+]GL.sc[
+1v27170.0142:viXraContributor: Training LoRA Experts & Task Vectors Aggregator: Creating Router Function for Inference
+……
+PEFT Module Training
+𝙰𝟷 𝙰𝟸 𝙰𝙽
+❄ ❄
+𝙰𝟷 𝙰𝟸 𝙰𝙽
+𝙱𝟷 𝙱𝟸 𝙱𝙽 𝙱𝟷 𝙱𝟸 𝙱𝙽
+𝚆 𝚆
+𝚟𝟷 𝚟𝟸 𝚟𝙽
+S 3-a sm hop tle D ata …𝚐 𝚐 𝚐…𝟷 𝟸 𝙽 G Rolo ub ta el r Top-2 …𝚟 𝚟 𝚟…𝟷 𝟸 𝙽 L Ro oc ua tel r
+……
+𝚐𝟷 𝚐𝟸 𝚐𝙽 𝚞𝚚 𝚞𝟷 𝚞𝟸
+LLM-Aided Instruction Generation LLM Instruction Embedding Token Embeddings
+Figure1: Overviewofourmethod. Contributor(left): Eachcontributorutilizeslocaldatatotrain
+severalcomponents: thePEFTmodule(comprisingA andB ),taskvectors(v ),andglobalrouting
+i i i
+vectors (g ). For the latter, an LLM is employed to generate semantically-informed instructions
+i
+based on 3 randomly selected examples, which are then embedded into g . Aggregator (right):
+i
+The aggregator utilizes local and global task vectors to construct local routers [v¯1;...;v¯N] and a
+global router [g1;...;gN], respectively. For each query, the global router uses an LLM-generated
+instructionembeddingtoproducetheglobalroutingscore. Thisscoreisthenscaledandcombined
+withthelocalroutingscore,enablingfine-grainedcontroloverexpertselection.
+toas“ModelMoErging”(Yadavetal.,2024)sincetheyfrequentlysharemethodologiesandideas
+withmixture-of-experts(MoE)models(Shazeeretal.,2017;Fedusetal.,2022;Duetal.,2022)and
+modelmerging(Yadavetal.,2023b;a;Ilharcoetal.,2022). However,MoEmethodsthattrainex-
+pertsjointlyfromscratch(Guptaetal.,2022)whileMoErgingutilizesadecentralized,community-
+sourced pool of pre-trained experts. Furthermore, it departs from traditional model merging tech-
+niquesbydynamicallyandadaptivelycombiningtheseexperts,optimizingperformanceatthequery
+ortasklevel. MoErgingmethodsofferthreekeyadvantages: (1)Theysupportdecentralizedmodel
+developmentbyreusingandroutingamongindependentlytrainedexperts,reducingrelianceoncen-
+tralized resources. (2) They facilitate modular capability expansion and “transparency" in updates
+astheyeitheraddormodifyspecializedexpertmodels. 3)Theyallowforcompositionalgeneraliza-
+tionbyrecombiningfine-grainedskillsfromvariousexperts,extendingthesystem’sabilitiestonew
+unseentasksbeyondthecapabilitiesoftheindividualexpertmodels.
+Most existing methods for MoErging often prioritize performance on either known expert tasks
+(held-in) or generalization to unseen tasks (held-out) depending on their use cases (Chronopoulou
+et al., 2023; Muqeeth et al., 2024; Zhao et al., 2024). This specialization limits practical appli-
+cability, as real-world deployments demand robust performance across both held-in and held-out
+tasks. Consequently, existing methods exhibit suboptimal performance when evaluated on both
+held-in and held-out tasks, often leading to suboptimal overall performance. For example, while
+Phatgoose(Muqeethetal.,2024)demonstratestrongperformanceonheld-outdata,theydonotper-
+formwellonheld-intasks. Wehypothesizethatthisgaparisesfromthemodel’stoken-levelrouting
+mechanism. We show that for the held-in tasks the independent routing decisions at each layer,
+based solely on individual token embeddings, lack sufficient global context to retrieve the correct
+expertforalltokenateverymodule. Thisleadstosuboptimalroutingwhichmaypropagatenoise
+throughthenetwork,furtherhinderingaccurateexpertutilizationindeeperlayers. Thishighlightsa
+criticallimitationoftoken-levelapproachestohandlingbothheld-intasks,whichhencefallsshort
+ofthegoalofbuildingaroutingsystemthatseamlesslyhandlesarbitraryqueries. Webelievethat
+adding a global routing mechanism based on semantic task information can further aid the token
+levelrouterforcorrectretrievalforheld-intasks. Hence,weaskthequestion.
+(Q) Can we leverage LLMs to generate semantics-aware task instructions to guide routing
+mechanismtofacilitatebothspecializationandgeneralization?
+2
+……
+……
+……
+PEFT
+Layer-iThis paper addresses the challenges by investigating the potential of leveraging the inherent rea-
+soningandgeneralizationcapabilitiesofLLMstoguidetheroutingprocessinanMoE-likemodel
+composedofspecializedLoRAmodules.Weintroduce,GlobalandLocalInstructionDrivenExpert
+Router(GLIDER)thathingesonamulti-scaleroutingmechanismthatcontainsbothlocalandglobal
+routersasshowninFigure1. TheglobalrouterleveragesLLM-generated,semantics-awareinstruc-
+tions(seeAppendixA.2)toselectthetop-2expertmodelsforeachinputqueryacrossallthelayers.
+Thishigh-levelguidanceisthencomplementedbyalearnedlocalrouter,whichmakestoken-level
+routingdecisionsateachmodule,enablingfine-grainedcontrolandimprovingperformanceonthe
+challengingheld-outtasks.Throughthisframework,wehighlightthecrucialroleofLLMreasoning
+inunlockingthecompositionalgeneralizationcapabilitiesofMoEmodels.
+TotesttheeffectivenessofourGLIDERmethod,wefollowPhatgoose(Muqeethetal.,2024)anduse
+T5models(Raffeletal.,2020)tocreateexpertmodelsforT0held-in(Sanhetal.,2022)andFLAN
+tasks(Longpreetal.,2023)andtestperformanceonT0held-in&held-out(Sanhetal.,2022)and
+big-benchlite(BIG-benchauthors,2023)&hardtasks(Suzgunetal.,2022). Ourkeycontributions
+andfindingsare:
+• WeintroduceGLIDER,whichemploysLLM-guidedmulti-scaleglobalandlocalattention.
+Our experiments show that GLIDER outperforms previous methods, significantly improv-
+ing performance on held-in tasks (e.g. 6.6% over Phatgoose on T0 held-in) while also
+enhancing zero-shot held-out compositional generalization (e.g. 0.9% over Phatgoose on
+T0held-out).
+• We find that without LLM assistance, MoE models underperform individual specialized
+models on held-in tasks by 8.2%. Incorporating semantic-aware instructions enables
+GLIDER to achieve comparable performance, demonstrating the LLM’s capacity to effec-
+tivelyinfertaskidentityandguidemoduleselectionwithoutexplicittasklabels.
+• GLIDER also maintains strong performance on held-out tasks, showcasing its adaptability
+andgeneralizationcapabilities. OurworkhighlightsthecriticalroleofLLMsinenhancing
+MoEmodels’compositionalgeneralization,advancingthedevelopmentofmorerobustand
+versatileAIsystemscapableofhandlingbothfamiliarandnoveltasks.
+2 RELATED WORKS
+MoErging Methods. The abundance of specialized expert models has spurred the development
+of techniques to leverage “experts" models for enhanced performance and generalization. Yadav
+etal.(2024)intheirrecentsurveycalledsuchtechniquesas“MoErging"* methodswhichrelyon
+adaptiveroutingmechanismstoselectrelevantexpertsforspecifictasksorqueries. Thesemethods
+canbebroadlyclassifiedintofourcategoriesbasedonthedesignoftheirroutingmechanisms.
+Embedding−BasedRouting:Thiscategoryencompassesmethodsthatderiveroutingdecisions
+from learned embeddings of expert training data. These methods typically compare a query em-
+bedding against the learned expert embeddings to determine the optimal routing path. Examples
+includeAdapterSoup(Chronopoulouetal.,2023), RetrievalofExperts(Jangetal.,2023), Token-
+Level Adaptation (Belofsky, 2023), LoraRetriever (Zhao et al., 2024), Mo’LoRA (Maxine, 2023),
+theembedding-basedapproachofAiroboros(Durbin,2024),andDynamicAdapterMerging(Cheng
+etal.,2024).
+Classifier−BasedRouting:Thiscategoryconsistsofmethodsthattrainaroutertofunctionas
+aclassifier.Thisrouteristrainedtopredicttheoptimalroutingpathbasedonfeaturesextractedfrom
+expert datasets or unseen data. Representative methods in this category include Zooter (Lu et al.,
+2023), Branch-Train-Mix (Sukhbaatar et al., 2024), Routing with Benchmark Datasets (Shnitzer
+et al., 2023), Routoo (Mohammadshahi et al., 2024), and RouteLLM (Ong et al., 2024). The key
+distinction between embedding-based and classifier-based routing lies in the router’s architecture
+and training methodology. While embedding-based routing often employs a nearest neighbor ap-
+proach, classifier-based routing typically relies on logistic regression or analogous classification
+techniques.
+*See e.g. https://huggingface.co/spaces/open-llm-leaderboard/open_llm_
+leaderboard
+3Task−SpecificRouting:Thiscategoryfocusesonmethodstailoredtoenhanceperformanceon
+specifictargettasks. Thesemethodslearnatask-specificroutingdistributionoverthetargetdataset
+to optimize performance for the given task. Methods in this category include LoraHub (Huang
+etal.,2023),LoRA-Flow(Wangetal.,2024),AdapterFusion(Pfeifferetal.,2021),π-Tuning(Wu
+etal.,2023),Co-LLM(Shenetal.,2024),Weight-EnsemblingMoE(Tangetal.,2024),MoLE(Wu
+etal.,2024),MeteoRA(Xuetal.,2024),PEMT(Linetal.,2024),MixDA(Diaoetal.,2023),and
+Twin-Merging(Luetal.,2024).
+RouterlessMethods:Thisfinalcategoryencompassesmethodsthatdonotrelyonanexplicitly
+trained router. Instead, these methods often employ alternative mechanisms, such as heuristics or
+rule-based systems, for routing decisions. Examples include Arrow ↗ (Ostapenko et al., 2024),
+PHATGOOSE(Muqeethetal.,2024),the“askanLLM"routingofAiroboros(Durbin,2024)and
+LlamaIndex(Liu,2024).
+Model Merging. Model merging (Yadav et al., 2023b; Choshen et al., 2022; Wortsman et al.,
+2022; Ramé et al., 2022; Matena & Raffel, 2022; Ilharco et al., 2022; Tam et al., 2023; Jin et al.,
+2022; Yang et al., 2023) consolidates multiple independently trained models with identical archi-
+tecturesintoaunifiedmodelthatpreservesindividualmodelcapabilities. Whilesimpleparameter
+averagingsufficesformodelswithinalinearlyconnectedlow-lossparameterspace(McMahanetal.,
+2017;Stich,2018;Frankleetal.,2020;Wortsmanetal.,2021), moresophisticatedtechniquesare
+necessaryforcomplexscenarios. Forinstance,taskvectorsfacilitatemergingexpertmodelstrained
+ondiversedomains(Ilharcoetal.,2022). Additionally,methodslikeweightedmergingusingFisher
+ImportanceMatrices(Matena&Raffel,2022;Tametal.,2023)andTIES-Merging,whichaddresses
+signdisagreementsandredundancy(Yadavetal.,2023b)offersimprovedperformance. Asanon-
+adaptiveexpertaggregationmethod,mergingservesasafundamentalbaselinefornumerousModel
+EditingwithRegularization(MoErging)techniques.
+MultitaskLearning(MTL). researchoffersvaluableinsightsfordecentralizeddevelopment.No-
+tably, investigations into task-relatedness (Standley et al., 2020; Bingel & Søgaard, 2017; Achille
+etal.,2019;Vuetal.,2020;Zamiretal.,2018;Mouetal.,2016)provideguidancefordesigningrout-
+ingmechanisms,whileMTLarchitecturesaddressingthebalancebetweensharedandtask-specific
+knowledge (Misra et al., 2016; Ruder et al., 2017; Meyerson & Miikkulainen, 2017; Zaremoodi
+etal.,2018;Sunetal.,2019)offerstrategiesforcombiningexpertcontributionsinadecentralized
+manner.
+MoE for Multitask Learning. Recent research has extensively investigated mixture-of-experts
+(MoE) models for multitask learning, achieving promising results in unseen task generalization.
+These approaches generally fall into two categories: (1) Example Routing: Studies like Muqeeth
+etal.(2023);Zadourietal.(2023);Wangetal.(2022a)trainrouterstodynamicallyselectexperts
+foreachinput, whileCacciaetal.(2023)demonstratetheefficacyofroutingatafinergranularity
+by splitting expert parameters into blocks. (2) Task Routing: Ponti et al. (2023) employs a train-
+able skill matrix to assign tasks to specific parameter-efficient modules, while Gupta et al. (2022)
+leverages task-specific routers selected based on domain knowledge. Ye et al. (2022) proposes a
+layer-wiseexpertselectionmechanisminformedbytaskrepresentationsderivedfrominputembed-
+dings. Suchapproachesleveragetask-specificrepresentationtoallowtheroutertoeffectivelyselect
+the most suitable experts for unseen tasks. While these studies differ from our setting by assum-
+ingsimultaneousdataaccess, theyoffervaluableinsightsapplicabletoourexplorationofcreating
+routingmechanismsoverexpertmodels.
+3 PROBLEM STATEMENT
+In our work, we aim to build a routing mechanism capable of performing well on diverse queries
+from various tasks, including both seen and unseen tasks. For each query/token and module, this
+routingmechanismdynamicallyselectsamodelfromalargepoolofspecializedexpertmodelsto
+achieve high performance. To facilitate modular development, we adopt a contributor-aggregator
+framework(Yadavetal.,2024)whereindividualcontributorscreatespecializedexpertmodelsfrom
+ageneralistmodelfortheirrespectivetasksanddistributethesemodelstoothersforpublicusage.
+Theaggregatorbuildsaroutingmechanismovertheexpertmodelsthatsharedbythecontributorto
+4Held-In Held-Out
+Figure2: WepresentroutingheatmapsforGLIDERandPhatgooseontwoheld-inandtwoheld-out
+tasks. For held-in tasks, oracle experts are marked with red dashed lines. GLIDER selects ora-
+cleexpertsmorefrequentlythanPhatgooseforheld-intasks, leadingtoimprovementsof3.3%on
+CommonGenand6.5%onPAWS.Forheld-outtasks,GLIDERalsotendstoselectthemostrelevant
+expertsacrossmostLoRAmodules,resultinginimprovementsof2.2%onCOPAand5.8%onSto-
+ryCloze.
+directqueriestothemostrelevantexperts.Followingrecentworks(Muqeethetal.,2024;Ostapenko
+etal.,2024),weuseparameter-efficientfinetuning(PEFT)(Liuetal.,2022;Sungetal.,2022;Poth
+etal.,2023)methodslikeLoRA(Huetal.,2022)totraintheexpertmodels. SincePEFTtypically
+haslowercomputationalandcommunicationcoststhanfull-modelfinetuning(Huetal.,2022;Liu
+etal.,2022),theuseofPEFTmakesiteasiertoparticipateandcontribute. PEFTmethodsintroduce
+modulesthroughoutthemodel–forexample,LoRA(Huetal.,2022)introducesalow-rankupdate
+ateverylinearlayerinthemodel. Werefertoeachoftheseupdatesasamodule. Subsequently,the
+trainedexpertmodelsandadditionalinformationaresharedwiththeaggregators. Theaggregator’s
+jobistocollecttheseexpertmodelsandtheadditionalinformationanddesignthepost-hocrouting
+mechanism. Thismechanismwilleffectivelydirectincomingqueriestothemostappropriateexpert
+modelforeachtokenandateachmoduletoensureoptimalperformanceonbothseenandunseen
+tasks.Thisapproachallowsfortheseamlessintegrationofnewcapabilitiesbyaddingexpertmodels
+totheexistingpool. Next,weformallydefineourcontributor-aggregatorframework.
+LetusassumethatthereareN contributors,{c ,c ,...,c },andeachcontributorc hasaccesstoa
+1 2 N i
+task-specificdatasetsD . Eachcontributor,c ,followsthepredefinedtrainingprotocolT provided
+i i
+by the aggregator. The training protocol (T) takes in a base model (θ ) and a dataset (D ). It
+base i
+returns the expert model parameters (ϕ ) along with any additional information (Ψ ) that needs to
+i i
+besharedwiththeaggregators,forexample,thegatevectorsdescribedinSection4.1. Specifically,
+{ϕ , Ψ }←T(θ ,D ).Allcontributorssharethisinformationwiththeaggregator,whichcreates
+i i base i
+apoolofmodelscontaining{(ϕ ,Ψ )}N . Theaggregators(A)thenusestheseexpertmodelsand
+i i i=1
+theauxiliaryinformationtocreatearoutingmechanismR(.)thattakestheuserqueryqastheinput
+and return routing path describing how the information is routed through the given set of expert
+models. Formally, R(.) ← A({(ϕ ,Ψ )}N ). The function R(.) describe the full path of input
+i i i=1
+querybymakingvariouschoicesabout1)expertinputgranularity,choosingtorouteper-token,per-
+query,orper-task,2)expertdepthgranularity,optingforeitherper-moduleormodel-levelrouting,
+and3)selectingbetweensparseordenserouting.Finally,theaggregatorusestheroutingmechanism
+toanswerincomingqueries.
+54 METHODOLOGY
+Torecap,ourgoalistobuildaMoErgingmethodthatdynamicallyroutingqueriestoadiversepool
+ofspecializedexpertmodels,addressingthechallengeofeffectivelyhandlingqueriesfromvarious
+tasksandensuringbothheld-inandheld-outperformance. Ourproposedmethod,GlobalandLocal
+Instruction Driven Expert Router (GLIDER), leverages a combination of local and global routing
+vectors to achieve this goal. Specifically, contributors train task-specific routing vectors, while a
+largelanguagemodel(LLM)generatesaglobalsemantictaskinstructionswhicharethenconverted
+to global instruction routing vectors. During inference, these local and global routing vectors are
+combined to perform top-k discrete routing, directing queries to the most suitable expert model.
+ThisprocessisvisualizedinFigure1anddescribedindetailbelow.
+4.1 EXPERTTRAININGPROTOCOL
+Our expert training protocol T takes as input the base model parameters, θ , and a dataset d
+base
+and performs three steps to obtain the required output. First, we train the LoRA experts (ϕ), then
+train the local routing vectors (l) while keeping the LoRA experts fixed. Finally, we train obtain
+the global routing vector (g) by using an LLM and an embedding model. Formally, in our case,
+ϕ, Ψ = {l,g} ← T(θ ,d) which are then shared with the aggregators to create the routing
+base
+mechanism. Wedescribedthesestepsindetailbelow.
+PEFT Training of Expert Model. GLIDER is compatible with expert models trained using
+parameter-efficient finetuning methods (e.g. LoRA (Hu et al., 2022), Adapters (Houlsby et al.,
+2019)) that introduce small trainable modules throughout the model. We focus on PEFT experts
+because they typically have lower computational and communication costs than full-model fine-
+tuning (Yadav et al., 2023a), making it easier to train and share expert models. Following Phat-
+goose (Muqeeth et al., 2024), this work specifically focuses in LoRA (Hu et al., 2022) due to
+its widespread use. LoRA introduces a module comprising the trainable matrices B ∈ Rd×r and
+A ∈ Rr×n in parallel to each linear layer with parameters W ∈ Rd×n. Given the tth input token
+activation u , LoRA modifies the output of the linear layer from Wu to Wu + α ∗BAu where α
+i i i r i
+is a constant and usually is set to 1. During training, the matrices A and B are trainable while
+the original linear layer W is kept frozen. We denote the final trained expert parameters with
+ϕ={(A ,B ),...,(A ,B )},wheremisthenumberofmodulesinthemodel.
+1 1 m m
+TrainingLocalRoutingVectors. FollowingPhatgoose(Muqeethetal.,2024),aftertrainingthe
+PEFTmodulesontheirdataset,alocalrouterisintroducedbeforeeachPEFTmodule. Thisrouter,
+employingasharedvectoracrossallqueriesandtokens, dynamicallydeterminestheutilizationof
+the PEFT module based on the input token activations. The router is trained for a small number
+ofstepsusingthesamedatasetandobjectiveasthePEFTmodule,whilekeepingtheexpertPEFT
+parametersfixed. Thisprocesseffectivelylearnstoassociatethetokenactivationpatternswiththe
+learnedexpertmodel. ForLoRA,thelocalrouter,representedbyatrainablevectorv∈Rd,controls
+thecontributionofthePEFTmoduletothefinaloutput. Thisresultsinamodifiedlinearlayerofthe
+formWu + α ∗BAu ∗σ(vTu ),whereα,W,B,andAarefrozen,andthelocalroutervislearned.
+i r i i
+Wedenotethefinallocalroutingvectorsasl = {v ,...,v }wheremisthenumberofmodulesin
+1 m
+themodel.
+CreatingLLM-AidedGlobalRoutingVector. Thelocalroutingvectorscapturetheintricatere-
+lationships between token activations and expert models, enabling efficient query routing in cases
+wherenodedicatedexpertisavailable. Conversely, forqueriescorrespondingtoheld-intasks, di-
+rect retrieval of the relevant expert model is preferred to process the full query. For this purpose,
+wecreateaglobalroutingvectorthatutilizesanLLMtogenerateasemantically-informedinstruc-
+tion, termed as taskdescription, which effectively captures the essence of the kind of queries the
+expert can handle. We prompt an LLM with three randomly selected in-context examples to gen-
+erate this task description. We used the gpt-4-turbo model along with the prompt provided
+inAppendix A.Theresulting taskdescription isthenembedded usinganoff-the-shelf embedding
+model,specificallythenomic-embed-text-v1.5model,toproduceaglobalroutingvectorfor
+thetask. Wedenotetheglobalroutingvectorasg∈Rdg.
+64.2 GLIDER: INFERENCEEXPERTAGGREGATIONPHASE
+Following training, all contributors share their expert models along with the auxiliary information
+comprising of the local and global routing vectors, {ϕt, lt, gt}N with the aggregators. The
+t=1
+GLIDERmethodsubsequentlyleveragesthisinformationtoperforminferenceonarbitraryqueries.
+LocalRouter. Beforeeachinputmodulem,aseparatelocalrouterL ∈RN×d isinsertedtomake
+m
+local per-token, per-module routing decisions. For a given module m and expert model c, we first
+standardize the task-specific local routing vectors vc by subtracting its mean and dividing by the
+m
+standard deviation to obtain v¯c. Next, we obtain the local router for module m by stacking these
+m
+standardised localrouting vectorsas L = [v¯1;...;v¯N] ∈ RN×d. Next, for eachtoken i with acti-
+m m m
+vationu comingintomodulem,westandardiseittoobtainu¯ . Wethencomputethelocalaffinity
+i i
+scores,sloc ∈RNbetweenthelocalrouterL andu assloc =cos-sim(L ,u ).
+m m i m m i
+Global Router. The global router aims to capture task semantics to retrieve relevant experts for
+anygiveninputquery. WecreatetheglobalrouterG∈RN×dg bystackingtheglobalroutingvectors
+from all the expert models as G = [g1;...;gN]. This router is not a part of the base model and is
+addedbeforethemodeltoindependentlyprocessthefullyquery. Givenaninputqueryualongwith
+threefew-shotinput-outputpairsofsimilarqueries,wepromptanLLM(gpt-4-turbo)usingthe
+templateprovidedinAppendixAtoobtainataskdescriptionforthequery. Wethenembedthistask
+descriptionusingthesameembeddingmodel(nomic-embed-text-v1.5)toobtainthevector
+q
+u
+∈Rdg.Wethencomputetheglobalaffinityscore,sglob ∈RN,bycomputingthecosinesimilarity
+assglob =cos-sim(G,q ).
+u
+Combining Global and Local Router. At each module m, we have the global and local affin-
+ity scores sglob and sloc respectively. Following Phatgoose (Muqeeth et al., 2024), we scale the
+m √
+local scores with a factor of 1/ N. However, the global router’s main goal is to retrieve the cor-
+rect expert for the held-in tasks. Therefore, we first check if the expert with the highest global
+affinity score (max(sglob)) is above a threshold (p). If such experts exist, then we set a high α
+to enforce retrieval and vice versa. Hence, we propose to scale the global scores with α, where
+α=γ∗I +β,wherepisthecosinesimilaritythreshold,andγandβarescalinghy-
+{max(sglob)−p>0}
+perparameters. UsingourablationexperimentsinSection5.4,wesetp=0.8,γ =100andβ =3.
+√
+Wethenobtainthefinalaffinityscores∈RN =α∗sglob+sloc/ N.ThenGLIDERselectsthetop-k
+m
+expertsafterperformingsoftmaxoverthefinalaffinityscoresasE =top-k(softmax(s)).
+top
+(cid:80)
+Finally,theoutputofthemodulefortokenactivationu iscomputedasWu + w ∗B A u .
+i i k∈Etop k k k i
+5 EXPERIMENTS
+5.1 SETTING
+Dataset. OurexperimentsutilizethemultitaskpromptedtrainingsetupintroducedbySanhetal.
+(2021), which has become a standard benchmark for evaluating generalization to unseen tasks
+(Chung et al., 2022; Longpre et al., 2023; Jang et al., 2023; Zhou et al., 2022). Following Phat-
+goose (Muqeeth et al., 2024), we employ LM-adapted T5.1.1 XL (Lester et al., 2021) as our
+base model which is a 3B parameter variant of T5 (Raffel et al., 2020) further trained on the C4
+dataset using a standard language modeling objective. For held-out evaluations, we follow Phat-
+goose(Muqeethetal.,2024)andusethreeheld-outbenchmarkcollections. WeusetheT0held-out
+(T0HO)datasetsusedinSanhetal.(2021)andthetwosubsetsofBIG-bench(BIG-benchauthors,
+2023).Specifically,weuseBIG-benchHard(BBH)(Suzgunetal.,2022),consistingof23challeng-
+ingdatasets,andBIG-benchLite(BBL)(BIG-benchauthors,2023),alightweight24-datasetproxy
+for the full benchmark. Similar to Muqeeth et al. (2024), we exclude certain BIG-bench datasets
+duetotokenizationincompatibilitywiththeT5tokenizer.
+ExpertCreation. Tocreatethepoolofexpertmoduleforrouting,wefollowMuqeethetal.(2024)
+andusetwodistinctdatasetcollections:❶T0Held-In(Sanhetal.,2021)consistingofthe36held-in
+prompted datasets for tasks from the T0 training procedure. ❷ The “FLAN Collection" (Longpre
+et al., 2023) which significantly expands the T0 tasks by incorporating prompted datasets from
+SuperGLUE(Wangetal.,2019),SuperNaturalInstructions(Wangetal.,2022b),dialoguedatasets,
+7andChain-of-Thoughtdatasets(Weietal.,2022b). FollowingMuqeethetal.(2024),wecreate166
+specializedmodelsfromtheFLANCollection. Foreachdatasetinthesecollections,wetrainLow-
+RankAdapters(LoRAs)(Huetal.,2021)modulesresultinginpoolsof36and166expertmodels
+for T0 Held-In and FLAN, respectively. Similar to Phatgoose, we use a rank of r = 16 and train
+for 1000 steps using the AdamW optimizer (Loshchilov & Hutter, 2017) with a learning rate of
+5×10−3 andawarmupratioof0.06. AftertrainingtheLoRAmodule, wefreezeitandtrainthe
+localroutingvectorsforanadditional100stepswiththesamehyperparameters. Finally,following
+prior work (Shazeer et al., 2016; Du et al., 2022; Lepikhin et al., 2020), GLIDER performs top-k
+routingwithk =2.
+5.2 BASELINES
+Expert Merging. Model Merging (Yadav et al., 2023b; Choshen et al., 2022) involves averaging
+the parameters of multiple models or modules to create a single aggregate model. We merge by
+multiplying the LoRA matrices and then taking an unweighted average of all the experts within
+the pool. It is important to note that this merging strategy requires homogeneous expert module
+architectures;incontrast,GLIDERcanaccommodateheterogeneousexpertmodules.
+Arrow. FollowingOstapenkoetal.(2024), weemployaroutingmechanismwheregatingvectors
+are derived from LoRA expert modules. Specifically, the first right singular vector of the outer
+productofeachmodule’sLoRAupdate(BA)servesasitsgatingvector.Inputroutingisdetermined
+byaprobabilitydistributionbasedontheabsolutedotproductbetweentheinputrepresentationand
+eachgatingvector. Weutilizetop-kroutingwithk =2.
+Phatgoose. Phatgoose (Muqeeth et al., 2024) first learn the LoRA modules for each, followed by
+learning a sigmoid gating vector similar to our local router. During inference, they make routing
+decisionsforeachtokenindependentlyforallmodules. Specifically,theyfirststandardizetheinput
+tokenactivationsandgatingvectorsfromallexpertsandthenperformsimilarity-basedtop-2routing.
+LoRAHub. LoraHub(Huangetal.,2023)methodperformsgradient-freeoptimizationusingfew-
+shottasksamplestolearnmixingcoefficientsfordifferentexpertmodelswhilekeepingthemfixed.
+Oncethecoefficientsarelearned,theymergetheexpertswiththelearnedweightandroutethrough
+themergedexpert.
+Multi-taskFine-Tuning. Whilemultitasktraining,aprovenmethodforenhancingzero-shotgen-
+eralization (Sanh et al., 2021; Wei et al., 2022a), is infeasible given our problem setting and data
+accesslimitations,weincludeitasabaselineusingpubliclyavailablemodels. Specifically,weuti-
+lizetheT0-3Bmodel(Sanhetal.,2021)fortheT0Held-Indatasets,givenitstrainingonamatching
+datasetcollection. ForFLAN,adirectlycomparablepubliclyavailablemodelisunavailable;there-
+fore,wereportresultsforFLAN-T5XL,trainedonadifferent,undiscloseddatasetmixture,while
+acknowledgingthelimitationsofthisindirectcomparison.
+Oracle. Following Jang et al. (2023) and Muqeeth et al. (2024), we employ an Oracle routing
+scheme as a performance upper bound. This scheme selects the expert exhibiting optimal perfor-
+manceonagivenevaluationdataset,thusrepresentinganon-zero-shotapproach.
+5.3 MAINRESULTS
+Table 1 presents the comparison results among our GLIDER and six baselines on both held-in and
+held-outsettings. Tofurtherillustratetheperformance,wealsoincludetheresultsofOracleExpert,
+which has extra access to the task identities of expert modules and evaluated datasets and can be
+regardedasanupperbound.
+T0Setting. IntheT0taskset,thefollowingobservationscanbedrawn: ❶Fortheheld-intasks,
+i.e. T0-HI,GLIDERsignificantlyoutperformsotherbaselinesandalmostmatchestheperformance
+ofOracleExpertupperbound. ❷ForT0-HOandBBLtasks,GLIDERachievesthebestperformance
+among all the methods, including Oracle Expert upper bound. ❸ GLIDER has negligible lower
+performance, i.e. 0.01%, compared to the Expert Merging baseline in BBH but outperforms it by
+around12%onT0-HOand1.5%onBBL.BesidesExpertMerging,GLIDERoutperformsallother
+methodsonBBH,includingtheOracleExpertupperbound.
+8Table 1: Performance evaluated on the T0 set and FLAN set. We present the performance on
+both held-in tasks (i.e. T0-HI) and held-out tasks (i.e. T0-HO, BBH, and BBL). We compare the
+following methods: (1) performance upper bound, i.e. Oracle Expert; (2) zero-shot baselines, i.e.
+Multi-TaskFine-Tuning,ExpertMerging,Arrow,andPhatgoose;(3)few-shotbaselines,i.e. LoRA
+Hub and GLIDER. We mark the best performance besides the upper bound (i.e., Oracle Expert) in
+bold.
+T0 FLAN
+Method T0-HI T0-HO BBH BBL BBH BBL
+OracleExpert 69.60 51.60 34.90 36.60 38.90 45.40
+Multi-TaskFine-Tuning 55.90 51.60 34.90 36.60 38.90 45.40
+ExpertMerging 30.73 45.40 35.30 36.00 34.60 34.00
+Arrow 39.84 55.10 33.60 34.50 30.60 29.60
+Phatgoose 61.42 56.90 34.90 37.30 35.60 35.20
+LoRAHub 31.90 46.85 31.35 31.18 34.50 30.54
+GLIDER 68.04 57.78 35.29 37.46 35.07 35.52
+T0-HI T0-HO BigBench
+Figure3: GlobalroutingscoresfortasksintheT0set. Theredhorizontallineindicatesourdesign
+thresholdof0.8.EachcolumnrepresentsanevaluatedtaskfromT0-HI,T0-HO,BigBenchusingT0
+held-inexperts. Allglobalroutingscoresforeachtaskareplotted,correspondingtothe35experts
+intotal.
+5.4 ABLATIONSTUDYANDFURTHERINVESTIGATION
+Ablation on the global routing scale α. To illustrate how the specialization and generalization
+abilities change as we scale the coefficient α of the global routing score, we conduct the ablation
+studyofαranging{1,3,10,100,1000,3000}.AsshowninTable2,wepresentexperimentalresults
+oftheT0tasksetonbothheld-inandheld-outtasks.Forheld-intasks,i.e.T0-HI,GLIDERcanselect
+theoptimalαtoscaletheglobalroutingscore.Forheld-outtasks,i.e.{T0-HO,BBH,BBL},GLIDER
+produceeithertheoptimalα(forBBH)orthesub-optimalαwithslightlylowerperformancetothe
+optimalones(forT0-HOandBBL).
+Ablation on the routing strategy. There exists a trade-off between performance and efficiency
+when using different top-k routing strategies (Ramachandran & Le, 2019). To investigate the
+impact of routing strategy in GLIDER, we evaluate top-k routing of k in {1,2,3}. Moreover, we
+furtherevaluatethetop-prouting(Huangetal.,2024c;Zengetal.,2024)ofpin{25%,50%,75%},
+where each token selects experts with higher routing probabilities until the cumulative probability
+exceedsthresholdp. AsshowninTable3,wecandrawthefollowingconclusions: (1)Fortop-k
+routing, k = 2 shows comparable or better performance than k = 3, particularly for T0-HO and
+BBH,whileofferingimprovedefficiency. (2)Fortop-prouting,higherpvaluesconsistentlyyield
+betterperformanceatthecostofefficiency. Therefore,weusetop-2routinginGLIDERbydefault.
+9Table 2: Ablation on the instruction coeffi- Table 3: Ablation on the routing strategy.
+cient α. We mark the best performance in GLIDER employs top-2 routing. We mark
+bold and the performance corresponding to thebestperformanceamongtop-kandtop-p
+theselectedαbyGLIDERin blue. routinginbold,respectively.
+T0 T0
+α T0-HI T0-HO BBH BBL Method T0-HI T0-HO BBH BBL
+1 62.20 57.04 35.05 37.79 Top-1 67.96 56.07 33.91 35.82
+3 63.40 57.78 35.29 37.46 Top-2 68.04 57.78 35.39 37.46
+10 65.52 57.98 34.80 37.04 Top-3 68.06 57.52 35.08 38.55
+100 68.04 53.22 31.73 34.97 Top-25% 67.98 56.53 34.10 36.32
+1000 66.88 52.91 30.71 34.31 Top-50% 67.95 57.25 35.07 37.49
+3000 66.69 52.37 30.03 33.24 Top-75% 68.02 57.86 35.38 38.65
+Investigationonthethresholddesignofglobalscores. AsdescribedinSection4,wecompute
+thescaleαforglobalscoresusingtheformulaα=γ∗I +β,whereweestablish
+{max(sglob)−0.8>0}
+a threshold of 0.8 to differentiate evaluated tasks. Figure 3 presents the global routing scores for
+each task in the T0 set to motivate the rationale behind this design. For all held-in tasks (i.e., T0-
+HI), at least one expert (typically the oracle expert trained on the evaluated task) achieves global
+routingscoresexceeding0.8. Consequently, GLIDERappliesahigherα = 100, enablingeffective
+identificationoftaskscorrespondingtoaspecificallytrainedexpertandenhancingretrievalofthis
+oracle expert. For nearly all held-out tasks (i.e., T0-HO and BigBench), no global routing score
+surpasses 0.8, prompting GLIDER to utilize a lower α = 3. Two exceptions among the held-out
+tasksarebbq_lite_jsonandstrange_storiesinBigBench,asshowninthefigure,where
+onescoremarginallyexceeds0.8ineachcase. Forthesetwo,GLIDERemploysthehigherα=100,
+resulting in performance improvements of 1.3% and 2.9% respectively over α = 3, thus showing
+theeffectivenessofourdesign.
+6 CONCLUSION
+ThispaperintroducesGLIDER,anovelmulti-scaleroutingmechanismthatincorporatesbothglobal
+semanticandlocaltoken-levelrouters. ByleveragingthesemanticreasoningcapabilitiesofLLMs
+forglobalexpertselectionandrefiningthesechoiceswithalearnedlocalrouter,GLIDERaddresses
+thelimitationsofexistingmethodsthatoftenperformpoorlyonheld-intasks. Ourempiricaleval-
+uation on T0 and FLAN benchmarks, using T5-based experts, demonstrates that GLIDER achieves
+substantial improvements in held-in task performance while maintaining competitive generaliza-
+tiononheld-outtasks. Thesefindingssuggestthatincorporatingglobalsemantictaskcontextinto
+routingmechanismsiscrucialforbuildingrobustandpracticallyusefulrouting-basedsystems.
+REFERENCES
+Alessandro Achille, Michael Lam, Rahul Tewari, Avinash Ravichandran, Subhransu Maji, Char-
+lessCFowlkes,StefanoSoatto,andPietroPerona. Task2vec: Taskembeddingformeta-learning.
+In Proceedings of the IEEE/CVF international conference on computer vision, pp. 6430–6439,
+2019.
+JoshuaBelofsky. Token-leveladaptationofloraadaptersfordownstreamtaskgeneralization,2023.
+BIG-benchauthors. Beyondtheimitationgame: Quantifyingandextrapolatingthecapabilitiesof
+language models. Transactions on Machine Learning Research, 2023. ISSN 2835-8856. URL
+https://openreview.net/forum?id=uyTL5Bvosj.
+JoachimBingelandAndersSøgaard. Identifyingbeneficialtaskrelationsformulti-tasklearningin
+deepneuralnetworks. arXivpreprintarXiv:1702.08303,2017.
+10LucasCaccia,EdoardoPonti,ZhanSu,MatheusPereira,NicolasLeRoux,andAlessandroSordoni.
+Multi-headadapterroutingforcross-taskgeneralization. InThirty-seventhConferenceonNeural
+InformationProcessingSystems,2023.
+FengCheng,ZiyangWang,Yi-LinSung,Yan-BoLin,MohitBansal,andGedasBertasius. DAM:
+Dynamic adapter merging for continual video qa learning. arXiv preprint arXiv:2403.08755,
+2024.
+LeshemChoshen,EladVenezian,NoamSlonim,andYoavKatz. Fusingfinetunedmodelsforbetter
+pretraining. arXivpreprintarXiv:2204.03044,2022.
+Alexandra Chronopoulou, Matthew E Peters, Alexander Fraser, and Jesse Dodge. Adaptersoup:
+Weight averaging to improve generalization of pretrained language models. arXiv preprint
+arXiv:2302.07027,2023.
+Hyung Won Chung, Le Hou, Shayne Longpre, Barret Zoph, Yi Tay, William Fedus, Yunxuan Li,
+Xuezhi Wang, Mostafa Dehghani, Siddhartha Brahma, et al. Scaling instruction-finetuned lan-
+guagemodels. arXivpreprintarXiv:2210.11416,2022.
+Shizhe Diao, Tianyang Xu, Ruijia Xu, Jiawei Wang, and T. Zhang. Mixture-of-domain-adapters:
+Decoupling and injecting domain knowledge to pre-trained language models’ memories. In
+AnnualMeetingoftheAssociationforComputationalLinguistics,2023. URLhttps://api.
+semanticscholar.org/CorpusID:259108831.
+Nan Du, Yanping Huang, Andrew M Dai, Simon Tong, Dmitry Lepikhin, Yuanzhong Xu, Maxim
+Krikun, Yanqi Zhou, Adams Wei Yu, Orhan Firat, et al. Glam: Efficient scaling of language
+models with mixture-of-experts. In International Conference on Machine Learning, pp. 5547–
+5569.PMLR,2022.
+Jon Durbin. airoboros: Customizable implementation of the self-instruct paper. https://
+github.com/jondurbin/airoboros,2024.
+WilliamFedus,BarretZoph,andNoamShazeer. Switchtransformers: Scalingtotrillionparameter
+modelswithsimpleandefficientsparsity. JournalofMachineLearningResearch,23(120),2022.
+JonathanFrankle,GintareKarolinaDziugaite,DanielRoy,andMichaelCarbin. Linearmodecon-
+nectivityandthelotterytickethypothesis. InInternationalConferenceonMachineLearning,pp.
+3259–3269.PMLR,2020.
+Shashank Gupta, Subhabrata Mukherjee, Krishan Subudhi, Eduardo Gonzalez, Damien Jose,
+AhmedHAwadallah,andJianfengGao. Sparselyactivatedmixture-of-expertsarerobustmulti-
+tasklearners. arXivpreprintarXiv:2204.07689,2022.
+Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski, Bruna Morrone, Quentin De Laroussilhe,
+Andrea Gesmundo, Mona Attariyan, and Sylvain Gelly. Parameter-efficient transfer learning
+for NLP. In International Conference on Machine Learning, pp. 2790–2799, 2019. URL
+http://proceedings.mlr.press/v97/houlsby19a/houlsby19a.pdf.
+EdwardJ.Hu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+and Weizhu Chen. Lora: Low-rank adaptation of large language models. In International
+ConferenceonLearningRepresentations,2021.
+EdwardJHu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In International
+ConferenceonLearningRepresentations,2022.URLhttps://openreview.net/forum?
+id=nZeVKeeFYf9.
+ChengsongHuang,QianLiu,BillYuchenLin,TianyuPang,ChaoDu,andMinLin. Lorahub: Effi-
+cientcross-taskgeneralizationviadynamicloracomposition. arXivpreprintarXiv:2307.13269,
+2023.
+Chengsong Huang, Qian Liu, Bill Yuchen Lin, Tianyu Pang, Chao Du, and Min Lin. Lorahub:
+Efficientcross-taskgeneralizationviadynamicloracomposition,2024a.
+11Haoxu Huang, Fanqi Lin, Yingdong Hu, Shengjie Wang, and Yang Gao. Copa: General robotic
+manipulationthroughspatialconstraintsofpartswithfoundationmodels,2024b. URLhttps:
+//arxiv.org/abs/2403.08248.
+Quzhe Huang, Zhenwei An, Nan Zhuang, Mingxu Tao, Chen Zhang, Yang Jin, Kun Xu, Kun Xu,
+Liwei Chen, Songfang Huang, and Yansong Feng. Harder tasks need more experts: Dynamic
+routinginmoemodels,2024c. URLhttps://arxiv.org/abs/2403.07652.
+Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Suchin Gururangan, Ludwig Schmidt,
+Hannaneh Hajishirzi, and Ali Farhadi. Editing models with task arithmetic. arXiv preprint
+arXiv:2212.04089,2022.
+Joel Jang, Seungone Kim, Seonghyeon Ye, Doyoung Kim, Lajanugen Logeswaran, Moontae Lee,
+KyungjaeLee,andMinjoonSeo. Exploringthebenefitsoftrainingexpertlanguagemodelsover
+instructiontuning. arXivpreprintarXiv:2302.03202,2023.
+XisenJin,XiangRen,DanielPreotiuc-Pietro,andPengxiangCheng. Datalessknowledgefusionby
+mergingweightsoflanguagemodels. arXivpreprintarXiv:2212.09849,2022.
+Remi Lebret, David Grangier, and Michael Auli. Neural text generation from structured data
+with application to the biography domain, 2016. URL https://arxiv.org/abs/1603.
+07771.
+Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang,
+MaximKrikun,NoamShazeer,andZhifengChen.Gshard:Scalinggiantmodelswithconditional
+computationandautomaticsharding. arXivpreprintarXiv:2006.16668,2020.
+BrianLester,RamiAl-Rfou,andNoahConstant. Thepowerofscaleforparameter-efficientprompt
+tuning,2021. URLhttps://arxiv.org/pdf/2104.08691.pdf.
+BillYuchenLin,WangchunshuZhou,MingShen,PeiZhou,ChandraBhagavatula,YejinChoi,and
+XiangRen. Commongen: Aconstrainedtextgenerationchallengeforgenerativecommonsense
+reasoning,2020. URLhttps://arxiv.org/abs/1911.03705.
+Zhisheng Lin, Han Fu, Chenghao Liu, Zhuo Li, and Jianling Sun. Pemt: Multi-task corre-
+lation guided mixture-of-experts enables parameter-efficient transfer learning. arXiv preprint
+arXiv:2402.15082,2024.
+Haokun Liu, Derek Tam, Mohammed Muqeeth, Jay Mohta, Tenghao Huang, Mohit Bansal, and
+Colin A Raffel. Few-shot parameter-efficient fine-tuning is better and cheaper than in-context
+learning. AdvancesinNeuralInformationProcessingSystems,35:1950–1965,2022.
+JerryLiu. LlamaIndex,adataframeworkforyourLLMapplications. https://github.com/
+run-llama/llama_index,2024.
+ShayneLongpre,LeHou,TuVu,AlbertWebson,HyungWonChung,YiTay,DennyZhou,QuocV
+Le,BarretZoph,JasonWei,etal. Theflancollection: Designingdataandmethodsforeffective
+instructiontuning. arXivpreprintarXiv:2301.13688,2023.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International
+ConferenceonLearningRepresentations,2017. URLhttps://api.semanticscholar.
+org/CorpusID:53592270.
+Keming Lu, Hongyi Yuan, Runji Lin, Junyang Lin, Zheng Yuan, Chang Zhou, and Jingren Zhou.
+Routingtotheexpert:Efficientreward-guidedensembleoflargelanguagemodels.arXivpreprint
+arXiv:2311.08692,2023.
+ZhenyiLu, ChenghaoFan, WeiWei, XiaoyeQu, DangyangChen, andYuCheng. Twin-merging:
+Dynamicintegrationofmodularexpertiseinmodelmerging. arXivpreprintarXiv:2406.15479,
+2024.
+MichaelSMatenaandColinARaffel. Mergingmodelswithfisher-weightedaveraging. Advances
+inNeuralInformationProcessingSystems,35:17703–17716,2022.
+12Maxine. Llama-2, mo’ lora. https://crumbly.medium.com/
+llama-2-molora-f5f909434711,2023.
+Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Ar-
+cas. Communication-efficient learning of deep networks from decentralized data. In Artificial
+intelligenceandstatistics,2017.
+Elliot Meyerson and Risto Miikkulainen. Beyond shared hierarchies: Deep multitask learn-
+ing through soft layer ordering. ArXiv, abs/1711.00108, 2017. URL https://api.
+semanticscholar.org/CorpusID:3285020.
+Ishan Misra, Abhinav Shrivastava, Abhinav Kumar Gupta, and Martial Hebert. Cross-stitch
+networks for multi-task learning. 2016 IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), pp. 3994–4003, 2016. URL https://api.semanticscholar.
+org/CorpusID:1923223.
+AlirezaMohammadshahi,AliShaikh,andMajidYazdani. Routoo: Learningtoroutetolargelan-
+guagemodelseffectively,2024.
+Lili Mou, Zhao Meng, Rui Yan, Ge Li, Yan Xu, Lu Zhang, and Zhi Jin. How transferable
+are neural networks in nlp applications? In Conference on Empirical Methods in Natural
+LanguageProcessing,2016. URLhttps://api.semanticscholar.org/CorpusID:
+11866664.
+MohammedMuqeeth,HaokunLiu,andColinRaffel.Softmergingofexpertswithadaptiverouting.
+arXivpreprintarXiv:2306.03745,2023.
+Mohammed Muqeeth, Haokun Liu, Yufan Liu, and Colin Raffel. Learning to route among spe-
+cialized experts for zero-shot generalization. In Ruslan Salakhutdinov, Zico Kolter, Katherine
+Heller,AdrianWeller,NuriaOliver,JonathanScarlett,andFelixBerkenkamp(eds.),Proceedings
+of the 41st International Conference on Machine Learning, volume 235 of Proceedings of
+Machine Learning Research, pp. 36829–36846. PMLR, 21–27 Jul 2024. URL https://
+proceedings.mlr.press/v235/muqeeth24a.html.
+Isaac Ong, Amjad Almahairi, Vincent Wu, Wei-Lin Chiang, Tianhao Wu, Joseph E. Gonzalez,
+MWaleedKadous,andIonStoica. Routellm: Learningtoroutellmswithpreferencedata,2024.
+URLhttps://arxiv.org/abs/2406.18665.
+Oleksiy Ostapenko, Zhan Su, Edoardo Maria Ponti, Laurent Charlin, Nicolas Le Roux, Matheus
+Pereira,LucasCaccia,andAlessandroSordoni. Towardsmodularllmsbybuildingandreusinga
+libraryofloras. arXivpreprintarXiv:2405.11157,2024.
+JonasPfeiffer,AishwaryaKamath,AndreasRücklé,KyunghyunCho,andIrynaGurevych.Adapter-
+Fusion: Non-destructive task composition for transfer learning. In Proceedings of the 16th
+ConferenceoftheEuropeanChapteroftheAssociationforComputationalLinguistics,pp.487–
+503,April2021. URLhttps://aclanthology.org/2021.eacl-main.39.
+EdoardoMariaPonti,AlessandroSordoni,YoshuaBengio,andSivaReddy. Combiningparameter-
+efficient modules for task-level generalisation. In Proceedings of the 17th Conference of the
+EuropeanChapteroftheAssociationforComputationalLinguistics,pp.687–702,2023.
+Clifton Poth, Hannah Sterz, Indraneil Paul, Sukannya Purkayastha, Leon Engländer, Timo Imhof,
+IvanVulic´,SebastianRuder,IrynaGurevych,andJonasPfeiffer. Adapters: Aunifiedlibraryfor
+parameter-efficientandmodulartransferlearning. arXivpreprintarXiv:2311.11077,2023.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. Journal of Machine Learning Research, 21:1–67, 2020. URL https://www.
+jmlr.org/papers/volume21/20-074/20-074.pdf.
+Prajit Ramachandran and Quoc V. Le. Diversity and depth in per-example routing models. In
+InternationalConferenceonLearningRepresentations,2019. URLhttps://openreview.
+net/forum?id=BkxWJnC9tX.
+13AlexandreRamé,KartikAhuja,JianyuZhang,MatthieuCord,LéonBottou,andDavidLopez-Paz.
+Recyclingdiversemodelsforout-of-distributiongeneralization.arXivpreprintarXiv:2212.10445,
+2022.
+Sebastian Ruder, Joachim Bingel, Isabelle Augenstein, and Anders Søgaard. Latent multi-task
+architecture learning. In AAAI Conference on Artificial Intelligence, 2017. URL https:
+//api.semanticscholar.org/CorpusID:115985550.
+VictorSanh,AlbertWebson,ColinRaffel,StephenHBach,LintangSutawika,ZaidAlyafeai,An-
+toine Chaffin, Arnaud Stiegler, Teven Le Scao, Arun Raja, et al. Multitask prompted training
+enableszero-shottaskgeneralization. arXivpreprintarXiv:2110.08207,2021.
+Victor Sanh, Albert Webson, Colin Raffel, Stephen H. Bach, Lintang Sutawika, Zaid Alyafeai,
+AntoineChaffin, ArnaudStiegler, TevenLeScao, ArunRaja, MananDey, M.SaifulBari, Can-
+wen Xu, Urmish Thakker, Shanya Sharma, Eliza Szczechla, Taewoon Kim, Gunjan Chhablani,
+Nihal V. Nayak, Debajyoti Datta, Jonathan Chang, Mike Tian-Jian Jiang, Han Wang, Matteo
+Manica,ShengShen,ZhengXinYong,HarshitPandey,RachelBawden,ThomasWang,Trishala
+Neeraj, Jos Rozen, Abheesht Sharma, Andrea Santilli, Thibault Févry, Jason Alan Fries, Ryan
+Teehan,StellaBiderman,LeoGao,TaliBers,ThomasWolf,andAlexanderM.Rush. Multitask
+promptedtrainingenableszero-shottaskgeneralization. InTheTenthInternationalConference
+onLearningRepresentations,2022. URLhttps://arxiv.org/pdf/2110.08207.pdf.
+NoamShazeer,AzaliaMirhoseini,KrzysztofMaziarz,AndyDavis,QuocLe,GeoffreyHinton,and
+JeffDean. Outrageouslylargeneuralnetworks: Thesparsely-gatedmixture-of-expertslayer. In
+InternationalConferenceonLearningRepresentations,2016.
+NoamShazeer,AzaliaMirhoseini,KrzysztofMaziarz,AndyDavis,QuocLe,GeoffreyHinton,and
+JeffDean. Outrageouslylargeneuralnetworks: Thesparsely-gatedmixture-of-expertslayer. In
+InternationalConferenceonLearningRepresentations,2017. URLhttps://openreview.
+net/pdf?id=B1ckMDqlg.
+Shannon Zejiang Shen, Hunter Lang, Bailin Wang, Yoon Kim, and David Sontag. Learning to
+decodecollaborativelywithmultiplelanguagemodels. arXivpreprintarXiv:2403.03870,2024.
+TalShnitzer,AnthonyOu,MírianSilva,KateSoule,YuekaiSun,JustinSolomon,NeilThompson,
+andMikhailYurochkin. Largelanguagemodelroutingwithbenchmarkdatasets. arXivpreprint
+arXiv:2309.15789,2023.
+Aarohi Srivastava, Abhinav Rastogi, Abhishek Rao, Abu Awal Md Shoeb, Abubakar Abid, Adam
+Fisch,AdamR.Brown,AdamSantoro,AdityaGupta,AdriàGarriga-Alonso,AgnieszkaKluska,
+Aitor Lewkowycz, Akshat Agarwal, Alethea Power, Alex Ray, Alex Warstadt, Alexander W.
+Kocurek, Ali Safaya, Ali Tazarv, Alice Xiang, Alicia Parrish, Allen Nie, Aman Hussain,
+Amanda Askell, Amanda Dsouza, Ambrose Slone, Ameet Rahane, Anantharaman S. Iyer, An-
+ders Andreassen, Andrea Madotto, Andrea Santilli, Andreas Stuhlmüller, Andrew Dai, An-
+drew La, Andrew Lampinen, Andy Zou, Angela Jiang, Angelica Chen, Anh Vuong, Animesh
+Gupta, Anna Gottardi, Antonio Norelli, Anu Venkatesh, Arash Gholamidavoodi, Arfa Tabas-
+sum, Arul Menezes, Arun Kirubarajan, Asher Mullokandov, Ashish Sabharwal, Austin Her-
+rick, Avia Efrat, Aykut Erdem, Ayla Karakas¸, B. Ryan Roberts, Bao Sheng Loe, Barret Zoph,
+Bartłomiej Bojanowski, Batuhan Özyurt, Behnam Hedayatnia, Behnam Neyshabur, Benjamin
+Inden, Benno Stein, Berk Ekmekci, Bill Yuchen Lin, Blake Howald, Bryan Orinion, Cameron
+Diao,CameronDour,CatherineStinson,CedrickArgueta,CésarFerriRamírez,ChandanSingh,
+Charles Rathkopf, Chenlin Meng, Chitta Baral, Chiyu Wu, Chris Callison-Burch, Chris Waites,
+Christian Voigt, Christopher D. Manning, Christopher Potts, Cindy Ramirez, Clara E. Rivera,
+Clemencia Siro, Colin Raffel, Courtney Ashcraft, Cristina Garbacea, Damien Sileo, Dan Gar-
+rette, Dan Hendrycks, Dan Kilman, Dan Roth, Daniel Freeman, Daniel Khashabi, Daniel Levy,
+Daniel Moseguí González, Danielle Perszyk, Danny Hernandez, Danqi Chen, Daphne Ippolito,
+Dar Gilboa, David Dohan, David Drakard, David Jurgens, Debajyoti Datta, Deep Ganguli, De-
+nis Emelin, Denis Kleyko, Deniz Yuret, Derek Chen, Derek Tam, Dieuwke Hupkes, Diganta
+Misra, Dilyar Buzan, Dimitri Coelho Mollo, Diyi Yang, Dong-Ho Lee, Dylan Schrader, Eka-
+terina Shutova, Ekin Dogus Cubuk, Elad Segal, Eleanor Hagerman, Elizabeth Barnes, Eliza-
+bethDonoway,ElliePavlick,EmanueleRodola,EmmaLam,EricChu,EricTang,ErkutErdem,
+14ErnieChang,EthanA.Chi,EthanDyer,EthanJerzak,EthanKim,EuniceEngefuManyasi,Ev-
+geniiZheltonozhskii, FanyueXia, FatemehSiar, FernandoMartínez-Plumed, FrancescaHappé,
+Francois Chollet, Frieda Rong, Gaurav Mishra, Genta Indra Winata, Gerard de Melo, Germán
+Kruszewski, Giambattista Parascandolo, Giorgio Mariani, Gloria Wang, Gonzalo Jaimovitch-
+López,GregorBetz, GuyGur-Ari,HanaGalijasevic,HannahKim,HannahRashkin, Hannaneh
+Hajishirzi,HarshMehta,HaydenBogar,HenryShevlin,HinrichSchütze,HiromuYakura,Hong-
+ming Zhang, Hugh Mee Wong, Ian Ng, Isaac Noble, Jaap Jumelet, Jack Geissinger, Jackson
+Kernion, Jacob Hilton, Jaehoon Lee, Jaime Fernández Fisac, James B. Simon, James Koppel,
+JamesZheng, JamesZou, JanKocon´, JanaThompson, JanelleWingfield, JaredKaplan, Jarema
+Radom, Jascha Sohl-Dickstein, Jason Phang, Jason Wei, Jason Yosinski, Jekaterina Novikova,
+Jelle Bosscher, Jennifer Marsh, Jeremy Kim, Jeroen Taal, Jesse Engel, Jesujoba Alabi, Ji-
+achengXu,JiamingSong,JillianTang,JoanWaweru,JohnBurden,JohnMiller,JohnU.Balis,
+JonathanBatchelder,JonathanBerant,JörgFrohberg,JosRozen,JoseHernandez-Orallo,Joseph
+Boudeman, Joseph Guerr, Joseph Jones, Joshua B. Tenenbaum, Joshua S. Rule, Joyce Chua,
+KamilKanclerz,KarenLivescu,KarlKrauth,KarthikGopalakrishnan,KaterinaIgnatyeva,Katja
+Markert, Kaustubh D. Dhole, Kevin Gimpel, Kevin Omondi, Kory Mathewson, Kristen Chia-
+fullo,KseniaShkaruta,KumarShridhar,KyleMcDonell,KyleRichardson,LariaReynolds,Leo
+Gao, Li Zhang, Liam Dugan, Lianhui Qin, Lidia Contreras-Ochando, Louis-Philippe Morency,
+Luca Moschella, Lucas Lam, Lucy Noble, Ludwig Schmidt, Luheng He, Luis Oliveros Colón,
+Luke Metz, Lütfi Kerem S¸enel, Maarten Bosma, Maarten Sap, Maartje ter Hoeve, Maheen Fa-
+rooqi, Manaal Faruqui, Mantas Mazeika, Marco Baturan, Marco Marelli, Marco Maru, Maria
+Jose Ramírez Quintana, Marie Tolkiehn, Mario Giulianelli, Martha Lewis, Martin Potthast,
+Matthew L. Leavitt, Matthias Hagen, Mátyás Schubert, Medina Orduna Baitemirova, Melody
+Arnaud, Melvin McElrath, Michael A. Yee, Michael Cohen, Michael Gu, Michael Ivanitskiy,
+MichaelStarritt,MichaelStrube,MichałSwe˛drowski,MicheleBevilacqua,MichihiroYasunaga,
+Mihir Kale, Mike Cain, Mimee Xu, Mirac Suzgun, Mitch Walker, Mo Tiwari, Mohit Bansal,
+Moin Aminnaseri, Mor Geva, Mozhdeh Gheini, Mukund Varma T, Nanyun Peng, Nathan A.
+Chi, Nayeon Lee, Neta Gur-Ari Krakover, Nicholas Cameron, Nicholas Roberts, Nick Doiron,
+Nicole Martinez, Nikita Nangia, Niklas Deckers, Niklas Muennighoff, Nitish Shirish Keskar,
+NivedithaS.Iyer,NoahConstant,NoahFiedel,NuanWen,OliverZhang,OmarAgha,OmarEl-
+baghdadi,OmerLevy,OwainEvans,PabloAntonioMorenoCasares,ParthDoshi,PascaleFung,
+PaulPuLiang,PaulVicol,PegahAlipoormolabashi,PeiyuanLiao,PercyLiang,PeterChang,Pe-
+terEckersley, PhuMonHtut, PinyuHwang, PiotrMiłkowski, PiyushPatil, PouyaPezeshkpour,
+Priti Oli, Qiaozhu Mei, Qing Lyu, Qinlang Chen, Rabin Banjade, Rachel Etta Rudolph, Raefer
+Gabriel,RahelHabacker,RamonRisco,RaphaëlMillière,RhythmGarg,RichardBarnes,RifA.
+Saurous, Riku Arakawa, Robbe Raymaekers, Robert Frank, Rohan Sikand, Roman Novak, Ro-
+man Sitelew, Ronan LeBras, Rosanne Liu, Rowan Jacobs, Rui Zhang, Ruslan Salakhutdinov,
+Ryan Chi, Ryan Lee, Ryan Stovall, Ryan Teehan, Rylan Yang, Sahib Singh, Saif M. Moham-
+mad, Sajant Anand, Sam Dillavou, Sam Shleifer, Sam Wiseman, Samuel Gruetter, Samuel R.
+Bowman, Samuel S. Schoenholz, Sanghyun Han, Sanjeev Kwatra, Sarah A. Rous, Sarik Ghaz-
+arian, Sayan Ghosh, Sean Casey, Sebastian Bischoff, Sebastian Gehrmann, Sebastian Schus-
+ter, Sepideh Sadeghi, Shadi Hamdan, Sharon Zhou, Shashank Srivastava, Sherry Shi, Shikhar
+Singh,ShimaAsaadi,ShixiangShaneGu,ShubhPachchigar,ShubhamToshniwal,ShyamUpad-
+hyay, Shyamolima, Debnath, Siamak Shakeri, Simon Thormeyer, Simone Melzi, Siva Reddy,
+Sneha Priscilla Makini, Soo-Hwan Lee, Spencer Torene, Sriharsha Hatwar, Stanislas Dehaene,
+StefanDivic,StefanoErmon,StellaBiderman,StephanieLin,StephenPrasad,StevenT.Pianta-
+dosi,StuartM.Shieber,SummerMisherghi,SvetlanaKiritchenko,SwaroopMishra,TalLinzen,
+TalSchuster,TaoLi,TaoYu,TariqAli,TatsuHashimoto,Te-LinWu,ThéoDesbordes,Theodore
+Rothschild, Thomas Phan, Tianle Wang, Tiberius Nkinyili, Timo Schick, Timofei Kornev, Ti-
+tus Tunduny, Tobias Gerstenberg, Trenton Chang, Trishala Neeraj, Tushar Khot, Tyler Shultz,
+Uri Shaham, Vedant Misra, Vera Demberg, Victoria Nyamai, Vikas Raunak, Vinay Ramasesh,
+Vinay Uday Prabhu, Vishakh Padmakumar, Vivek Srikumar, William Fedus, William Saun-
+ders,WilliamZhang,WoutVossen,XiangRen,XiaoyuTong,XinranZhao,XinyiWu,Xudong
+Shen, Yadollah Yaghoobzadeh, Yair Lakretz, Yangqiu Song, Yasaman Bahri, Yejin Choi, Yichi
+Yang, Yiding Hao, Yifu Chen, Yonatan Belinkov, Yu Hou, Yufang Hou, Yuntao Bai, Zachary
+Seid, Zhuoye Zhao, Zijian Wang, Zijie J. Wang, Zirui Wang, and Ziyi Wu. Beyond the im-
+itation game: Quantifying and extrapolating the capabilities of language models, 2023. URL
+https://arxiv.org/abs/2206.04615.
+15Trevor Standley, Amir Zamir, Dawn Chen, Leonidas Guibas, Jitendra Malik, and Silvio Savarese.
+Which tasks should be learned together in multi-task learning? In International conference on
+machinelearning,pp.9120–9132.PMLR,2020.
+Sebastian U. Stich. Local sgd converges fast and communicates little. arXiv preprint
+arXiv:1805.09767,2018.
+Sainbayar Sukhbaatar, Olga Golovneva, Vasu Sharma, Hu Xu, Xi Victoria Lin, Baptiste Rozière,
+JacobKahn,DanielLi,Wen-tauYih,JasonWeston,etal. Branch-train-mix: Mixingexpertllms
+intoamixture-of-expertsllm. arXivpreprintarXiv:2403.07816,2024.
+Ximeng Sun, Rameswar Panda, and Rogério Schmidt Feris. Adashare: Learning what to share
+for efficient deep multi-task learning. ArXiv, abs/1911.12423, 2019. URL https://api.
+semanticscholar.org/CorpusID:208513386.
+Yi-Lin Sung, Jaemin Cho, and Mohit Bansal. Lst: Ladder side-tuning for parameter and memory
+efficienttransferlearning. InAdvancesinNeuralInformationProcessingSystems,2022.
+MiracSuzgun,NathanScales,NathanaelSchärli,SebastianGehrmann,YiTay,HyungWonChung,
+AakankshaChowdhery,QuocVLe,EdHChi,DennyZhou,etal. Challengingbig-benchtasks
+andwhetherchain-of-thoughtcansolvethem. arXivpreprintarXiv:2210.09261,2022.
+DerekTam,MohitBansal,andColinRaffel. Mergingbymatchingmodelsintasksubspaces. arXiv
+preprintarXiv:2312.04339,2023.
+Anke Tang, Li Shen, Yong Luo, Nan Yin, Lefei Zhang, and Dacheng Tao. Merging multi-task
+modelsviaweight-ensemblingmixtureofexperts,2024.
+Tu Vu, Tong Wang, Tsendsuren Munkhdalai, Alessandro Sordoni, Adam Trischler, Andrew
+Mattarella-Micke, Subhransu Maji, and Mohit Iyyer. Exploring and predicting transferability
+acrossnlptasks. arXivpreprintarXiv:2005.00770,2020.
+AlexWang,YadaPruksachatkun,NikitaNangia,AmanpreetSingh,JulianMichael,FelixHill,Omer
+Levy, and Samuel Bowman. Superglue: A stickier benchmark for general-purpose language
+understandingsystems. Advancesinneuralinformationprocessingsystems,32,2019.
+Hanqing Wang, Bowen Ping, Shuo Wang, Xu Han, Yun Chen, Zhiyuan Liu, and Maosong Sun.
+Lora-flow: Dynamic lora fusion for large language models in generative tasks. arXiv preprint
+arXiv:2402.11455,2024.
+YaqingWang,SubhabrataMukherjee,XiaodongLiu,JingGao,AhmedHassanAwadallah,andJian-
+fengGao. Adamix: Mixture-of-adapterforparameter-efficienttuningoflargelanguagemodels.
+arXivpreprintarXiv:2205.12410,2022a.
+YizhongWang,SwaroopMishra,PegahAlipoormolabashi,YeganehKordi,AmirrezaMirzaei,An-
+jana Arunkumar, Arjun Ashok, Arut Selvan Dhanasekaran, Atharva Naik, David Stap, et al.
+Super-naturalinstructions: Generalizationviadeclarativeinstructionson1600+nlptasks. arXiv
+preprintarXiv:2204.07705,2022b.
+Jason Wei, Maarten Bosma, Vincent Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du,
+Andrew M. Dai, and Quoc V Le. Finetuned language models are zero-shot learners. In
+InternationalConferenceonLearningRepresentations,2022a. URLhttps://openreview.
+net/forum?id=gEZrGCozdqR.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,Denny
+Zhou,etal. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. Advancesin
+NeuralInformationProcessingSystems,35,2022b.
+Mitchell Wortsman, Maxwell C Horton, Carlos Guestrin, Ali Farhadi, and Mohammad Raste-
+gari. Learning neural network subspaces. In International Conference on Machine Learning,
+pp.11217–11227.PMLR,2021.
+16Mitchell Wortsman, Gabriel Ilharco, Samir Ya Gadre, Rebecca Roelofs, Raphael Gontijo-Lopes,
+AriSMorcos, HongseokNamkoong, AliFarhadi, YairCarmon, SimonKornblith, etal. Model
+soups: averaging weights of multiple fine-tuned models improves accuracy without increasing
+inference time. In International Conference on Machine Learning, pp. 23965–23998. PMLR,
+2022.
+Chengyue Wu, Teng Wang, Yixiao Ge, Zeyu Lu, Ruisong Zhou, Ying Shan, and Ping Luo. pi-
+tuning: Transferring multimodal foundation models with optimal multi-task interpolation. In
+InternationalConferenceonMachineLearning,pp.37713–37727.PMLR,2023.
+Xun Wu, Shaohan Huang, and Furu Wei. Mixture of loRA experts. In The Twelfth International
+ConferenceonLearningRepresentations,2024.URLhttps://openreview.net/forum?
+id=uWvKBCYh4S.
+Jingwei Xu, Junyu Lai, and Yunpeng Huang. Meteora: Multiple-tasks embedded lora for large
+languagemodels. arXivpreprintarXiv:2405.13053,2024.
+Prateek Yadav, Leshem Choshen, Colin Raffel, and Mohit Bansal. Compeft: Compression for
+communicatingparameterefficientupdatesviasparsificationandquantization,2023a.
+PrateekYadav,DerekTam,LeshemChoshen,ColinRaffel,andMohitBansal. TIES-merging: Re-
+solvinginterferencewhenmergingmodels. InThirty-seventhConferenceonNeuralInformation
+ProcessingSystems,2023b.
+Prateek Yadav, Colin Raffel, Mohammed Muqeeth, Lucas Caccia, Haokun Liu, Tianlong Chen,
+Mohit Bansal, Leshem Choshen, and Alessandro Sordoni. A survey on model moerging:
+Recycling and routing among specialized experts for collaborative learning. arXiv preprint
+arXiv:2408.07057,2024.
+EnnengYang,ZhenyiWang,LiShen,ShiweiLiu,GuibingGuo,XingweiWang,andDachengTao.
+Adamerging: Adaptivemodelmergingformulti-tasklearning. arXivpreprintarXiv:2310.02575,
+2023.
+QinyuanYe,JuanZha,andXiangRen. Elicitingandunderstandingcross-taskskillswithtask-level
+mixture-of-experts. arXivpreprintarXiv:2205.12701,2022.
+TedZadouri,AhmetÜstün,ArashAhmadian,BeyzaErmis¸,AcyrLocatelli,andSaraHooker. Push-
+ing mixture of experts to the limit: Extremely parameter efficient moe for instruction tuning.
+arXivpreprintarXiv:2309.05444,2023.
+Amir Zamir, Alexander Sax, Bokui (William) Shen, Leonidas J. Guibas, Jitendra Malik, and Sil-
+vio Savarese. Taskonomy: Disentangling task transfer learning. 2018 IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pp. 3712–3722, 2018. URL https://api.
+semanticscholar.org/CorpusID:5046249.
+Poorya Zaremoodi, Wray L. Buntine, and Gholamreza Haffari. Adaptive knowledge shar-
+ing in multi-task learning: Improving low-resource neural machine translation. In Annual
+Meeting of the Association for Computational Linguistics, 2018. URL https://api.
+semanticscholar.org/CorpusID:51875779.
+Zihao Zeng, Yibo Miao, Hongcheng Gao, Hao Zhang, and Zhijie Deng. Adamoe: Token-
+adaptiveroutingwithnullexpertsformixture-of-expertslanguagemodels,2024. URLhttps:
+//arxiv.org/abs/2406.13233.
+ZiyuZhao,LeileiGan,GuoyinWang,WangchunshuZhou,HongxiaYang,KunKuang,andFeiWu.
+Loraretriever: Input-awareloraretrievalandcompositionformixedtasksinthewild,2024.
+Jing Zhou, Zongyu Lin, Yanan Zheng, Jian Li, and Zhilin Yang. Not all tasks are born equal:
+Understanding zero-shot generalization. In The Eleventh International Conference on Learning
+Representations,2022.
+17APPENDIX
+A LLM FOR TASK INSTRUCTION GENERATION.
+A.1 PROMPTTEMPLATE
+We use the following prompt with 3 randomly selected samples for each task to generate its de-
+scription. The prompt is then fed into the gpt-4-turbo OpenAI API to get the generated task
+descriptions.
+The following are three pairs of input-output examples from one task. Generate the task
+instruction in one sentence that is most possibly used to command a language model to
+produce them. In the instruction, remember to point out the skill or knowledge required for
+thetasktoguidethelanguagemodel.
+-Input:
+-Output:
+-Input:
+-Output:
+-Input:
+-Output:
+A.2 EXAMPLESOFTHEGENERATEDINSTRUCTIONS
+WeprovideseveralexamplesofLLM-generatedinstructionsinthissection.
+WikiBio(Lebretetal.,2016)(T0Held-In):
+• Createashortbiographyusingtheprovidedfacts,demonstratingknowledgeinhistorical
+andbiographicalwriting.
+• Writeashortbiographybasedonthegivenfactualbulletpoints,demonstratingproficiency
+insummarizingandtransformingstructureddataintocoherentnarrativetext.
+CommonGen(Linetal.,2020)(T0Held-In):
+• Generate a coherent sentence using all the given abstract concepts, requiring the skill of
+conceptintegrationtoformameaningfulsentence.
+• Generateacoherentsentencebycreativelycombiningagivensetofabstractconcepts.
+COPA(Huangetal.,2024b)(T0Held-Out):
+• Identifythemostlogicallyconsistentsentencefromtwogivenoptionsbasedontheprovided
+context,demonstratingreasoningandcausalrelationshipskills.
+• Generatethemostlikelyoutcomeforagivenscenariobychoosingbetweentwoprovided
+optionsbasedoncontextualcluesandcausalreasoning.
+DateUnderstanding(Srivastavaetal.,2023)(BigBench-Hard):
+• CalculatethedatebasedonthegiveninformationandpresentitinMM/DD/YYYYformat,
+ensuringthatyouaccuratelyaccountforday,month,andyearchanges.
+HinduMythologyTrivia(Srivastavaetal.,2023)(BigBench-Lite):
+• Generate the correct answer by making use of your knowledge in Hindu mythology and
+culture.
+18B DEMONSTRATING COMPOSITIONAL GENERATION
+Inadditiontosignificantimprovementsonheld-intasks,GLIDERdemonstratesstrongperformance
+onheld-outtasks,showcasingitsgeneralizationcapability. Tofurtherexaminethisabilitytohandle
+unseen tasks by composing experts, we provide specific task examples illustrating the association
+betweenselectedexpertsandtheevaluatedtask. AsFigure2shows,GLIDERprimarilyselectstwo
+expertsfortheCOPA(T0held-out)task,correspondingtoCosmosQAandQuaRel. Thefollowing
+threeexamplesfromthesetasksdemonstratetheirclosesemanticrelationship:
+• COPA:
+– Question: Everyoneintheclassturnedtostareatthestudent. Selectthemostplausi-
+blecause: -Thestudent’sphonerang. -Thestudenttooknotes.
+– Answer: Thestudent’sphonerang.
+• CosmosQA:
+– Question: Thatideastillweirdsmeout. Imadeablanketforthebaby’soldersister
+beforeshewasbornbutIcompletelyspacedthatthisonewasontheway,caughtup
+in my own dramas and whatnot . Luckily , I had started a few rows in white just to
+learnastitchagesago,andcontinuingthatstitchwillmakeanacceptablewoobie,I
+think. Accordingtotheabovecontext,choosethebestoptiontoanswerthefollowing
+question. Question: WhatdidImakeforthebaby. Options: A.Imadeacarseat. B.
+Noneoftheabovechoices. C.Imadeacrb. D.Ifinishedapairofbooties.
+– Answer: D.
+• QuaRel:
+– Question: Here’sashortstory: Apieceofthreadismuchthinnerthanatreesoitis
+(A)lessstrong(B)morestrong. Whatisthemostsensicalanswerbetween"Thread"
+and"Tree"?
+– Answer: Thread.
+19
