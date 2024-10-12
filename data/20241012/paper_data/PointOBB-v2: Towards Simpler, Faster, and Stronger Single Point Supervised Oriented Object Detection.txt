@@ -1,0 +1,673 @@
+PointOBB-v2
+POINTOBB-V2: TOWARDS SIMPLER, FASTER, AND
+STRONGER SINGLE POINT SUPERVISED ORIENTED
+OBJECT DETECTION
+BotaoRen1∗,XueYang2∗,YiYu3∗,JunweiLuo4,ZhidongDeng1†
+1TsinghuaUniversity 2OpenGVLab,ShanghaiAILaboratory
+3SoutheastUniversity 4WuhanUniversity
+rbt22@mails.tsinghua.edu.cn
+Code: https://github.com/taugeren/PointOBB-v2
+ABSTRACT
+Single point supervised oriented object detection has gained attention and made
+initial progress within the community. Diverse from those approaches relying
+on one-shot samples or powerful pretrained models (e.g. SAM), PointOBB has
+shownpromiseduetoitsprior-freefeature. Inthispaper,weproposePointOBB-
+v2,asimpler,faster,andstrongermethodtogeneratepseudorotatedboxesfrom
+points without relying on any other prior. Specifically, we first generate a Class
+Probability Map (CPM) by training the network with non-uniform positive and
+negativesampling. WeshowthattheCPMisabletolearntheapproximateobject
+regionsandtheircontours. Then,PrincipalComponentAnalysis(PCA)isapplied
+to accurately estimate the orientation and the boundary of objects. By further
+incorporating a separation mechanism, we resolve the confusion caused by the
+overlappingontheCPM,enablingitsoperationinhigh-densityscenarios. Exten-
+sivecomparisonsdemonstratethatourmethodachievesatrainingspeed15.58×
+faster and an accuracy improvement of 11.60%/25.15%/21.19% on the DOTA-
+v1.0/v1.5/v2.0datasetscomparedtothepreviousstate-of-the-art,PointOBB.This
+significantlyadvancesthecuttingedgeofsinglepointsupervisedorienteddetec-
+tioninthemodulartrack.
+1 INTRODUCTION
+Orientedobjectdetectionisessentialforaccuratelylabelingsmallanddenselypackedobjects, es-
+pecially in scenarios like remote sensing imagery, retail analysis, and scene text detection, where
+OrientedBoundingBoxes(OBBs)providepreciseannotations.However,annotatingOBBsislabor-
+intensiveandcostly.Therefore,numerousweaklysupervisedmethodshaveemergedinrecentyears,
+including horizontal bounding box supervision and point supervision. Representative methods for
+horizontal bounding box supervision include H2RBox (Yang et al., 2023a) and H2RBox-v2 (Yu
+et al., 2023). In addition, point supervision, which only requires labeling the point and category
+foreachobject,significantlyreducestheannotationcost. Notablepoint-supervisedmethodsinclude
+P2RBox(Caoetal.,2024),Point2RBox(Yuetal.,2024),andPointOBB(Luoetal.,2024).
+AsillustratedinFig.1,existingpoint-supervisedorientedobjectdetectionmethodscanbebroadly
+categorized into three paradigms: (a) SAM-based methods (Cao et al., 2024; Zhang et al., 2024)
+rely on the powerful SAM (Kirillov et al., 2023b) model, which, although effective in natural im-
+ages,struggleswithcross-domaintaskslikeaerialimagery,particularlyinsmallobjectanddensely
+packed scenarios. Additionally, SAM-based methods are slow and memory-intensive due to post-
+processing;(b)Prior-basedWeakly-supervisedOrientedObjectDetection(WOOD)methods,such
+asPoint2RBox(Yuetal.,2024),integratehumanpriorswhichreducegeneralizabilitysincedifferent
+datasets require distinct prior knowledge. Further, the end-to-end setup limits flexibility, prevent-
+ingthesemethodsfromleveragingmorepowerfuldetectorsandbenefitingfromtheirperformance
+improvements; (c) Modular WOOD methods (Luo et al., 2024) do not rely on manually designed
+∗Equalcontribution.†Correspondingauthor
+1
+4202
+tcO
+01
+]VC.sc[
+1v01280.0142:viXraPointOBB-v2
+Flexible: Flexible: Flexible: Prior:
+Prior: Prior:
+Speed: Speed:
+Speed: Speed: Result Result
+Trainable
+Result Result
+OBB Detector OBB Detector
+OBB Detector Pseudo RBox Fixed
+Pseudo RBox
+OBB Prior
+Pseudo RBox Detector Model MIL Loss MIL
+stu tea
+Post Process Label CPM+PCA Slow
+Gen.
+SAM Human Multi-View
+Point Image Prior Point Image
+Point Image Point Image Fast
+e.g.PointOBB PointOBB-v2(Ours)
+e.g.P2RBox, PMHO e.g.Point2RBox
+(a)SAM-basedOOD (b) Prior-based WOOD (c) Modular WOOD
+Figure1: Comparewithexistingpointsupervisedmethods, including(a)PromptOOD(i.e. SAM
+based);(b-c)WeaklyOOD:Prior-basedandModular. OODmeansOrientedObjectDetection.
+priorsandoffergreaterflexibilitybydecouplingpseudo-labelgenerationfromthedetector,making
+themmoresuitableforefficientandscalabledetectiontasks.
+Asapreviousstate-of-the-artmethod,PointOBBfallsunderthemodularWOODcategoryandoffers
+afeasiblesolutionforpoint-superviseddetection. However,ithasseveralpracticallimitations: the
+pseudo-labelgenerationprocessisveryslow,takingapproximately7-8timeslongerthanthesubse-
+quentdetectortraining. Additionally,itstrainingrequiressignificantGPUmemoryduetomultiple
+viewtransformations. Moreover, thevariabilityinthenumberofRegionofInterest(RoI)propos-
+alscanleadtoout-of-memoryissues,particularlyindenseobjectscenarios. Althoughlimitingthe
+numberofRoIproposalscanmitigatethisissue,itresultsindegradedperformance.
+Considering the aforementioned issues, our motivation is to design a simpler, faster, and stronger
+method,whichleadstothedevelopmentofPointOBB-v2. Ourapproachaimstoretainthestrengths
+of the modular WOOD paradigm while addressing the inefficiencies of PointOBB, particularly in
+termsofspeedandmemoryconsumption,makingitmoresuitableforreal-worldapplications.
+PointOBB-v2 introduces a novel and concise pipeline that discards the teacher-student structure,
+achieving significant improvements in the accuracy and generation speed of the pseudo-label, and
+improvingmemoryefficiency,especiallyinscenarioswithsmallanddenseobjects. Specifically,we
+generateClassProbabilityMaps(CPM)frompointannotationsanddesignanovelsampleassign-
+mentstrategytocaptureobjectcontoursandorientationsfromtheCPM.Next,weapplynon-uniform
+samplingbasedontheprobabilitydistributionandusePrincipalComponentAnalysis(PCA)tode-
+termineobjectboundariesanddirections. Toaddressdenseobjectdistributions,wedesignasepara-
+tionmechanismtoreduceconfusioninpseudo-labelgenerationcausedbyconnectedCPMs.
+Experimentalresultsdemonstratethatourmethodconsistentlyimprovesaccuracy,speed,andmem-
+oryefficiencyacrossvariousdatasetscomparedtoPointOBB,achievingseveralstate-of-the-artre-
+sults. Specifically, on the DOTA-v1.0 dataset, our method, when using pseudo-labels for training
+with Rotated FCOS, improves the mAP from 30.08% (PointOBB) to 41.68%, a gain of 11.60%
+mAP.InmorechallengingdatasetslikeDOTA-v1.5andDOTA-v2.0,whichcontainahigherdensity
+ofsmallobjects,ourmethodachievesmAPof36.39%and27.22%,withrespectivegainsof25.15%
+and 21.19% over PointOBB, demonstrating its robustness in handling small and densely packed
+objects. Furthermore, ourpseudo-labelgenerationprocessis15.58timesfaster, reducingthetime
+from 22.28 hours to 1.43 hours. On the DOTA-v1.5 and DOTA-v2.0 datasets, PointOBB requires
+limitingthenumberofRoIproposalsduetohighmemoryconsumption,whileourmethodoperates
+withoutsuchrestrictions,withamemoryusageofapproximately8GB.
+Ourcontributionsaresummarizedasfollows:
+• We propose a novel and efficient pipeline for point-supervised oriented object detection, which
+eliminates the time- and memory-consuming teacher-student structure, significantly improving
+pseudo-labelgenerationspeedandreducingmemoryusage.
+• Withoutanyadditionaldeepnetworkdesign,ourmethodreliessolelyonclassprobabilitymapsto
+generateaccurateobjectcontours,usingefficientPCAtodetermineobjectdirectionsandbound-
+2PointOBB-v2
+aries. Wealsodesignavectorconstraintmethodtodistinguishsmallobjectsindensescenarios,
+improvingdetectionperformance.
+• Experimental results show that our method consistently outperforms PointOBB across multiple
+datasets, achieving 11.60%/25.15%/21.19% gain on the DOTA-v1.0/v1.5/v2.0 datasets, with a
+15.58× speedup in pseudo-label generation and memory usage reduced to approximately 8GB
+withoutlimitingRoIproposals.
+2 RELATED WORK
+In addition to horizontal detection (Zhao et al., 2019; Liu et al., 2020), oriented object detection
+(Yangetal.,2018;Wenetal.,2023)hasreceivedextensiveattention. Inthissection,wefirstintro-
+duceorienteddetectionsupervisedbyrotatedboxes. Then,approachestopoint-supervisedoriented
+detectionandotherweakly-supervisedsettingsarediscussed.
+2.1 RBOX-SUPERVISEDORIENTEDDETECTION
+Representative works include anchor-based detector Rotated RetinaNet (Lin et al., 2020), anchor-
+freedetectorRotatedFCOS(Tianetal.,2019),andtwo-stagesolutions,e.g. RoITransformer(Ding
+etal.,2019),OrientedR-CNN(Xieetal.,2021),andReDet(Hanetal.,2021). Someresearchen-
+hancesthedetectorbyexploitingalignmentfeatures,e.g. R3Det(Yangetal.,2021b)andS2A-Net
+(Hanetal.,2022). Theangleregressionmayfaceboundarydiscontinuityandremediesaredevel-
+oped, including modulated losses (Yang et al., 2019a; 2022; Qian et al., 2021) that alleviate loss
+jumps,anglecoders(Yang&Yan,2020;Yangetal.,2021a;Yang&Yan,2022;Yu&Da,2023)that
+convert the angle into boundary-free coded data, and Gaussian-based losses (Yang et al., 2021c;d;
+2023b;c;Murrugarra-Llerenaetal.,2024)transformingrotatedboundingboxesintoGaussiandis-
+tributions. RepPoint-basedmethods (Yang et al., 2019b; Hou etal., 2023; Li et al., 2022) provide
+alternativesthatpredictasetofsamplepointsthatboundsthespatialextentofanobject.
+2.2 POINT-SUPERVISEDORIENTEDDETECTION
+Recently,severalmethodsforpoint-supervisedorienteddetectionhavebeenproposed: 1)P2RBox
+(Cao et al., 2024), PMHO (Zhang et al., 2024) and PointSAM (Liu et al., 2024) propose oriented
+objectdetectionwithpointpromptsbyemployingthezero-shotPoint-to-MaskabilityofSAM(Kir-
+illov et al., 2023a). 2) Point2RBox (Yu et al., 2024) has introduced a novel end-to-end approach
+based on knowledge combination in this domain. 3) PointOBB (Luo et al., 2024) achieves point
+annotationbasedRBoxgenerationmethodfororientedobjectdetectionthroughscale-sensitivecon-
+sistencyandmultipleinstancelearning.
+Amongthesemethods,P2RBox,PMHOandPointSAMrequireSAMmodelpre-trainedonmassive
+amounts of labeled data, whereas Point2RBox requires one-shot samples (i.e. human priors) for
+eachcategory. Althoughachievingbetteraccuracy,theyarenotasgeneralasPointOBB.Hence,we
+choosePointOBBasourbaselinetodevelopasimpler,faster,andstrongermethod,PointOBB-v2.
+2.3 OTHERWEAKLY-SUPERVISEDSETTINGS
+Compared to the Point-to-RBox, some other weakly-supervised settings have been better studied.
+These methods are potentially applicable to our Point-to-RBox task setting by using a cascade
+pipeline,suchasPoint-to-HBox-to-RBoxandPoint-to-Mask-to-RBox. Inourexperiment,cascade
+pipelinespoweredbystate-of-the-artweakly-supervisedapproachesarealsoadoptedforcompari-
+son. Here,severalrepresentativeworkareintroduced.
+HBox-to-RBox. The seminal work H2RBox (Yang et al., 2023a) circumvents the segmentation
+step andachieves RBoxdetection directlyfrom HBoxannotation. WithHBox annotationsfor the
+same object in various orientations, the geometric constraint limits the object to a few candidate
+angles. Supplementedwithaself-supervisedbrancheliminatingtheundesiredresults,anHBox-to-
+RBox paradigm is established. An enhanced version H2RBox-v2 (Yu et al., 2023) is proposed to
+leverage the reflection symmetry of objects to estimate their angle, further boosting the HBox-to-
+RBoxperformance. EIE-Det(Wangetal.,2024)usesanexplicitequivariancebranchforlearning
+3PointOBB-v2
+Generate CPM Label Assignment
+Positive Negative Label
+Labels Positive Label
+Ignored
+Backbone Negative
+Labels
+Projection Training Target
+Find Orientation & Boundary
+Weighted Find
+PCA Boundary
+Sample Grid Weight Principle Axes
+Figure 2: Our PointOBB-v2 first generates a Class Probability Map (CPM) with a positive and
+negativesampleassignmentstrategyduringtraining. ItthenappliesPrincipalComponentAnalysis
+(PCA)toinferobjectorientationandboundariestogeneratepseudolabels.
+rotation consistency, and an implicit equivariance branch for learning position, aspect ratio, and
+scaleconsistency. Somestudies(Iqbaletal.,2021;Sunetal.,2021;Zhuetal.,2023)useadditional
+annotateddatafortraining,whicharealsoattractivebutlessgeneral.
+Point-to-HBox.Severalrelatedapproacheshavebeendeveloped,including:1)P2BNet(Chenetal.,
+2022)samplesboxproposalsofdifferentsizesaroundthelabeledpointandclassifythemtoachieve
+point-supervisedhorizontalobjectdetection. 2)PSOD(Gaoetal.,2022)achievespoint-supervised
+salientobjectdetectionusinganedgedetectorandadaptivemaskedfloodfill.
+Point-to-Mask. Point2Mask (Li et al., 2023) is proposed to achieve panoptic segmentation using
+only a single point annotation per target for training. SAM (Segment Anything Model) (Kirillov
+etal.,2023a)producesobjectmasksfrominputpoint/HBoxprompts. ThoughRBoxescanbeob-
+tainedfromthesegmentationmaskbyfindingtheminimumcircumscribedrectangle, suchacom-
+plexpipelinecanbelesscost-efficientandperformworse(Yangetal.,2023a;Yuetal.,2023).
+3 METHOD
+Our task focuses on oriented object detection with single point supervision. We first utilize point
+annotations for each object in the training dataset to generate pseudo labels, which are then used
+to train an existing detector. As shown in Fig. 2, the model first generates a Class Probability
+Map(CPM)basedonthepointannotations. Specifically,duringtraining,wedeviseapositiveand
+negativesampleassignmentstrategy, wheretheresultingCPMoutlinestheroughobjectcontours,
+withhigherprobabilitiesconcentratedaroundthepointandalongtheobjectaxes.
+WegeneratepseudoorientedboundingboxesaccordingtoCPM.Weperformnon-uniformsampling
+aroundthepointannotationofeachobject,guidedbytheprobabilitydistributionwithintheCPM.
+We convert the sampling process into a weighted probability approach, which maintains the same
+expectedresultwhileeliminatingthevarianceintroducedbyrandomsampling. ByapplyingPrin-
+cipalComponentAnalysis(PCA)totheweightedgridpoints,wecaninfertheobject’sorientation.
+WethendeterminetheobjectboundariesbycombiningthethresholdedCPMwiththeinferredori-
+entation.Furthermore,toaddressdenselypopulatedobjectscenarios,weintroduceamechanismfor
+differentiatingbetweencloselysituatedobjects,ensuringeffectiveseparationandaccuratedetection.
+4PointOBB-v2
+Input Image Learned CPM Input Image Learned CPM
+Figure3: Visualizationofclassprobabilitymap(CPM).
+3.1 CLASSPROBABILITYMAPGENERATION
+TheClassProbabilityMap(CPM)representstheper-classprobabilityforeachpointonthefeature
+map, with values ranging between [0, 1]. To generate the CPM, our model first takes an image I
+ofdimension(C,H,W)asinputandprocessesitthroughaResNet-50(Heetal.,2016)backbone
+withanFPN(Linetal.,2017)structure. Thefinalclassprobabilitymapisderivedfromthehighest-
+resolutionfeaturemapoftheFPN,whichisthenprojectedthroughaprojectionlayer. Theoutputis
+amapofsize(N ,H ,W ). Formally,itisdefinedas:
+class 0 0
+CPM=Proj(f(I) ), (1)
+0
+where CPM is the class probability map, Proj(·) represents the projection layer, and f(I) is the
+0
+highest-resolutionfeaturemapfromtheResNet-50+FPN.
+3.2 LABELASSIGNMENT
+Akeycomponentofourapproachisthedesignofarobustsampleassignmentstrategyforbothpos-
+itiveandnegativesamples. ThisstrategyisessentialforbuildinganaccurateCPM,whichoutlines
+roughobjectcontours,concentratinghigherprobabilitiesaroundobjectcentersandalongtheiraxes.
+Toensurereliableseparationofobjects,especiallyindenselypopulatedscenarios,ourmethodad-
+dressesthechallengeofcloselysituatedobjectsbyintroducingadditionalmechanismsforeffective
+differentiation. We illustrate this label assignment in the upper-right part of Fig. 2. The specific
+detailsofthesampleassignmentprocessareoutlinedbelow:
+PositiveLabelAssignment. Forpositivesamples,weselectallpointswithinafixedradiusb (set
+1
+to6inourmodel)aroundeachpoint. Ifapointlieswithinmultiplesuchradii,itisassignedtothe
+closestcenter. Theconditionforpositivesamplesisasfollows:
+∃GT ∈GT ,(d(p,GT )<b )∧(d(p,GT )=min(d(p,GT )))
+i 1∼N i 1 i 1∼N
+(2)
+⇒pispositive,cls(p)=cls(GT ).
+i
+Negative Label Assignment. Given N ground truth objects (GT), for each GT , we identify its
+i
+nearest neighboring object GT based on the Euclidean distance. This gives us a vector dist
+j min
+with dimension [N], where each element dist represents the minimum distance between GT and
+i i
+itsclosestneighbor. Wethendrawacirclewithradiusα×dist aroundGT , whereα(setto1in
+i i
+ourmodel)isafixedproportionalconstant. Pointsoutsideallsuchcirclesaredesignatedasnegative
+samples. Thenegativesampleconditionisformulatedas:
+∀GT ∈GT ,d(p,GT )>α×dist ⇒pisnegative. (3)
+i 1∼N i i
+In addition to the above defined negative labels, we also set the middle region between objects
+as negative to make the boundaries clearer between densely packed objects (denoted as “Neg./M”
+in ablation Tab. 4). For each GT , we identify its nearest neighbor GT that belongs to the same
+i j
+class. Acircleisdrawnwitharadiusb (setto4inourmodel)andcenteredatthemidpointofthe
+2
+line connecting GT and GT , and points within this circle are assigned as negative samples. The
+i j
+conditionisdefinedas:
+∀GT ∈GT ,∃GT ∈GT ,d(GT ,GT )=min(d(GT ,GT ))
+i 1∼N j 1∼N i j i 1∼N
+(4)
+∧cls(GT )=cls(GT )∧d(p,(GT +GT )/2)<b ⇒pisnegative.
+i j i j 2
+5PointOBB-v2
+Robustness.Whilewedonotexplicitlydefinepositiveandnegativesamplesbasedonpreciseobject
+contoursororientedboundingboxes,whichmayresultinsomeinaccuraciesduringlabelassignment
+(i.e. incorrectlyassigningasmallportionofpositiveornegativesamplesduringtraining),thisdoes
+not significantly hinder our method’s ability to learn accurate object contours. These minor label
+assignmentinaccuracies,particularlyindenselypopulatedregionsorforobjectswithextremeaspect
+ratios, do not affect the overall robustness and effectiveness of the approach. As demonstrated in
+Fig. 3, our strategy is capable of learning the correct contours, even for objects with large aspect
+ratiosandindenselypackedscenarios.
+3.3 ORIENTATIONANDBOUNDARYESTIMATIONVIAPCA
+AfterobtainingtheCPM,wesamplepointsaroundeachgroundtruthbasedontheclassprobabil-
+ities,andthenapplyPrincipalComponentAnalysis(PCA)onthesampledpointstodeterminethe
+object’sorientation. AsshowninbottompartofFig.2,wesamplepointsaroundtheGTbasedon
+theprobabilitiesintheCPMforthecorrespondingobjectclass. Wechoosea7×7gridcenteredat
+theGTwiththecoordinatesofthe49integerpointsz as:
+1∼49
+(x,y),x∈[−3,3],y ∈[−3,3]. (5)
+For each grid point z , we can compute the CPM probability p and decide whether to sample the
+i i
+pointbasedonthisprobability. Oncewehavethesampledpoints,weapplyPCAtofindtheprimary
+directionofthepointset,whichrepresentstheobject’sorientation. WhilePCAprovidesthecorrect
+primarydirectioninexpectation,therandomnessintroducedbysamplingcancausevarianceinthe
+resultfromasinglepass.Althoughaveragingovermultiplesamplingrunscanmitigatethisvariance,
+italsoincreasescomputationalcost.
+To address this, we propose an equivalent method that transforms probabilistic sampling into a
+weightedcoordinatetransformation.Insteadofsamplingpointsprobabilistically,weassignaweight
+of p to each point z , ensuring the same expected outcome while eliminating the variance caused
+i i
+byrandomsampling. Thecovariancematrixisthendefinedas:
+N
+(cid:88)
+C = p (z −µ )T(z −µ ). (6)
+z i i z i z
+i=1
+WethenperformeigenvaluedecompositiononC :
+z
+C v =λ v . (7)
+z i i i
+The eigenvector v corresponding to the largest eigenvalue λ is chosen as the primary direction.
+1 1
+SinceC isarealsymmetricmatrix, thesecondarydirectionisguaranteedtobeorthogonaltothe
+z
+primarydirection.Thisorthogonalitycorrespondstotheperpendicularrelationshipbetweenthetwo
+adjacentsidesofanorientedboundingbox.
+After identifying the primary and secondary directions, we determine the object boundaries along
+thesedirections. Startingfromthecenter,wemovealongeachdirectionandstopwhenthevalueat
+apositionfallsbelowathreshold,indicatingtheobjectboundary.
+3.4 OBJECTDIFFERENTIATIONINDENSESCENARIOS
+In dense scenarios, objects can be difficult to distinguish on the CPM. This can affect the PCA’s
+ability to determine the object orientation and the boundary identification. To address this, we
+designa“VectorConstraintSuppression”methodtoresolveboundaryambiguity.
+VectorConstraintSuppression. Evenafterdeterminingthecorrectorientationindensescenarios,
+the object boundaries may still be unclear, making it difficult to precisely locate them using the
+probabilitythresholddescribedinSec.3.3.Inmostcases,simplydistinguishingbetweentwoclosely
+positionedobjectsissufficienttodefinetheobject’sboundary.
+We propose a simple constraint: For each GT , we first find its nearest same-class neighbor GT
+i j
+and compute the vector u = ⟨GT ,GT ⟩ between GT and GT . If the angle between this vector
+i j i j
+and the primary or secondary direction is smaller than a threshold α (set to π/6 in our model),
+6PointOBB-v2
+Table1: ResultsofeachcategoryontheDOTA-v1.0dataset. FCOSRandORCNNrefertoRotated
+FCOSandOrientedR-CNN.∗indicatesusingadditionalhumanknowledgepriors.
+Method PL BD BR GTF SV LV SH TC BC ST SBF RA HA SP HC mAP50
+Point2Mask-RBox 4.0 23.1 3.8 1.3 15.1 1.0 3.3 19.0 1.0 29.1 0.0 9.5 7.4 21.1 7.1 9.72
+P2BNet+H2RBox 24.7 35.9 7.0 27.9 3.3 12.1 17.5 17.5 0.8 34.0 6.3 49.6 11.6 27.2 18.8 19.63
+P2BNet+H2RBox-v2 11.0 44.8 14.9 15.4 36.8 16.7 27.8 12.1 1.8 31.2 3.4 50.6 12.6 36.7 12.5 21.87
+Point2RBox-RC 62.9 64.3 14.4 35.0 28.2 38.9 33.3 25.2 2.2 44.5 3.4 48.1 25.9 45.0 22.6 34.07
+Point2RBox-SK∗ 53.3 63.9 3.7 50.9 40.0 39.2 45.7 76.7 10.5 56.1 5.4 49.5 24.2 51.2 33.8 40.27
+PointOBB(FCOSR) 26.1 65.7 9.1 59.4 65.8 34.9 29.8 0.5 2.3 16.7 0.6 49.0 21.8 41.0 36.7 30.08
+PointOBB-v2(FCOSR) 64.5 27.8 1.9 36.2 58.8 47.2 53.4 90.5 62.2 45.3 12.1 41.7 8.1 43.7 32.0 41.68
+PointOBB(ORCNN) 28.3 70.7 1.5 64.9 68.8 46.8 33.9 9.1 10.0 20.1 0.2 47.0 29.7 38.2 30.6 33.31
+PointOBB-v2(ORCNN) 63.7 45.6 2.0 39.5 50.5 49.6 45.4 89.8 62.9 41.3 13.6 42.8 8.9 39.5 29.5 41.64
+PointOBB(ReDet) 24.2 75.0 0.5 60.6 59.3 46.1 45.7 6.1 10.1 25.0 0.2 50.4 30.0 45.0 31.1 33.95
+PointOBB-v2(ReDet) 65.4 52.1 2.2 44.4 55.0 49.3 51.8 89.0 70.2 47.0 16.2 43.9 13.0 43.8 29.4 44.85
+we consider this direction valid for boundary definition. The boundary is then constrained by the
+followingcondition:
+1
+u·v < ×d(GT ,GT ) ifangle(u,v )<α (8)
+k 2 i j k
+wherev istheprimaryorsecondarydirection,GT isthenearestsame-classobjecttoGT ,and 1
+k j i 2
+meansthattheboundaryshouldbeclosertoGT thantoGT .
+i j
+4 EXPERIMENT
+4.1 DATASETS
+DOTA (Xia et al., 2018) is a large-scale dataset designed for object detection in aerial images,
+coveringvariousobjectcategoriesandcomplexities. DOTAhasthreeversions:
+DOTA-v1.0has2,806imageswith188,282instancesacross15categories. Theimagesrangefrom
+800×800to4,000×4,000pixelsandexhibitsignificantvariationinscaleandorientation.
+DOTA-v1.5 extends DOTA-v1.0 by adding annotations for extremely small objects (less than 10
+pixels)andintroducinganewcategory,Container Crane(CC).Itincludesatotalof403,318
+instanceswhileretainingthesameimagecountanddatasetsplitasDOTA-v1.0.
+DOTA-v2.0furtherexpandsthedatasetto11,268imagesand1,793,658instances,covering18cat-
+egories. Twoadditionalcategories,Airport(AP)andHelipad(HP),areintroduced,providing
+amorediverseandchallengingsetofaerialimages.
+4.2 EXPERIMENTALSETTINGS
+Our implementation is based on the MMRotate library (Zhou et al., 2022). In the pseudo-label
+generationstage, wetrainthemodelfor6epochsusingmomentumSGDastheoptimizer. Weset
+theweightdecayto1e-4,withaninitiallearningrateof0.005,whichdecaysbyafactorof10after
+the4th epoch. Thebatchsizefortrainingissetto2. Forthedetectortrainingphaseusingpseudo-
+labels,weusethesamedetectorconfigurationsasthedefaultsettingsinMMRotate.Throughoutthe
+entiretrainingprocess,randomflippingisemployedastheonlydataaugmentationtechnique. Our
+experimentswereacceleratedusingtwoGeForceRTX3090GPUs.
+4.3 MAINRESULTS
+Results on DOTA-v1.0. As shown in Tab. 1, our method achieves state-of-the-art performance
+comparedtothepreviousleadingapproaches,i.e. PointOBBandPoint2RBox. Specifically,under
+threedifferentdetectors,ourmethodattainsmAP scoresof41.68%,41.64%,and44.85%,repre-
+50
+senting improvements of 11.60%, 8.33%, and 10.90% over PointOBB, respectively. Additionally,
+when compared to Point2RBox-RC, which does not incorporate human prior knowledge, our ap-
+proach achieves a substantial gain of 10.78%. Even when compared with Point2RBox-SK, which
+leverages manual sketches to assist in boundary determination, our method still outperforms it by
+7PointOBB-v2
+Table2: ResultsonDOTA-v1.0/v1.5/v2.0,reportingthemAP metric. FCOSRandORCNNrefer
+50
+toRotatedFCOSandOrientedR-CNN.∗indicatesusingadditionalhumanknowledgepriors.
+Method DOTA-v1.0 DOTA-v1.5 DOTA-v2.0
+Point2Mask-RBox 9.72 - -
+P2BNet+H2RBox 19.63 - -
+P2BNet+H2RBox-v2 21.87 - -
+Point2RBox-RC 34.07 24.31 14.69
+Point2RBox-SK∗ 40.27 30.51 23.43
+PointOBB(FCOSR) 30.08 10.66 5.53
+PointOBB-v2(FCOSR) 41.68(+11.60) 30.59(+19.93) 20.64(+15.11)
+PointOBB(ORCNN) 33.31 10.92 6.29
+PointOBB-v2(ORCNN) 41.64(+8.33) 32.01(+21.09) 23.40(+17.11)
+PointOBB(ReDet) 33.95 11.24 6.03
+PointOBB-v2(ReDet) 44.85(+10.90) 36.39(+25.15) 27.22(+21.19)
+Table3:Comparisonofthetrainingtimeinpseudo- Table4: Ablationstudywithdifferentlabel
+label generation phase and the accuracy between assignmentstrategies.
+PointOBBandPointOBB-v2. ThereportedmAP
+50
+istrainedwithRotatedFCOS. Pos. Neg. Neg./M mAP
+50
+✓ 23.62
+Method Epochs TrainHours mAP 50 ✓ ✓ 44.75
+PointOBB 24 22.28 30.08 ✓ ✓ 18.21
+PointOBB-v2 6 1.43 41.68 ✓ ✓ ✓ 44.85
+4.58%. These results demonstrate the robustness and effectiveness of our approach, even without
+theneedformanualpriorknowledge.
+ResultsonDOTA-v1.5/v2.0. BothDOTA-v1.5andDOTA-v2.0presentahigherlevelofdifficulty
+duetotheincreasednumberofdenselypackedandsmallerobjects. AsTab.2shows, ourmethod
+demonstrates significant improvements over other approaches on these more challenging datasets,
+indicatingitsstrengthinhandlingsmallanddenselydistributedobjects,attributedtotheseparation
+mechanism we designed. In comparison to PointOBB, our method achieves substantial gains on
+bothDOTA-v1.5andDOTA-v2.0,withgreaterabsoluteimprovementsandhigherpercentages. For
+instance,whentrainedwithReDet,ourapproachimprovesby36.39%onDOTA-v1.5and27.22%
+onDOTA-v2.0,correspondingto25.15%and21.19%increases,whichsurpassthe10.90%improve-
+mentonDOTA-v1.0. Furthermore,ourmethodconsistentlyoutperformsPoint2RBox. Evenwhen
+compared to Point2RBox-SK, which incorporates human prior knowledge, our method achieves
+improvementsof5.88%/3.79%onDOTA-v1.5/v2.0,respectively.
+ComputationalCost.Ourmethodishighlylightweight,primarilyduetoitssingle-branchstructure,
+whicheliminatestheneedforthetraditionalteacher-studentframework. Unlikeothermethods,we
+do not require multiple image transformations or consistency constraints within the model. As
+shown in Tab. 3, the pseudo-label training process for our model takes only 1.43 hours, which is
+15.58timesfasterthanthe22.28hoursrequiredbyPointOBB.
+In terms of memory consumption, our approach is also more efficient. For dense object scenarios
+such as DOTA-v2.0, our method uses approximately 8GB of memory, making it suitable for most
+GPUs. Incontrast,PointOBBfacesout-of-memoryissueswhenhandlingsuchdensescenes,requir-
+ingrestrictionsonthenumberofRoIstorunproperly. However,thislimitationseverelyimpactsthe
+detector’sperformance,resultinginnumeroussmallobjectsbeingundetected.
+4.4 ABLATIONSTUDIES
+Label Assignment. Tab. 4 demonstrates the impact of our three label assignment strategies on
+model performance. In these experiments, different label assignment strategies were used to train
+andgeneratetheCPM.Whenaspecificstrategywasappliedtodefinepositiveandnegativesamples,
+theremainingpointswereignoredduringtraining.Weobservedthatusingasimplecircularstrategy
+todeterminepositivesamplesresultedinonly23.62%. However,byincorporatingamorecompre-
+hensive strategy to identify negative samples, the performance increased significantly to 44.75%.
+Furthermore,assigningmiddleregionbetweenobjectstonegative(denotedas“Neg./M”)yieldeda
+8PointOBB-v2
+Table 5: Ablation study of sample methods. Table 6: Ablation of vector constraint module
+“Probabilistic” means sample according to the tohandledenseobjects. “w”and“w/o”indicate
+CPMprobability. the“with”and“without”themodule.
+Sample Probabilistic Weighted VectorConstraint w/o w
+mAP 41.40 44.85 mAP 27.88 44.85
+50 50
+Table 7: Ablation study of Table8: Ablationstudyofpointannotationsinaccuracy. Wereport
+thesamplingsizeofPCA. thepseudo-labelgenerationquality(measuredbymIoU)anddetec-
+tionperformance(measuredbymAP )
+50
+Size mAP
+50 Point DOTA-v1.0 DOTA-v1.5 DOTA-v2.0
+5 43.35 Range mIoU mAP mIoU mAP mIoU mAP
+50 50 50
+7 44.85 0% 45.40 44.85 43.65 36.39 42.91 27.22
+9 44.17 10% 42.89 42.30 41.85 34.20 41.46 25.14
+11 43.63 20% 40.22 38.46 39.47 30.95 39.30 23.45
+Table9: Comparisonofpseudo-labelgenerationquality(measuredbymIoU)anddetectionperfor-
+mance(measuredbymAP )acrossdifferentdatasets. Additionally,weselectedthreerepresenta-
+50
+tive categories—Small Vehicle (SV), Large Vehicle (LV), and Ship (SH)—which are
+abundantandexhibitcharacteristicsofsmallobjectsanddenselypackeddistributions. meanrepre-
+sentstheaveragevalueacrossallclassesinthedataset.
+Memory mIoU mAP
+Dataset Method 50
+(GB) SV LV SH mean SV LV SH mean
+PointOBB >24∗ 57.06 49.78 46.59 44.88 59.32 46.06 45.71 33.95
+DOTA-v1.0
+PointOBB-v2 5.99 52.74 47.65 48.82 45.40 55.00 49.27 51.77 44.85
+PointOBB >24∗ 9.69 26.58 26.49 30.65 0.01 4.15 11.40 11.24
+DOTA-v1.5
+PointOBB-v2 7.35 40.42 45.62 49.74 43.65 20.52 42.97 48.53 36.39
+PointOBB >24∗ 10.01 24.45 21.33 26.63 0.49 1.22 0.36 6.03
+DOTA-v2.0
+PointOBB-v2 7.67 42.47 48.14 46.45 42.91 20.94 28.76 22.15 27.22
+∗Thetrainingstagerequiresconstrainingtoaround70RoIs;otherwiseitresultsinout-of-memoryerrors.
+slight improvement, raising the mAP to 44.85%. This underscores the crucial role of the negative
+labelassignmentstrategy,whichcontributesgreatlytotheperformancegains.
+PCASamplingStrategyandSize. WeconductedablationexperimentsonthePCAsamplingstrat-
+egyandtherangeofsamplingsizes. AsshowninTab.5,ourweightedmethodforPCAcalculation
+improvesaccuracyby3.45%comparedtotheprobabilisticmethod.Wealsofoundthatthisimprove-
+ment primarily benefits classes with larger aspect ratios, such as large vehicles and harbors. This
+isbecauseCPMinelongatedobjectsexhibitsignificantprobabilityvariationalongtheshortaxisof
+theirorientedboundingboxes,andprobabilisticsamplemethodintroducesconsiderableinstability.
+Additionally, weevaluatedtheimpactofthePCAsamplingsize. AsshowninTab.7, ourmethod
+achievesthebestperformancewhenthesamplingsizeissetto7.
+Vector Constraint. As shown in Tab. 6, applying the vector constraint significantly improves de-
+tection performance. Through further analysis, we found that the improvement is primarily con-
+centrated in dense object categories, such as small vehicles, large vehicles, and ships. In contrast,
+sparsecategorieslikeharborsandswimmingpoolsarealmostunaffected. Thisobservationaligns
+with the motivation behind the design of this module, which especially addresses densely packed
+objectscenarios.
+4.5 ANALYSIS
+Label Accuracy. Recognizing the potential inaccuracies in human annotations, where the center
+pointmightnotbeperfectlylabeled,weconductedexperimentsbyaddingnoisetothecenterpoints
+to evaluate the robustn√ess of our model. We selected different thresholds σ and calculated the
+object’s scale as S = wh. The center points were randomly shifted along a uniformly sampled
+direction, with the offset distance drawn from a uniform distribution over the range [−σS,σS].
+We observed a slight performance decrease as the center points were perturbed. As Tab. 8 shows,
+9PointOBB-v2
+PointOBB
+PointOBB-v2
+Generated Pseudo Labels (Train Set) Detection Results (Test Set)
+Figure 4: Visualization of pseudo-labels and detection results from our model compared to
+PointOBB.Forclarity,labeltextsfordenseobjectsarehidden.
+the average mAP dropped by only 2.27% with a 10% shift. Despite this decline, our method still
+significantlyoutperformsPointOBB,demonstratingthestrongrobustnessofourmodel.
+Quality of Pseudo Labels. As shown in Tab. 9, our method consistently outperforms PointOBB
+in generating pseudo labels, with performance gains increasing in more challenging datasets like
+DOTA-v1.5andDOTA-v2.0. Specifically,weobservemIoUimprovementsof0.52%,13.00%,and
+16.28% across DOTA-v1.0, DOTA-v1.5, and DOTA-v2.0, respectively. Notably, although the im-
+provement in DOTA-v1.0 is only 0.52%, training the same detector with our pseudo labels yields
+a nearly 10% increase in mAP compared to PointOBB. As shown in Fig. 4, the first and second
+columnsillustratethatourmodellearnsmoreaccurateobjectscales,whilethethirdcolumndemon-
+stratesthat,unlikePointOBB—whichproducesoverlappingpseudolabelsforsmallvehicles—our
+methodeffectivelydistinguishesbetweenthesedenselypackedobjects.
+DenseObjectScenarios. AsshowninTab.9,weselectedthreerepresentativecategories—Small
+Vehicle(SV),Large Vehicle(LV),andShip(SH)—whicharecharacterizedbysmalland
+denselypackedobjects. DatasetslikeDOTA-v1.5andDOTA-v2.0introduceamuchlargernumber
+ofthesedenselypackedobjectscomparedtoDOTA-v1.0.Inthesechallengingscenarios,ourmethod
+significantly outperforms PointOBB. For example, in DOTA-v2.0, our method achieves a mean
+mIoUof42.91%andmAPof27.22%,whereasPointOBBdropsto26.63%and6.03%,respectively.
+Visualizations further confirm that our model generates better pseudo labels in dense scenes. In
+termsofdetectionresults,inthelastcolumnofFig.4,weshowadensescenewith25largevehicles,
+whereourmethoddetectsallofthem,whilePointOBBidentifiesonly15.
+Limitations. (a)Ourmethodassignsnegativesamplesbasedontheminimumdistancebetweenob-
+jects,requiringatleasttwopointannotationsperimage. Inscenarioswithextremelysparseobjects,
+itmaydegradetheperformance. (b)Somehyperparameters(e.g. theradiusinlabelassignment)are
+setbasedonthedataset. Theymayrequireadjustmentswhenfacingotherscenarios.
+5 CONCLUSION
+Inthispaper,weintroducedPointOBB-v2,asimpler,faster,andstrongerapproachforsinglepoint-
+supervised oriented object detection. By employing class probability maps and Principal Compo-
+nentAnalysis(PCA)forobjectorientationandboundaryestimation,ourmethodimprovesdetection
+accuracywhilediscardingthetraditionaltime-andmemory-heavyteacher-studentstructure. Exper-
+imental results demonstrate that PointOBB-v2 consistently outperforms the previous state-of-the-
+art across multiple datasets, achieving a training speed 15.58× faster and accuracy improvements
+of 11.60%/25.15%/21.19% on the DOTA-v1.0/v1.5/v2.0 datasets, with notable gains in small and
+densely packed object scenarios. Our method achieves a substantial speedup and accuracy boost
+whileusinglessmemory,showcasingitseffectivenessforreal-worldapplications.
+10PointOBB-v2
+REFERENCES
+Guangming Cao, Xuehui Yu, Wenwen Yu, Xumeng Han, Xue Yang, Guorong Li, Jianbin Jiao,
+and Zhenjun Han. P2rbox: Point prompt oriented object detection with SAM. arXiv preprint
+arXiv:2311.13128,2024.
+Pengfei Chen, Xuehui Yu, Xumeng Han, Najmul Hassan, Kai Wang, Jiachen Li, Jian Zhao,
+HumphreyShi,ZhenjunHan,andQixiangYe.Point-to-boxnetworkforaccurateobjectdetection
+viasinglepointsupervision. InEuropeanConferenceonComputerVision,2022.
+JianDing,NanXue,YangLong,Gui-SongXia,andQikaiLu.Learningroitransformerfororiented
+object detection in aerial images. In IEEE/CVF Conference on Computer Vision and Pattern
+Recognition,pp.2849–2858,2019.
+Shuyong Gao, Wei Zhang, Yan Wang, Qianyu Guo, Chenglong Zhang, Yangji He, and Wenqiang
+Zhang. Weakly-supervisedsalientobjectdetectionusingpointsupervision. InAAAIConference
+onArtificialIntelligence,volume36,pp.670–678,2022.
+Jiaming Han, Jian Ding, Nan Xue, and Gui-Song Xia. Redet: A rotation-equivariant detector for
+aerialobjectdetection. InIEEE/CVFConferenceonComputerVisionandPatternRecognition,
+pp.2785–2794,2021. doi: 10.1109/CVPR46437.2021.00281.
+JiamingHan,JianDing,JieLi,andGui-SongXia.Aligndeepfeaturesfororientedobjectdetection.
+IEEE Transactions on Geoscience and Remote Sensing, 60:1–11, 2022. doi: 10.1109/TGRS.
+2021.3062048.
+KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimagerecog-
+nition. In Proceedings of the IEEE conference on computer vision and pattern recognition, pp.
+770–778,2016.
+LipingHou,KeLu,XueYang,YuqiuLi,andJianXue.G-rep:Gaussianrepresentationforarbitrary-
+orientedobjectdetection. RemoteSensing,15(3):757,2023.
+Javed Iqbal, Muhammad Akhtar Munir, Arif Mahmood, Afsheen Rafaqat Ali, and Mohsen Ali.
+Leveragingorientationforweaklysupervisedobjectdetectionwithapplicationtofirearmlocal-
+ization. Neurocomputing, 440:310–320, 2021. ISSN0925-2312. doi: https://doi.org/10.1016/j.
+neucom.2021.01.075.
+AlexanderKirillov, EricMintun, NikhilaRavi, HanziMao, ChloeRolland, LauraGustafson, Tete
+Xiao, Spencer Whitehead, Alexander C. Berg, Wan-Yen Lo, Piotr Dollar, and Ross Girshick.
+Segmentanything. InIEEE/CVFInternationalConferenceonComputerVision,pp.4015–4026,
+2023a.
+AlexanderKirillov, EricMintun, NikhilaRavi, HanziMao, ChloeRolland, LauraGustafson, Tete
+Xiao,SpencerWhitehead,AlexanderCBerg,Wan-YenLo,etal. Segmentanything. InProceed-
+ingsoftheIEEE/CVFInternationalConferenceonComputerVision,pp.4015–4026,2023b.
+WentongLi,YijieChen,KaixuanHu,andJiankeZhu.Orientedreppointsforaerialobjectdetection.
+InIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.1829–1838,2022.
+Wentong Li, Yuqian Yuan, Song Wang, Jianke Zhu, Jianshu Li, Jian Liu, and Lei Zhang.
+Point2mask: Point-supervised panoptic segmentation via optimal transport. In IEEE Interna-
+tionalConferenceonComputerVision,2023.
+Tsung-Yi Lin, Piotr Dolla´r, Ross Girshick, Kaiming He, Bharath Hariharan, and Serge Belongie.
+Featurepyramidnetworksforobjectdetection. InProceedingsoftheIEEEconferenceoncom-
+putervisionandpatternrecognition,pp.2117–2125,2017.
+Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming He, and Piotr Dolla´r. Focal loss for dense
+object detection. IEEE Transactions on Pattern Analysis and Machine Intelligence, 42(2):318–
+327,2020. doi: 10.1109/TPAMI.2018.2858826.
+LiLiu,WanliOuyang,XiaogangWang,PaulFieguth,JieChen,XinwangLiu,andMattiPietika¨inen.
+Deeplearningforgenericobjectdetection: Asurvey. InternationalJournalofComputerVision,
+128(2):261–318,2020.
+11PointOBB-v2
+NanqingLiu,XunXu,YongyiSu,HaojieZhang,andHeng-ChaoLi. Pointsam: Pointly-supervised
+segmentanythingmodelforremotesensingimages. arXivpreprintarXiv:2409.13401,2024.
+Junwei Luo, Xue Yang, Yi Yu, Qingyun Li, Junchi Yan, and Yansheng Li. Pointobb: Learning
+oriented object detection via single point supervision. In IEEE/CVF Conference on Computer
+VisionandPatternRecognition,2024.
+Jeffri Murrugarra-Llerena, Lucas N Kirsten, Luis Felipe Zeni, and Claudio R Jung. Probabilistic
+intersection-over-union for training and evaluation of oriented object detectors. IEEE Transac-
+tionsonImageProcessing,2024.
+WenQian,XueYang,SilongPeng,JunchiYan,andYueGuo. Learningmodulatedlossforrotated
+objectdetection. InAAAIConferenceonArtificialIntelligence,volume35,pp.2458–2466,2021.
+YongqingSun,JieRan,FengYang,ChenqiangGao,TakayukiKurozumi,HideakiKimata,andZiqi
+Ye. Orientedobjectdetectionforremotesensingimagesbasedonweaklysupervisedlearning. In
+IEEEInternationalConferenceonMultimedia&ExpoWorkshops,pp.1–6,2021.
+Zhi Tian, Chunhua Shen, Hao Chen, and Tong He. Fcos: Fully convolutional one-stage object
+detection. In IEEE/CVF International Conference on Computer Vision, pp. 9626–9635, 2019.
+doi: 10.1109/ICCV.2019.00972.
+Linfei Wang, Yibing Zhan, Xu Lin, Baosheng Yu, Liang Ding, Jianqing Zhu, and Dapeng Tao.
+Explicit and implicit box equivariance learning for weakly-supervised rotated object detection.
+IEEETransactionsonEmergingTopicsinComputationalIntelligence,2024.
+LongWen,YuCheng,YiFang,andXinyuLi. Acomprehensivesurveyoforientedobjectdetection
+inremotesensingimages. ExpertSystemswithApplications,pp.119960,2023.
+Gui-SongXia,XiangBai,JianDing,ZhenZhu,SergeBelongie,JieboLuo,MihaiDatcu,Marcello
+Pelillo,andLiangpeiZhang. Dota: Alarge-scaledatasetforobjectdetectioninaerialimages. In
+ProceedingsoftheIEEEconferenceoncomputervisionandpatternrecognition,pp.3974–3983,
+2018.
+XingxingXie,GongCheng,JiabaoWang,XiwenYao,andJunweiHan. Orientedr-cnnforobject
+detection. InIEEE/CVFInternationalConferenceonComputerVision,pp.3520–3529,2021.
+XueYangandJunchiYan. Arbitrary-orientedobjectdetectionwithcircularsmoothlabel. InEuro-
+peanConferenceonComputerVision,pp.677–694,2020.
+Xue Yang and Junchi Yan. On the arbitrary-oriented object detection: Classification based ap-
+proachesrevisited. InternationalJournalofComputerVision,130(5):1340–1365,2022.
+XueYang,HaoSun,KunFu,JiruiYang,XianSun,MenglongYan,andZhiGuo. Automaticship
+detection in remote sensing images from google earth of complex scenes based on multiscale
+rotationdensefeaturepyramidnetworks. Remotesensing,10(1):132,2018.
+Xue Yang, Jirui Yang, Junchi Yan, Yue Zhang, Tengfei Zhang, Zhi Guo, Xian Sun, and Kun Fu.
+Scrdet: Towards more robust detection for small, cluttered and rotated objects. In IEEE/CVF
+InternationalConferenceonComputerVision,pp.8231–8240,2019a. doi: 10.1109/ICCV.2019.
+00832.
+XueYang,LipingHou,YueZhou,WentaoWang,andJunchiYan. Denselabelencodingforbound-
+arydiscontinuityfreerotationdetection. InIEEE/CVFConferenceonComputerVisionandPat-
+ternRecognition,pp.15814–15824,2021a. doi: 10.1109/CVPR46437.2021.01556.
+XueYang,JunchiYan,ZimingFeng,andTaoHe. R3det: Refinedsingle-stagedetectorwithfeature
+refinement for rotating object. In AAAI Conference on Artificial Intelligence, volume 35, pp.
+3163–3171,2021b.
+XueYang,JunchiYan,MingQi,WentaoWang,XiaopengZhang,andTianQi. Rethinkingrotated
+object detection with gaussian wasserstein distance loss. In 38th International Conference on
+MachineLearning,volume139,pp.11830–11841,2021c.
+12PointOBB-v2
+Xue Yang, XiaojiangYang, JiruiYang, QiMing, WentaoWang, QiTian, andJunchi Yan. Learn-
+inghigh-precisionboundingboxforrotatedobjectdetectionviakullback-leiblerdivergence. In
+AdvancesinNeuralInformationProcessingSystems,volume34,pp.18381–18394,2021d.
+XueYang,JunchiYan,WenlongLiao,XiaokangYang,JinTang,andTaoHe. Scrdet++: Detecting
+small,clutteredandrotatedobjectsviainstance-levelfeaturedenoisingandrotationlosssmooth-
+ing. IEEETransactionsonPatternAnalysisandMachineIntelligence,45(2):2384–2399,2022.
+XueYang,GefanZhang,WentongLi,XuehuiWang,YueZhou,andJunchiYan.H2rbox:Horizontal
+boxannotationisallyouneedfororientedobjectdetection.InternationalConferenceonLearning
+Representations,2023a.
+XueYang,GefanZhang,XiaojiangYang,YueZhou,WentaoWang,JinTang,TaoHe,andJunchi
+Yan. Detectingrotatedobjectsasgaussiandistributionsandits3-dgeneralization. IEEETrans-
+actionsonPatternAnalysisandMachineIntelligence,45(4):4335–4354,2023b.
+Xue Yang, Yue Zhou, Gefan Zhang, Jirui Yang, Wentao Wang, Junchi Yan, Xiaopeng Zhang, and
+Qi Tian. The kfiou loss for rotated object detection. In International Conference on Learning
+Representations,2023c.
+ZeYang,ShaohuiLiu,HanHu,LiweiWang,andStephenLin. Reppoints: Pointsetrepresentation
+forobjectdetection.InIEEE/CVFInternationalConferenceonComputerVision,pp.9656–9665,
+2019b. doi: 10.1109/ICCV.2019.00975.
+Yi Yu and Feipeng Da. Phase-shifting coder: Predicting accurate orientation in oriented object
+detection. InIEEE/CVFConferenceonComputerVisionandPatternRecognition,2023.
+YiYu,XueYang,QingyunLi,YueZhou,FeipengDa,andJunchiYan. H2rbox-v2: Incorporating
+symmetryforboostinghorizontalboxsupervisedorientedobjectdetection.InAdvancesinNeural
+InformationProcessingSystems,2023.
+Yi Yu, Xue Yang, Qingyun Li, Feipeng Da, Jifeng Dai, Yu Qiao, and Junchi Yan. Point2rbox:
+Combineknowledgefromsyntheticvisualpatternsforend-to-endorientedobjectdetectionwith
+singlepointsupervision. InIEEE/CVFConferenceonComputerVisionandPatternRecognition,
+2024.
+Shun Zhang, Jihui Long, Yaohui Xu, and Shaohui Mei. Pmho: Point-supervised oriented object
+detectionbasedonsegmentation-drivenproposalgeneration. IEEETransactionsonGeoscience
+andRemoteSensing,2024.
+Zhong-QiuZhao,PengZheng,Shou-TaoXu,andXindongWu.Objectdetectionwithdeeplearning:
+A review. IEEE Transactions on Neural Networks and Learning Systems, 30(11):3212–3232,
+2019. doi: 10.1109/TNNLS.2018.2876865.
+YueZhou,XueYang,GefanZhang,JiabaoWang,YanyiLiu,LipingHou,XueJiang,XingzhaoLiu,
+JunchiYan,ChengqiLyu,etal. Mmrotate: Arotatedobjectdetectionbenchmarkusingpytorch.
+InProceedingsofthe30thACMInternationalConferenceonMultimedia,pp.7331–7334,2022.
+TianyuZhu,BryceFerenczi,PulakPurkait,TomDrummond,HamidRezatofighi,andAntonvanden
+Hengel. Knowledge combination to learn rotated detection without rotated annotation. In
+IEEE/CVFConferenceonComputerVisionandPatternRecognition,2023.
+13
