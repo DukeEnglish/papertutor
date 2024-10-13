@@ -1,0 +1,529 @@
+EFFICIENT DICTIONARY LEARNING WITH SWITCH
+SPARSE AUTOENCODERS
+AnishMudide∗ JoshuaEngels
+MassachusettsInstituteofTechnology MassachusettsInstituteofTechnology
+EricJ.Michaud MaxTegmark
+MassachusettsInstituteofTechnology MassachusettsInstituteofTechnology
+ChristianSchroederdeWitt
+UniversityofOxford
+ABSTRACT
+Sparse autoencoders (SAEs) are a recent technique for decomposing neural net-
+work activations into human-interpretable features. However, in order for SAEs
+toidentifyallfeaturesrepresentedinfrontiermodels,itwillbenecessarytoscale
+themuptoveryhighwidth, posingacomputationalchallenge. Inthiswork, we
+introduce Switch Sparse Autoencoders, a novel SAE architecture aimed at re-
+ducingthecomputecostoftrainingSAEs. Inspiredbysparsemixtureofexperts
+models,SwitchSAEsrouteactivationvectorsbetweensmaller“expert”SAEs,en-
+ablingSAEstoefficientlyscaletomanymorefeatures. Wepresentexperiments
+comparingSwitchSAEswithotherSAEarchitectures,andfindthatSwitchSAEs
+deliverasubstantialParetoimprovementinthereconstructionvs.sparsityfrontier
+foragivenfixedtrainingcomputebudget. Wealsostudythegeometryoffeatures
+acrossexperts,analyzefeaturesduplicatedacrossexperts,andverifythatSwitch
+SAEfeaturesareasinterpretableasfeaturesfoundbyotherSAEarchitectures.
+1 INTRODUCTION
+Recently,largelanguagemodelshaveachievedimpressiveperformanceonmanytasks(Brownetal.,
+2020),buttheyremainlargelyinscrutabletohumans. Mechanisticinterpretabilityaimstoopenthis
+metaphorical black box and rigorously explain model computations (Olah et al., 2020). Specifi-
+cally,muchworkinmechanisticinterpretabilityhasfocusedonunderstandingfeatures,thespecific
+human-interpretable variables a model uses for computation (Olah et al., 2020; Park et al., 2023;
+Engelsetal.,2024).
+Earlymechanisticattemptstounderstandfeaturesfocusedonneurons,butthisworkwasstymiedby
+thefactthatneuronstendtobepolysemantic:theyarefrequentlyactivatedbyseveralcompletelydif-
+ferenttypesofinputs,makingthemhardtointerpret(Olahetal.,2020).Onetheoryforwhyneurons
+arepolysemanticissuperposition,theideathatlanguagemodelsrepresentmanymoreconceptsthan
+they have available dimensions (Elhage et al., 2022). To minimize interference, the superposition
+hypothesis posits that features are encoded as almost orthogonal directions in the model’s hidden
+statespace.
+Bricken et al. (2023) and Cunningham et al. (2023) propose to disentangle these superimposed
+model representations into monosemantic features by training unsupervised sparse autoencoders
+(SAEs) on intermediate language model activations. The success of this technique has led to an
+explosionofrecentwork(Templetonetal.,2024;Gaoetal.,2024)thathasfocusedonscalingsparse
+autoencoders to frontier language models such as Claude 3 Sonnet (Anthropic, 2024a) and GPT-4
+(Achiametal.,2023). DespitescalingSAEsto34millionfeatures,Templetonetal.(2024)estimate
+that there likely remains orders of magnitude more features. Furthermore, Gao et al. (2024) train
+∗Correspondencetoamudide@mit.edu.
+1
+4202
+tcO
+01
+]GL.sc[
+1v10280.0142:viXra4 4
+Dense SAE (TopK)
+Switch SAE, 8 experts
+3 3 Switch SAE, 64 experts
+2 2
+103 103
+1012 1013 1014 1015 1016 1017 107 108
+FLOPs Parameters
+Figure1: ScalinglawsforSwitchSAEs. WetraindenseTopKSAEsandSwitchSAEsofvarying
+size with fixed k = 32. Switch SAEs achieve better reconstruction than dense SAEs at a fixed
+compute budget, but require more features in total (and therefore more parameters) to achieve the
+samereconstructionasdenseSAEswhentrainedfor100ksteps(approximatelytoconvergence).
+SAEs on a series of language models and find that larger models require more features to achieve
+thesamereconstructionerror. Asmodelsizescontinuetogrow,currenttrainingmethodologiesare
+settoquicklybecomecomputationallyintractable.
+Each training step of a sparse autoencoder generally consists of six major computations: the en-
+coderforwardpass,theencodergradient,thedecoderforwardpass,thedecodergradient,thelatent
+gradientandthepre-biasgradient. Gaoetal.(2024)introducekernelsthatleveragethesparsityof
+theTopKactivationfunctiontodramaticallyoptimizeallcomputationsexcepttheencoderforward
+pass, which is not sparse. After implementing these optimizations, Gao et al. (2024) find that the
+trainingtimeisbottleneckedbythedenseencoderforwardpassandthememoryisbottleneckedby
+storingthelatentpre-activations.
+Inthiswork,weintroducetheSwitchSparseAutoencoder,whichtoourknowledgeisthefirstwork
+to solve these dual memory and FLOP bottlenecks. The Switch SAE combines the Switch layer
+(Fedus et al., 2022) with the TopK SAE (Gao et al., 2024). At a high level, the Switch SAE is
+composedofmanysmallexpertSAEsandatrainableroutingnetworkthatdetermineswhichexpert
+SAEwillprocessagiveninput. WedemonstratethattheSwitchSAEdeliversanimprovementin
+trainingFLOPsvs.traininglossoverexistingmethods.
+1.1 CONTRIBUTIONS
+1. InSection3,wedescribetheSwitchSparseAutoencoderarchitectureandcompareittoexisting
+SAE architectures. We also describe our training methodology, which balances reconstruction
+andexpertutilization.
+2. In Section 4.1, we describe scaling laws for reconstruction MSE with respect to FLOPs and
+parameters. WeshowthatSwitchSAEsachievealowerMSEcomparedtoTopKSAEsusingthe
+sameamountoftrainingcompute.
+3. InSection4.2,webenchmarkSwitchSAEsagainstReLU,GatedandTopKSAEsonthesparsity-
+reconstructionParetofrontier.
+4. InSection4.3,westudyfeatureduplicationinSwitchSAEsandvisualizetheglobalstructureof
+SwitchSAEfeaturesusingt-SNE.
+5. InSection4.4,wedemonstratethatSwitchSAEfeaturesareasinterpretableasTopKSAEfea-
+tures.
+2
+ESM
+noitcurtsnoceR2 RELATED WORK
+2.1 MIXTUREOFEXPERTMODELS
+Inastandarddeeplearningmodel,everyparameterisusedforeveryinput. Analternativeapproach
+isconditionalcomputation,whereonlyasubsetoftheparametersareactivedependingontheinput,
+allowing models with more parameters without the commensurate increase in computational cost.
+Shazeer et al. (2017) introduce the Sparsely-Gated Mixture-of-Experts (MoE) layer, the first gen-
+eralpurposeconditionalcomputationarchitecture. AMixture-of-Expertslayerconsistsof(1)aset
+of expert networks and (2) a routing network that determines which experts should be active on a
+giveninput.Shazeeretal.(2017)useMoEtoscaleLSTMsto137billionparameters,surpassingthe
+performanceofpreviousdensemodelsonlanguagemodelingandmachinetranslationbenchmarks.
+Buildingonthiswork, Fedusetal.(2022)introducetheSwitchlayer, asimplificationtotheMoE
+layer which routes to just a single expert and thereby decreases computational cost and increases
+trainingstability. Fedusetal.(2022)useSwitchlayersinplaceofMLPlayerstoscaletransformers
+tooveratrillionparameters. RecentstateoftheartlanguagemodelshaveusedMoElayers,includ-
+ingMixtral8x7B(Jiangetal.,2024)andGrok-1(xAI,2024). Tothebestofourknowledge,weare
+thefirsttoapplyconditionalcomputationtotrainingSAEs.
+2.2 DEEPLEARNINGTRAININGOPTIMIZATIONS
+Ourmethodfitsintothewiderliteraturefocusedonacceleratingdeeplearningtraining. Onetypeof
+trainingspeedupuseshardwareacceleratorslikeGPUs(Rainaetal.,2009)andTPUs(Jouppietal.,
+2017)tooptimizehighlyparallelizabledensematrixoperations. Algorithmicimprovements,onthe
+other hand, consist of architectural or implementation tricks to speed up forward and backwards
+passesonfixedhardware. TechniquessuchasMoElayers(discussedabove)andSlide(Chenetal.,
+2020)utilizesparsitytoonlyevaluateasubsetoftheparametersforagivenwideMLPlayer. Other
+techniquessuchasFlashAttention(Daoetal.,2022)andReformers(Kitaevetal.,2020)usehashing
+or structured matrices to reduce the time complexity of a transformer’s attention mechanism. See
+Appendix A in Dao et al. (2022) for a comprehensive overview of the literature on algorithmic
+trainingoptimizations. Ourworkdiffersfromthesepapersinthatweareconcernedwithnotonly
+whetherthetrainingoptimizationresultsinaspeedup,butalsowhetherSAEqualityispreserved.
+2.3 SPARSEAUTOENCODEROPTIMIZATIONS
+SincetheinitialworksproposingSAEstoseparatemodelrepresentations(Cunninghametal.,2023;
+Brickenetal.,2023),therehavebeenmanyproposedimprovementstotheSAEarchitecture. These
+haveincludedalternativeactivationfunctionslikeProLu(Taggart,2024),TopK(Gaoetal.,2024),
+andBatch-TopK(Bussmannetal.,2024),architecturalchangestosolvefeaturesuppressioncaused
+by the L1 penalty (Rajamanoharan et al., 2024a;b), and changes to the optimization objective it-
+self(Braunetal.,2024). Therearemanymetricsalongwhichthesepapersevaluatetheirimprove-
+ments,butthemostcommonmetricisaParetofrontierofSAElatentsparsity(measuredasaverage
+L0),meansquarederror,andfeatureinterpretability;thus,thesearethemetricswefocusoninthis
+paper. WealsocompareprimarilyagainstTopKSAEs(Gaoetal.,2024)asourbaseline,asrecent
+work(Anthropic,2024c)hasshownthattheseachievestateoftheartresultsonthesemetrics.
+3 THE SWITCH SPARSE AUTOENCODER
+3.1 BASELINESPARSEAUTOENCODER
+Sparseautoencodersaretrainedtoreconstructlanguagemodelactivationsx∈Rd bydecomposing
+them into sparse linear combinations of M ≫ d unit-length feature vectors f ,f ,...,f ∈ Rd.
+1 2 M
+SAEarchitecturesconsistofanencoderW ∈RM×d,adecoderW ∈Rd×M,biasterms(e.g.,
+enc dec
+b ∈Rd)andanactivationfunction. TheTopKSAE(Gaoetal.,2024)outputsareconstructionxˆ
+pre
+oftheinputactivationx,givenby
+z = TopK(W (x−b )) (1)
+enc pre
+xˆ = W z+b (2)
+dec pre
+3Thelatentvectorz ∈ RM representshowstronglyeachfeatureisactivated. Sincezissparse,the
+decoder forward pass can be optimized by a suitable kernel. The loss is the reconstruction error
+L=∥x−xˆ∥2.
+2
+We additionally benchmarkagainst the ReLU SAE (Anthropic, 2024b)and the Gated SAE (Raja-
+manoharan et al., 2024a). The ReLU SAE uses the ReLU activation function and applies an L1
+penalty to the feature activations to encourage sparsity. The Gated SAE avoids activation shrink-
+age(Wright&Sharkey,2024)byseparatelydeterminingwhichfeaturesshouldbeactiveandhow
+stronglyactivatedtheyshouldbe.
+3.2 SWITCHSPARSEAUTOENCODERARCHITECTURE
+TheSwitchSAEconsistsofN expertSAEs{E }N aswellasaroutingnetworkthatdetermines
+i i=1
+whichexpertSAEshouldbeusedforagiveninput(Fig.2). EachexpertSAEE resemblesaTopK
+i
+SAEwithnobiasterm:
+E (x)=WdecTopK(Wencx) (3)
+i i i
+Therouter,definedbytrainableparametersW ∈RN×dandb ∈Rd,computesaprobabil-
+router router
+itydistributionp(x)∈RN overtheN expertsgivenbyp(x)=softmax(W (x−b )). We
+router router
+routetheinputxtothemostprobableexperti∗(x)=argmaxp (x). Theoutputxˆ isgivenby,
+i
+i
+xˆ =p E (x−b )+b . (4)
+i∗(x) i∗(x) pre pre
+TheSwitchSAEthusavoidsthedenseW matrixmultiplicationbyleveragingconditionalcom-
+enc
+putation. WhencomparingSwitchSAEstoexistingSAEarchitectures,weevaluatetwocases: (1)
+FLOP-matchedSwitchSAEs,whichperformthesamenumberofFLOPsperactivationbutincrease
+the number of features by a factor of N, and (2) width-matched Switch SAEs, which reduce the
+FLOPsperactivationbyafactorofN whilekeepingthenumberoffeaturesconstant.
+Figure2: SwitchSparseAutoencoderArchitecture. Theroutercomputesaprobabilitydistribution
+overtheexpertSAEsandroutestheinputactivationvectortotheexpertwiththehighestprobability.
+Thefiguredepictsthearchitectureford=5,N =3,M =12.
+43.3 SWITCHSPARSEAUTOENCODERTRAINING
+Wesimultaneouslytraintherouterandalltheexpertsparseautoencoders. Whencomputingxˆ,we
+weightE (x−b )byp tomaketherouterdifferentiable. Weadoptmanyofthetraining
+i∗(x) pre i∗(x)
+strategiesdescribedinTempletonetal.(2024)andGaoetal.(2024)(seeAppendixAfordetails).1
+The TopK SAE enforces sparsity via its activation function and thus directly optimizes the recon-
+struction MSE. Following Fedus et al. (2022), we train our Switch SAEs using a weighted com-
+bination of the reconstruction MSE and an auxiliary loss which encourages the router to send an
+equal number of activations to each expert to reduce overhead. For a batch B with T activations,
+theauxiliarylossisgivenbyL = N
+·(cid:80)N
+f ·P . f representstheproportionofactivations
+aux i=1 i i i
+thatareroutedtoexperti,andP representstheproportionofrouterprobabilitythatisassignedto
+i
+expert i. Formally, f = 1 (cid:80) 1{i∗(x)=i} and P = 1 (cid:80) p (x). The auxiliary loss is
+i T x∈B i T x∈B i
+minimizedwhenthebatchofactivationsisrouteduniformlyacrosstheN experts. Thereconstruc-
+tion loss is defined to be L = 1 (cid:80) ∥x−xˆ∥2. Note that L ∝ d. Let α represent a
+recon T x∈B 2 recon
+tunableloadbalancinghyperparameterthatscalestheauxilliaryloss. ThetotallossL isgivenby
+total
+L = L +α·d·L . WeoptimizeL usingAdam(Kingma,2014). Inourexperiments,
+total recon aux total
+wesetα=3.
+4 RESULTS
+We train sparse autoencoders on the residual stream activations of GPT-2 small (Radford et al.,
+2019),whichhaveadimensionof768. Earlylayersoflanguagemodelshandledetokenizationand
+feature engineering, while later layers refine representations for next-token prediction (Lad et al.,
+2024). Inthiswork,wefollowGaoetal.(2024)andtrainSAEsonactivationsfromlayer8,which
+weexpecttoholdrichfeaturerepresentationsnotyetspecializedfornext-tokenprediction. Using
+textdatafromOpenWebText(Gokaslan&Cohen,2019),wetrainfor100Kstepsusingabatchsize
+of8192,foratotalofapproximately820milliontokens.
+4.1 SCALINGLAWSFORRECONSTRUCTIONERROR
+WefirststudyscalinglawsforSwitchSAEs,comparingthemtodenseTopKSAEsatfixedsparsity
+k =32. InFig.1,weshowscalingcurvesofreconstructionMSEerrorwithrespecttobothFLOPs
+andnumberofparametersforSwitchSAEswith8and64experts. WefindthatSwitchSAEshave
+favorablescalingwithrespecttoFLOPscomparedtodenseTopKSAEs.Infact,SwitchSAEsusing
+∼1OOMlesscomputecanoftenachievethesamereconstructionMSEasTopKSAEs. However,
+Switch SAEs perform worse at fixed width relative to dense TopK SAEs. Increasing the number
+ofexpertsimprovescomputeefficiencybutreducesparameterefficiency. Wehypothesizethatthis
+trade-offisaresultoffeaturesneedingtobeduplicatedacrossmultipleSwitchSAEexperts,which
+wediscussinmoredetaillater.
+4.2 SPARSITYVS. RECONSTRUCTIONERROR
+WenowstudySwitchSAEperformanceinthereconstructionerrorvs. sparsityfrontier. Webench-
+marktheSwitchSAEagainsttheReLUSAE(Anthropic,2024b),theGatedSAE(Rajamanoharan
+etal.,2024a)andtheTopKSAE(Gaoetal.,2024). Wepresentresultsfortwosettings:
+1. FLOP-matched: The ReLU, Gated and TopK SAEs are trained with 32·768 = 24576
+features. We train Switch SAEs with 2, 4 and 8 experts. Each expert of the Switch SAE
+with N experts has 24576 features, for a total of 24576·N features. The Switch SAE
+performsroughlythesamenumberofFLOPsperactivationcomparedtotheTopKSAE.
+2. Width-matched: Each SAE is trained with 32·768 = 24576 features. We train Switch
+SAEswith16,32,64and128experts. EachexpertoftheSwitchSAEwithN expertshas
+24576 features. The Switch SAE performs roughly N times fewer FLOPs per activation
+N
+comparedtotheTopKSAE.
+1Ourcodecanbefoundathttps://github.com/amudide/switch_sae
+5FLOP-Matched Width-Matched
+TopK SAE TopK SAE
+ReLU SAE ReLU SAE
+Gated SAE Gated SAE
+Switch SAE, 2 experts Switch SAE, 16 experts
+Switch SAE, 4 experts Switch SAE, 32 experts
+Switch SAE, 8 experts Switch SAE, 64 experts
+Switch SAE, 128 experts
+103 103
+101 102 101 102
+100% 100%
+98% 98%
+96% 96%
+94% 94%
+TopK SAE
+TopK SAE ReLU SAE
+92% ReLU SAE 92% Gated SAE
+Gated SAE Switch SAE, 16 experts
+Switch SAE, 2 experts Switch SAE, 32 experts
+Switch SAE, 4 experts Switch SAE, 64 experts
+90% Switch SAE, 8 experts 90% Switch SAE, 128 experts
+101 102 101 102
+Sparsity (L0) Sparsity (L0)
+Figure 3: Pareto frontier of sparsity versus (top) reconstruction mean squared error and (bottom)
+lossrecovered. FLOP-matchedSwitchSAEsPareto-dominateTopKSAEsusingthesameamount
+ofcompute(left). Width-matchedSwitchSAEsperformslightlyworsethanTopKSAEsbutPareto-
+dominateReLUSAEswhileperformingfewerFLOPs(right).
+6
+derevoceR
+ssoL
+ESM
+noitcurtsnoceRFor a wide range of sparsity (L0) values, we report the reconstruction MSE and the proportion of
+cross-entropylossrecoveredwhenthesparseautoencoderoutputispatchedintothelanguagemodel.
+Alossrecoveredvalueof1correspondstoaperfectreconstruction,whilealossrecoveredvalueof
+0correspondstoazero-ablation.
+4.2.1 FLOP-MATCHEDRESULTS
+FortheFLOP-matchedexperiments,wetrainSwitchSAEswith2,4and8experts,withtheresults
+shown in the left two plots of Fig. 3. The Switch SAEs are a Pareto improvement over the TopK,
+Gated and ReLU SAEs in terms of both MSE and loss recovered. As we scale up the number of
+expertsandrepresentmorefeatures,performancecontinuestoincreasewhilekeepingcomputational
+costsandmemorycosts(fromstoringthepre-activations)roughlyconstant.
+4.2.2 WIDTH-MATCHEDRESULTS
+Forthewidth-matchedexperiments,wetrainSwitchSAEswith16,32,64and128experts,withthe
+resultsshownintherighttwoplotsofFig.3.TheSwitchSAEsconsistentlyunderperformcompared
+totheTopKSAEintermsofMSEandlossrecovered,whileforthemostpartoutperformingGated
+andReLUSAEs. WhenL0islow, SwitchSAEsperformparticularlywell. Thissuggeststhatthe
+highfrequencyfeaturesthatimprovereconstructionfidelitythemostforagivenactivationmightlie
+withinthesamecluster.
+TheseresultsdemonstratethatSwitchSAEscanreducethenumberofFLOPsperactivationbyup
+to128xwhilestillretainingtheperformanceofaReLUSAE.WefurtherbelievethatSwitchSAEs
+canlikelyachievegreateraccelerationonlargerlanguagemodels.
+0.50
+1 1 0.6 11 45
+13 0.45
+0.10 12
+16 16 0.5 11 0.08 10 0.40
+9
+32 0.06 32 0.4 78 0.35
+6 64 0.04 64
+0.3
+45 0.30
+0.02 3
+2 0.25
+128 0.00 128 01
+0.20
+8 16 32 48 64 96128192 8 16 32 48 64 96128192 0123456789101112131415
+Sparsity (L0) Sparsity (L0) Expert
+(a)FractionofSAEdecodervec- (b)Averagecosinesimwithnear- (c)Averagecosinesimbetweennear-
+tors with nearest neighbor cosine est neighbor for decoder vectors, est neighbors across experts (16 ex-
+sim>0.9,width-matchedSAEs. width-matchedSAEs. perts,L0=64).
+Figure4: SwitchSAEfeaturegeometryexperiments.
+4.3 FEATUREGEOMETRY
+4.3.1 FEATURESIMILARITY
+WeareinterestedinwhySwitchSAEsachieveaworsereconstructionMSEthanTopKSAEsofthe
+samesize.Onehypothesisisthatbecauseonanygivenforwardpassonlyasingleexpertisactivated,
+some experts will have to learn duplicate features, reducing SAE capacity (this is necessary since
+there is no perfect split of features into clusters such that features in different clusters never co-
+occur). We test this hypothesis using a common (see e.g. Braun et al. (2024)) SAE evaluation
+metric: nearestneighborcosinesimilarity.
+OnewaytousethismetrictomeasurethenumberofduplicatefeaturesinanSAEistomeasurethe
+proportion of vectors in the decoder that have a nearest neighbor above a given cosine similarity,
+sincehighlysimilardecodervectorsarelikelyduplicates. InFig.4a,wecompareSAEstrainedwith
+different numbers of experts and different sparsities on this measure with a threshold of 0.9, and
+findthatassoonaswetrainwithexpertsthismeasurejumpysharplyfromabaselineof0inTopK
+SAEsto5to10percent. Inotherwords,strictduplicateslikelyreduceSwitchSAEcapacitybyup
+7
+strepxE
+#
+strepxE
+#
+trepxEFigure5:t-SNEprojectionsofencoderanddecoderfeaturesforaSwitchSAEwith65ktotalfeatures
+and8experts. Encoderfeaturesappeartoclustertogetherbyexpert. Awayfromtheseclusters,we
+seeavarietyofisolatedpointswhichareinfacttightgroupsoffeatureswhichhavebeenduplicated
+acrossmultipleexperts. Wedonotobserveasclearclustersinthedecoderfeatures.
+to 10%. This effect is less prevalent at larger L0s. However, we are not just worried about exact
+duplicates,butalsoageneralshifttowardsredundancy:inFig.4b,wefindthatamoreglobalmetric,
+cosinesimilarityofthenearestneighboraveragedacrossallfeatures,showsasimilarpatternacross
+sparsityandnumberofexperts.
+AnothermeasureofSwitchSAEqualityisexpertspecialization,thatis,howsimilararethesetsof
+featureseachexpertlearns. Wequantifybyaveragingthecosinesimilarityofeachfeatureinexpert
+A with its nearest neighbor in expert B. On one end, if the features are perfectly clustered, then
+eachpairofexpertsshouldhavethesamecosinesimilarityasrandomblocksofthesamesizeina
+TopKSAEofthesamesize.Ontheotherend,nospecializationshouldresultinidenticalexperts.In
+Fig.4c,weplotthismetricforallpairsofexpertsina16expertSwitchSAEwithL0 = 64. Some
+experts, e.g. expert0, seemunique, whileotherpairsofexperts, e.g. 10and7, arehighlysimilar.
+AllpairsaremoresimilarthanrandomblocksofthesamesizeinaTopKSAE,whichhasavalue
+ofabout0.2underthissamemetric.
+4.3.2 T-SNEVISUALIZATION
+To visualize the global structure of SAE features, we show t-SNE projections of the encoder and
+decoderfeaturevectorsinFig.5.Wefindthatencoderfeaturesfromthesameexpertclustertogether,
+whiledecoderfeaturestendtobemorediffuse. Intheencoderfeaturet-SNEprojection,wecanalso
+directlyobservefeatureduplication–aroundtheperipheryoftheplotwefindavarietyofisolated
+pointswhichuponcloserinspectionareactuallytightgroupingsofmultiplefeaturesfromdifferent
+experts.
+4.4 AUTOMATEDINTERPRETABILITY
+Brickenetal.(2023)evaluatehowinterpretablesparseautoencoderfeaturesusingautomatedinter-
+pretability: they generate explanations for each feature by giving top activating examples for that
+featuretoalanguagemodel,andthenaskalanguagemodel(inanewcontext)topredict,usingonly
+thedescriptionofthefeature,onwhichtokensthedescribedfeaturefires.Morerecently,Juangetal.
+(2024)introduceamorecomputeefficientmethodthatmeasuresdetection,whethertheexplanation
+allows a language model to predict whether a feature fires at all on a given context. Juang et al.
+(2024) additionally measure detection at each decile of feature activation, as well as on contexts
+where the feature does not fire at all (where to be correct the model should report that the feature
+does not fire). Using the Juang et al. (2024) implementation, we find that FLOP-matched SAE
+features have similar interpretability as TopK SAEs, but width-matched SAEs have a higher true
+positiverateoncontextswherethefeaturesfire,whileatthesametimehavingalowertruenegative
+rate(Fig.6).WeinterpretthisresultasSwitchSAEsbeingbiasedtowardshavingduplicatefrequent
+features,whichmaybothbeeasiertodetectandmorepronetofalsepositives.
+8FLOP-Matched Width-Matched
+1.0
+Topk Topk
+0.9 Switch: 2e Switch: 16e
+Switch: 4e Switch: 32e
+0.8 Switch: 8e Switch: 64e
+Switch: 128e
+0.7
+0.6
+0.5
+0.4
+0.3
+0.2
+Not Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10 Not Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10
+Quantiles Quantiles
+Figure 6: Automated interpretability detection results across SAE feature activation quantiles for
+1000randomfeatures,95%confidenceintervalsshown. “Not”meansthatthecontextcomesfrom
+arandomsetoftextwherethefeaturewasnotactivating.
+5 CONCLUSION
+Switch SAEs are a promising approach towards scaling sparse autoencoders, as they allow an im-
+provementintheFLOPsvs.MSEscalinglawwithoutasignificantreductioninfeatureinterpretabil-
+ity. We believe that Switch SAEs may find their best application for huge training runs on large
+clusters of GPUs, since in this setting each expert can be placed on a separate GPU, leading to
+significantwallclocktrainingspeedups. ThemostsignificantlimitationoftheSwitchSAEisthe
+reduction in performance of the SAE at a fixed number of parameters; future work to bridge this
+gap might investigate feature deduplication techniques, more sophisticated routing architectures,
+and multiple active experts. Overall, we believe that this work provides a case study for applying
+existingtrainingoptimizationtechniquestothesettingofsparseautoencodersforfeatureextraction
+from language models; we hope that the investigations in this paper serve as a guide for adapting
+moresuchtechniques.
+ACKNOWLEDGMENTS
+We used infrastructure from the https://github.com/saprmarks/dictionary_
+learning repository to train our SAEs. We would like to thank Samuel Marks and Can Rager
+for advice on how to use the repository. We would also like to thank Achyuta Rajaram, Jacob
+Goldman-Wetzler,MichaelPearce,GitanjaliRao,SatvikGolechha,KolaAyonrinde,RupaliBhati,
+Louis Jaburi, Vedang Lad, Adam Karvonen, Shiva Mudide, Sandy Tanwisuth, JP Rivera, Con-
+stantin Venhoff and Juan Gil for helpful discussions. This work is supported by Erik Otto, Jaan
+Tallinn, the Rothberg Family Fund for Cognitive Science, the NSF Graduate Research Fellowship
+(Grant No. 2141064), IAIFI through NSF grant PHY-2019786, UKRI grant: Turing AI Fellow-
+ship EP/W002981/1, and Armasuisse Science+Technology. AM was greatly helped by the MATS
+program,fundedbyAISafetySupport.
+REFERENCES
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-
+man,DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. Gpt-4technical
+report. arXivpreprintarXiv:2303.08774,2023.
+9
+ycaruccAAnthropic. Theclaude3modelfamily: Opus,sonnet,haiku,2024a. URLhttps://www-cdn.
+anthropic.com/de8ba9b01c9ab7cbabf5c33b80b7bbc618857627/Model_
+Card_Claude_3.pdf.
+Transformer Circuits Team Anthropic. Transformer circuits april 2024 update: Update on
+how we train saes, 2024b. URL https://transformer-circuits.pub/2024/
+april-update/index.html#training-saes. Accessed: 2024-09-16.
+TransformerCircuitsTeamAnthropic. Transformercircuitsaugust2024update: Evalscasestudy,
+2024c. URL https://transformer-circuits.pub/2024/august-update/
+index.html#evals-case-study. Accessed: 2024-09-16.
+Dan Braun, Jordan Taylor, Nicholas Goldowsky-Dill, and Lee Sharkey. Identifying functionally
+importantfeatureswithend-to-endsparsedictionarylearning. arXivpreprintarXiv:2405.12241,
+2024.
+Trenton Bricken, Adly Templeton, Joshua Batson, Brian Chen, Adam Jermyn, Tom Con-
+erly, Nick Turner, Cem Anil, Carson Denison, Amanda Askell, Robert Lasenby, Yifan Wu,
+Shauna Kravec, Nicholas Schiefer, Tim Maxwell, Nicholas Joseph, Zac Hatfield-Dodds, Alex
+Tamkin, Karina Nguyen, Brayden McLean, Josiah E Burke, Tristan Hume, Shan Carter,
+Tom Henighan, and Christopher Olah. Towards monosemanticity: Decomposing language
+models with dictionary learning. Transformer Circuits Thread, 2023. https://transformer-
+circuits.pub/2023/monosemantic-features/index.html.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhari-
+wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal,
+Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel
+Ziegler, Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen, Eric Sigler, Mateusz Litwin,
+Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Rad-
+ford, Ilya Sutskever, and Dario Amodei. Language Models are Few-Shot Learners. In Ad-
+vances in Neural Information Processing Systems, volume 33, pp. 1877–1901. Curran Asso-
+ciates, Inc., 2020. URL https://proceedings.neurips.cc/paper/2020/hash/
+1457c0d6bfcb4967418bfb8ac142f64a-Abstract.html.
+Bart Bussmann, Patrick Leask, and Neel Nanda. BatchTopK: A simple improvement for TopK-
+SAEs. AIAlignmentForum,2024. URLhttps://www.alignmentforum.org/posts/
+Nkx6yWZNbAsfvic98/batchtopk-a-simple-improvement-for-topk-saes.
+Beidi Chen, Tharun Medini, James Farwell, Charlie Tai, Anshumali Shrivastava, et al. Slide: In
+defense of smart algorithms over hardware acceleration for large-scale deep learning systems.
+ProceedingsofMachineLearningandSystems,2:291–306,2020.
+HoagyCunningham, AidanEwart, LoganRiggs, RobertHuben, andLeeSharkey. Sparseautoen-
+coders find highly interpretable features in language models. arXiv preprint arXiv:2309.08600,
+2023.
+TriDao,DanFu,StefanoErmon,AtriRudra,andChristopherRe´.Flashattention:Fastandmemory-
+efficientexactattentionwithio-awareness. AdvancesinNeuralInformationProcessingSystems,
+35:16344–16359,2022.
+NelsonElhage,TristanHume,CatherineOlsson,NicholasSchiefer,TomHenighan,ShaunaKravec,
+ZacHatfield-Dodds,RobertLasenby,DawnDrain,CarolChen,RogerGrosse,SamMcCandlish,
+Jared Kaplan, Dario Amodei, Martin Wattenberg, and Christopher Olah. Toy models of super-
+position. TransformerCircuitsThread, 2022. https://transformer-circuits.pub/
+2022/toy_model/index.html.
+JoshuaEngels,IsaacLiao,EricJMichaud,WesGurnee,andMaxTegmark. Notalllanguagemodel
+featuresarelinear. arXivpreprintarXiv:2405.14860,2024.
+WilliamFedus,BarretZoph,andNoamShazeer. Switchtransformers: Scalingtotrillionparameter
+modelswithsimpleandefficientsparsity. JournalofMachineLearningResearch,23(120):1–39,
+2022.
+10LeoGao,TomDupre´laTour,HenkTillman,GabrielGoh,RajanTroll,AlecRadford,IlyaSutskever,
+Jan Leike, and Jeffrey Wu. Scaling and evaluating sparse autoencoders, 2024. URL https:
+//arxiv.org/abs/2406.04093.
+AaronGokaslanandVanyaCohen.Openwebtextcorpus.http://Skylion007.github.io/
+OpenWebTextCorpus,2019.
+AlbertQJiang,AlexandreSablayrolles,AntoineRoux,ArthurMensch,BlancheSavary,ChrisBam-
+ford, Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand, et al.
+Mixtralofexperts. arXivpreprintarXiv:2401.04088,2024.
+NormanPJouppi,CliffYoung,NishantPatil,DavidPatterson,GauravAgrawal,RaminderBajwa,
+SarahBates,SureshBhatia,NanBoden,AlBorchers,etal.In-datacenterperformanceanalysisof
+atensorprocessingunit. InProceedingsofthe44thannualinternationalsymposiumoncomputer
+architecture,pp.1–12,2017.
+CadenJuang,Gonc¸aloPaulo,JacobDrori,andNoraBelrose.Opensourceautomatedinterpretability
+forsparseautoencoderfeatures. https://blog.eleuther.ai/autointerp/,2024.
+DiederikPKingma. Adam: Amethodforstochasticoptimization. arXivpreprintarXiv:1412.6980,
+2014.
+Nikita Kitaev, Łukasz Kaiser, and Anselm Levskaya. Reformer: The efficient transformer. arXiv
+preprintarXiv:2001.04451,2020.
+VedangLad,WesGurnee,andMaxTegmark. Theremarkablerobustnessofllms: Stagesofinfer-
+ence? arXivpreprintarXiv:2406.19384,2024.
+Chris Olah, Nick Cammarata, Ludwig Schubert, Gabriel Goh, Michael Petrov, and Shan Carter.
+Zoom in: An introduction to circuits. Distill, 2020. doi: 10.23915/distill.00024.001.
+https://distill.pub/2020/circuits/zoom-in.
+KihoPark,YoJoongChoe,andVictorVeitch.Thelinearrepresentationhypothesisandthegeometry
+oflargelanguagemodels. arXivpreprintarXiv:2311.03658,2023.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal.Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+Rajat Raina, Anand Madhavan, and Andrew Y Ng. Large-scale deep unsupervised learning using
+graphics processors. In Proceedings of the 26th annual international conference on machine
+learning,pp.873–880,2009.
+Senthooran Rajamanoharan, Arthur Conmy, Lewis Smith, Tom Lieberum, Vikrant Varma, Ja´nos
+Krama´r,RohinShah,andNeelNanda. Improvingdictionarylearningwithgatedsparseautoen-
+coders. arXivpreprintarXiv:2404.16014,2024a.
+SenthooranRajamanoharan,TomLieberum,NicolasSonnerat,ArthurConmy,VikrantVarma,Ja´nos
+Krama´r,andNeelNanda.Jumpingahead:Improvingreconstructionfidelitywithjumprelusparse
+autoencoders. arXivpreprintarXiv:2407.14435,2024b.
+Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton,
+andJeffDean. Outrageouslylargeneuralnetworks: Thesparsely-gatedmixture-of-expertslayer.
+arXivpreprintarXiv:1701.06538,2017.
+Glen Taggart. ProLU: A nonlinearity for sparse autoencoders. AI Alignment Forum,
+2024. URL https://www.alignmentforum.org/posts/HEpufTdakGTTKgoYF/
+prolu-a-pareto-improvement-for-sparse-autoencoders.
+Adly Templeton, Tom Conerly, Jonathan Marcus, Jack Lindsey, Trenton Bricken, Brian Chen,
+Adam Pearce, Craig Citro, Emmanuel Ameisen, Andy Jones, Hoagy Cunningham, Nicholas L
+Turner, Callum McDougall, Monte MacDiarmid, C. Daniel Freeman, Theodore R. Sumers,
+Edward Rees, Joshua Batson, Adam Jermyn, Shan Carter, Chris Olah, and Tom Henighan.
+Scaling monosemanticity: Extracting interpretable features from claude 3 sonnet. Trans-
+former Circuits Thread, 2024. URL https://transformer-circuits.pub/2024/
+scaling-monosemanticity/index.html.
+11BenjaminWrightandLeeSharkey. AddressingfeaturesuppressioninSAEs. AIAlignmentForum,
+2024. URL https://www.alignmentforum.org/posts/3JuSjTZyMzaSeTxKk/
+addressing-feature-suppression-in-saes.
+xAI. Grok-1modelcard,2024. URLhttps://x.ai/blog/grok/model-card.
+A SWITCH SPARSE AUTOENCODER TRAINING DETAILS
+We initialize the rows of Wi to be parallel to the columns of Wi for all i. We initialize both
+enc dec
+b and b to the geometric median of a batch of samples, but we do not tie b and b .
+pre router pre router
+Weadditionallynormalizethedecodercolumnvectorstounit-normatinitializationandaftereach
+gradient step. We remove gradient information parallel to the decoder feature directions to mini-
+mizeinterferencewiththeAdamoptimizer. Wesetthelearningratebasedonthe √1 scalinglaw
+M
+from Gao et al. (2024) and linearly decay the learning rate over the last 20% of training. We do
+notincludeneuronresampling(Brickenetal.,2023)ortheAuxKloss(Gaoetal.,2024),butfuture
+workcouldexploreemployingthesestrategiestopreventdeadlatentsinlargermodels.Weoptimize
+L withAdamusingthedefaultparametersβ =0.9,β =0.999.
+total 1 2
+12
