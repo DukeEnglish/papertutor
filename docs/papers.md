@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08211v1 |
-|title| LatteCLIP: Unsupervised CLIP Fine-Tuning via LMM-Synthetic Texts |
-|authors| Anh-Quan CaoMaximilian JaritzMatthieu GuillauminRaoul de CharetteLoris Bazzani
-|links| http://arxiv.org/abs/2410.08211v1 |
-|updated| 2024-10-10 17:59:59 UTC |
-|summary| Large-scale vision-language pre-trained VLP models e.g. CLIP arerenowned for their versatility as they can be applied to diverse applicationsin a zero-shot setup. However when these models are used in specific domainstheir performance often falls short due to domain gaps or theunder-representation of these domains in the training data. While fine-tuningVLP models on custom datasets with human-annotated labels can address thisissue annotating even a small-scale dataset e.g. 100k samples can be anexpensive endeavor often requiring expert annotators if the task is complex.To address these challenges we propose LatteCLIP an unsupervised method forfine-tuning CLIP models on classification with known class names in customdomains without relying on human annotations. Our method leverages LargeMultimodal Models LMMs to generate expressive textual descriptions for bothindividual images and groups of images. These provide additional contextualinformation to guide the fine-tuning process in the custom domains. SinceLMM-generated descriptions are prone to hallucination or missing details weintroduce a novel strategy to distill only the useful information and stabilizethe training. Specifically we learn rich per-class prototype representationsfrom noisy generated texts and dual pseudo-labels. Our experiments on 10domain-specific datasets show that LatteCLIP outperforms pre-trained zero-shotmethods by an average improvement of 4.74 points in top-1 accuracy and otherstate-of-the-art unsupervised methods by 3.45 points. |
+|idx| 2410.09047v1 |
+|title| Unraveling and Mitigating Safety Alignment Degradation of Vision-Language Models |
+|authors| Qin LiuChao ShangLing LiuNikolaos PappasJie MaNeha Anna JohnSrikanth DossLluis MarquezMiguel BallesterosYassine Benajiba
+|links| http://arxiv.org/abs/2410.09047v1 |
+|updated| 2024-10-11 17:59:31 UTC |
+|summary| The safety alignment ability of Vision-Language Models VLMs is prone to bedegraded by the integration of the vision module compared to its LLM backbone.We investigate this phenomenon dubbed as safety alignment degradation inthis paper and show that the challenge arises from the representation gap thatemerges when introducing vision modality to VLMs. In particular we show thatthe representations of multi-modal inputs shift away from that of text-onlyinputs which represent the distribution that the LLM backbone is optimized for.At the same time the safety alignment capabilities initially developed withinthe textual embedding space do not successfully transfer to this newmulti-modal representation space. To reduce safety alignment degradation weintroduce Cross-Modality Representation Manipulation CMRM an inference timerepresentation intervention method for recovering the safety alignment abilitythat is inherent in the LLM backbone of VLMs while simultaneously preservingthe functional capabilities of VLMs. The empirical results show that ourframework significantly recovers the alignment ability that is inherited fromthe LLM backbone with minimal impact on the fluency and linguistic capabilitiesof pre-trained VLMs even without additional training. Specifically the unsaferate of LLaVA-7B on multi-modal input can be reduced from 61.53 to as low as3.15 with only inference-time intervention.  WARNING: This paper contains examples of toxic or harmful language. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08202v1 |
-|title| Mono-InternVL: Pushing the Boundaries of Monolithic Multimodal Large Language Models with Endogenous Visual Pre-training |
-|authors| Gen LuoXue YangWenhan DouZhaokai WangJifeng DaiYu QiaoXizhou Zhu
-|links| http://arxiv.org/abs/2410.08202v1 |
-|updated| 2024-10-10 17:59:22 UTC |
-|summary| The rapid advancement of Large Language Models LLMs has led to an influx ofefforts to extend their capabilities to multimodal tasks. Among them growingattention has been focused on monolithic Multimodal Large Language ModelsMLLMs that integrate visual encoding and language decoding into a single LLM.Despite the structural simplicity and deployment-friendliness training amonolithic MLLM with promising performance still remains challenging. Inparticular the popular approaches adopt continuous pre-training to extend apre-trained LLM to a monolithic MLLM which suffers from catastrophicforgetting and leads to performance degeneration. In this paper we aim toovercome this limitation from the perspective of delta tuning. Specificallyour core idea is to embed visual parameters into a pre-trained LLM therebyincrementally learning visual knowledge from massive data via delta tuningi.e. freezing the LLM when optimizing the visual parameters. Based on thisprinciple we present Mono-InternVL a novel monolithic MLLM that seamlesslyintegrates a set of visual experts via a multimodal mixture-of-expertsstructure. Moreover we propose an innovative pre-training strategy to maximizethe visual capability of Mono-InternVL namely Endogenous Visual Pre-trainingEViP. In particular EViP is designed as a progressive learning process forvisual experts which aims to fully exploit the visual knowledge from noisydata to high-quality data. To validate our approach we conduct extensiveexperiments on 16 benchmarks. Experimental results not only validate thesuperior performance of Mono-InternVL compared to the state-of-the-art MLLM on6 multimodal benchmarks e.g. 113 points over InternVL-1.5 on OCRBench butalso confirm its better deployment efficiency with first token latency reducedby up to 67. |
+|idx| 2410.09045v1 |
+|title| MiRAGeNews: Multimodal Realistic AI-Generated News Detection |
+|authors| Runsheng HuangLiam DuganYue YangChris Callison-Burch
+|links| http://arxiv.org/abs/2410.09045v1 |
+|updated| 2024-10-11 17:58:02 UTC |
+|summary| The proliferation of inflammatory or misleading fake news content hasbecome increasingly common in recent years. Simultaneously it has becomeeasier than ever to use AI tools to generate photorealistic images depictingany scene imaginable. Combining these two -- AI-generated fake news content --is particularly potent and dangerous. To combat the spread of AI-generated fakenews we propose the MiRAGeNews Dataset a dataset of 12500 high-quality realand AI-generated image-caption pairs from state-of-the-art generators. We findthat our dataset poses a significant challenge to humans 60 F-1 andstate-of-the-art multi-modal LLMs  24 F-1. Using our dataset we train amulti-modal detector MiRAGe that improves by 5.1 F-1 over state-of-the-artbaselines on image-caption pairs from out-of-domain image generators and newspublishers. We release our code and data to aid future work on detectingAI-generated content. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08197v1 |
-|title| From Exploration to Mastery: Enabling LLMs to Master Tools via Self-Driven Interactions |
-|authors| Changle QuSunhao DaiXiaochi WeiHengyi CaiShuaiqiang WangDawei YinJun XuJi-Rong Wen
-|links| http://arxiv.org/abs/2410.08197v1 |
-|updated| 2024-10-10 17:58:44 UTC |
-|summary| Tool learning enables Large Language Models LLMs to interact with externalenvironments by invoking tools serving as an effective strategy to mitigatethe limitations inherent in their pre-training data. In this process tooldocumentation plays a crucial role by providing usage instructions for LLMsthereby facilitating effective tool utilization. This paper concentrates on thecritical challenge of bridging the comprehension gap between LLMs and externaltools due to the inadequacies and inaccuracies inherent in existinghuman-centric tool documentation. We propose a novel framework DRAFT aimed atDynamically Refining tool documentation through the Analysis of Feedback andTrails emanating from LLMs interactions with external tools. This methodologypivots on an innovative trial-and-error approach consisting of three distinctlearning phases: experience gathering learning from experience anddocumentation rewriting to iteratively enhance the tool documentation. Thisprocess is further optimized by implementing a diversity-promoting explorationstrategy to ensure explorative diversity and a tool-adaptive terminationmechanism to prevent overfitting while enhancing efficiency. Extensiveexperiments on multiple datasets demonstrate that DRAFTs iterativefeedback-based refinement significantly ameliorates documentation qualityfostering a deeper comprehension and more effective utilization of tools byLLMs. Notably our analysis reveals that the tool documentation refined via ourapproach demonstrates robust cross-model generalization capabilities. |
+|idx| 2410.09040v1 |
+|title| AttnGCG: Enhancing Jailbreaking Attacks on LLMs with Attention Manipulation |
+|authors| Zijun WangHaoqin TuJieru MeiBingchen ZhaoYisen WangCihang Xie
+|links| http://arxiv.org/abs/2410.09040v1 |
+|updated| 2024-10-11 17:55:09 UTC |
+|summary| This paper studies the vulnerabilities of transformer-based Large LanguageModels LLMs to jailbreaking attacks focusing specifically on theoptimization-based Greedy Coordinate Gradient GCG strategy. We first observea positive correlation between the effectiveness of attacks and the internalbehaviors of the models. For instance attacks tend to be less effective whenmodels pay more attention to system prompts designed to ensure LLM safetyalignment. Building on this discovery we introduce an enhanced method thatmanipulates models attention scores to facilitate LLM jailbreaking which weterm AttnGCG. Empirically AttnGCG shows consistent improvements in attackefficacy across diverse LLMs achieving an average increase of 7 in theLlama-2 series and 10 in the Gemma series. Our strategy also demonstratesrobust attack transferability against both unseen harmful goals and black-boxLLMs like GPT-3.5 and GPT-4. Moreover we note our attention-scorevisualization is more interpretable allowing us to gain better insights intohow our targeted attention manipulation facilitates more effectivejailbreaking. We release the code athttps://github.com/UCSC-VLAA/AttnGCG-attack. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08196v1 |
-|title| MathCoder2: Better Math Reasoning from Continued Pretraining on Model-translated Mathematical Code |
-|authors| Zimu LuAojun ZhouKe WangHouxing RenWeikang ShiJunting PanMingjie ZhanHongsheng Li
-|links| http://arxiv.org/abs/2410.08196v1 |
-|updated| 2024-10-10 17:58:40 UTC |
-|summary| Code has been shown to be effective in enhancing the mathematical reasoningabilities of large language models due to its precision and accuracy. Previousworks involving continued mathematical pretraining often include code thatutilizes math-related packages which are primarily designed for fields such asengineering machine learning signal processing or module testing ratherthan being directly focused on mathematical reasoning. In this paper weintroduce a novel method for generating mathematical code accompanied withcorresponding reasoning steps for continued pretraining. Our approach beginswith the construction of a high-quality mathematical continued pretrainingdataset by incorporating math-related web data code using mathematicalpackages math textbooks and synthetic data. Next we construct reasoningsteps by extracting LaTeX expressions the conditions needed for theexpressions and the results of the expressions from the previously collecteddataset. Based on this extracted information we generate corresponding code toaccurately capture the mathematical reasoning process. Appending the generatedcode to each reasoning step results in data consisting of paired naturallanguage reasoning steps and their corresponding code. Combining this data withthe original dataset results in a 19.2B-token high-performing mathematicalpretraining corpus which we name MathCode-Pile. Training several popular basemodels with this corpus significantly improves their mathematical abilitiesleading to the creation of the MathCoder2 family of models. All of our dataprocessing and training code is open-sourced ensuring full transparency andeasy reproducibility of the entire data collection and training pipeline. Thecode is released at https://github.com/mathllm/MathCoder2 . |
+|idx| 2410.09038v1 |
+|title| SimpleStrat: Diversifying Language Model Generation with Stratification |
+|authors| Justin WongYury OrlovskiyMichael LuoSanjit A. SeshiaJoseph E. Gonzalez
+|links| http://arxiv.org/abs/2410.09038v1 |
+|updated| 2024-10-11 17:54:14 UTC |
+|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposemethod an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08193v1 |
-|title| GenARM: Reward Guided Generation with Autoregressive Reward Model for Test-time Alignment |
-|authors| Yuancheng XuUdari Madhushani SehwagAlec KoppelSicheng ZhuBang AnFurong HuangSumitra Ganesh
-|links| http://arxiv.org/abs/2410.08193v1 |
-|updated| 2024-10-10 17:58:24 UTC |
-|summary| Large Language Models LLMs exhibit impressive capabilities but requirecareful alignment with human preferences. Traditional training-time methodsfinetune LLMs using human preference datasets but incur significant trainingcosts and require repeated training to handle diverse user preferences.Test-time alignment methods address this by using reward models RMs to guidefrozen LLMs without retraining. However existing test-time approaches rely ontrajectory-level RMs which are designed to evaluate complete responses makingthem unsuitable for autoregressive text generation that requires computingnext-token rewards from partial responses. To address this we introduceGenARM a test-time alignment approach that leverages the Autoregressive RewardModel--a novel reward parametrization designed to predict next-token rewardsfor efficient and effective autoregressive generation. Theoretically wedemonstrate that this parametrization can provably guide frozen LLMs toward anydistribution achievable by traditional RMs within the KL-regularizedreinforcement learning framework. Experimental results show that GenARMsignificantly outperforms prior test-time alignment baselines and matches theperformance of training-time methods. Additionally GenARM enables efficientweak-to-strong guidance aligning larger LLMs with smaller RMs without the highcosts of training larger models. Furthermore GenARM supports multi-objectivealignment allowing real-time trade-offs between preference dimensions andcatering to diverse user preferences without retraining. |
+|idx| 2410.09037v1 |
+|title| Mentor-KD: Making Small Language Models Better Multi-step Reasoners |
+|authors| Hojae LeeJunho KimSangKeun Lee
+|links| http://arxiv.org/abs/2410.09037v1 |
+|updated| 2024-10-11 17:53:27 UTC |
+|summary| Large Language Models LLMs have displayed remarkable performances acrossvarious complex tasks by leveraging Chain-of-Thought CoT prompting. Recentlystudies have proposed a Knowledge Distillation KD approach reasoningdistillation which transfers such reasoning ability of LLMs throughfine-tuning language models of multi-step rationales generated by LLM teachers.However they have inadequately considered two challenges regardinginsufficient distillation sets from the LLM teacher model in terms of 1 dataquality and 2 soft label provision. In this paper we propose Mentor-KD whicheffectively distills the multi-step reasoning capability of LLMs to smaller LMswhile addressing the aforementioned challenges. Specifically we exploit amentor intermediate-sized task-specific fine-tuned model to augmentadditional CoT annotations and provide soft labels for the student model duringreasoning distillation. We conduct extensive experiments and confirmMentor-KDs effectiveness across various models and complex reasoning tasks. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08211v1 |
-|title| LatteCLIP: Unsupervised CLIP Fine-Tuning via LMM-Synthetic Texts |
-|authors| Anh-Quan CaoMaximilian JaritzMatthieu GuillauminRaoul de CharetteLoris Bazzani
-|links| http://arxiv.org/abs/2410.08211v1 |
-|updated| 2024-10-10 17:59:59 UTC |
-|summary| Large-scale vision-language pre-trained VLP models e.g. CLIP arerenowned for their versatility as they can be applied to diverse applicationsin a zero-shot setup. However when these models are used in specific domainstheir performance often falls short due to domain gaps or theunder-representation of these domains in the training data. While fine-tuningVLP models on custom datasets with human-annotated labels can address thisissue annotating even a small-scale dataset e.g. 100k samples can be anexpensive endeavor often requiring expert annotators if the task is complex.To address these challenges we propose LatteCLIP an unsupervised method forfine-tuning CLIP models on classification with known class names in customdomains without relying on human annotations. Our method leverages LargeMultimodal Models LMMs to generate expressive textual descriptions for bothindividual images and groups of images. These provide additional contextualinformation to guide the fine-tuning process in the custom domains. SinceLMM-generated descriptions are prone to hallucination or missing details weintroduce a novel strategy to distill only the useful information and stabilizethe training. Specifically we learn rich per-class prototype representationsfrom noisy generated texts and dual pseudo-labels. Our experiments on 10domain-specific datasets show that LatteCLIP outperforms pre-trained zero-shotmethods by an average improvement of 4.74 points in top-1 accuracy and otherstate-of-the-art unsupervised methods by 3.45 points. |
+|idx| 2410.09047v1 |
+|title| Unraveling and Mitigating Safety Alignment Degradation of Vision-Language Models |
+|authors| Qin LiuChao ShangLing LiuNikolaos PappasJie MaNeha Anna JohnSrikanth DossLluis MarquezMiguel BallesterosYassine Benajiba
+|links| http://arxiv.org/abs/2410.09047v1 |
+|updated| 2024-10-11 17:59:31 UTC |
+|summary| The safety alignment ability of Vision-Language Models VLMs is prone to bedegraded by the integration of the vision module compared to its LLM backbone.We investigate this phenomenon dubbed as safety alignment degradation inthis paper and show that the challenge arises from the representation gap thatemerges when introducing vision modality to VLMs. In particular we show thatthe representations of multi-modal inputs shift away from that of text-onlyinputs which represent the distribution that the LLM backbone is optimized for.At the same time the safety alignment capabilities initially developed withinthe textual embedding space do not successfully transfer to this newmulti-modal representation space. To reduce safety alignment degradation weintroduce Cross-Modality Representation Manipulation CMRM an inference timerepresentation intervention method for recovering the safety alignment abilitythat is inherent in the LLM backbone of VLMs while simultaneously preservingthe functional capabilities of VLMs. The empirical results show that ourframework significantly recovers the alignment ability that is inherited fromthe LLM backbone with minimal impact on the fluency and linguistic capabilitiesof pre-trained VLMs even without additional training. Specifically the unsaferate of LLaVA-7B on multi-modal input can be reduced from 61.53 to as low as3.15 with only inference-time intervention.  WARNING: This paper contains examples of toxic or harmful language. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08210v1 |
-|title| PointOBB-v2: Towards Simpler, Faster, and Stronger Single Point Supervised Oriented Object Detection |
-|authors| Botao RenXue YangYi YuJunwei LuoZhidong Deng
-|links| http://arxiv.org/abs/2410.08210v1 |
-|updated| 2024-10-10 17:59:56 UTC |
-|summary| Single point supervised oriented object detection has gained attention andmade initial progress within the community. Diverse from those approachesrelying on one-shot samples or powerful pretrained models e.g. SAM PointOBBhas shown promise due to its prior-free feature. In this paper we proposePointOBB-v2 a simpler faster and stronger method to generate pseudo rotatedboxes from points without relying on any other prior. Specifically we firstgenerate a Class Probability Map CPM by training the network with non-uniformpositive and negative sampling. We show that the CPM is able to learn theapproximate object regions and their contours. Then Principal ComponentAnalysis PCA is applied to accurately estimate the orientation and theboundary of objects. By further incorporating a separation mechanism weresolve the confusion caused by the overlapping on the CPM enabling itsoperation in high-density scenarios. Extensive comparisons demonstrate that ourmethod achieves a training speed 15.58x faster and an accuracy improvement of11.60/25.15/21.19 on the DOTA-v1.0/v1.5/v2.0 datasets compared to theprevious state-of-the-art PointOBB. This significantly advances the cuttingedge of single point supervised oriented detection in the modular track. |
+|idx| 2410.09043v1 |
+|title| Transforming In-Vehicle Network Intrusion Detection: VAE-based Knowledge Distillation Meets Explainable AI |
+|authors| Muhammet Anil YagizPedram MohajerAnsariMert D. PesePolat Goktas
+|links| http://arxiv.org/abs/2410.09043v1 |
+|updated| 2024-10-11 17:57:16 UTC |
+|summary| In the evolving landscape of autonomous vehicles ensuring robust in-vehiclenetwork IVN security is paramount. This paper introduces an advancedintrusion detection system IDS called KD-XVAE that uses a VariationalAutoencoder VAE-based knowledge distillation approach to enhance bothperformance and efficiency. Our model significantly reduces complexityoperating with just 1669 parameters and achieving an inference time of 0.3 msper batch making it highly suitable for resource-constrained automotiveenvironments. Evaluations in the HCRL Car-Hacking dataset demonstrateexceptional capabilities attaining perfect scores Recall Precision F1 Scoreof 100 and FNR of 0 under multiple attack types including DoS FuzzingGear Spoofing and RPM Spoofing. Comparative analysis on the CICIoV2024 datasetfurther underscores its superiority over traditional machine learning modelsachieving perfect detection metrics. We furthermore integrate Explainable AIXAI techniques to ensure transparency in the models decisions. The VAEcompresses the original feature space into a latent space on which thedistilled model is trained. SHAPSHapley Additive exPlanations values provideinsights into the importance of each latent dimension mapped back to originalfeatures for intuitive understanding. Our paper advances the field byintegrating state-of-the-art techniques addressing critical challenges in thedeployment of efficient trustworthy and reliable IDSes for autonomousvehicles ensuring enhanced protection against emerging cyber threats. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08209v1 |
-|title| Emerging Pixel Grounding in Large Multimodal Models Without Grounding Supervision |
-|authors| Shengcao CaoLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2410.08209v1 |
-|updated| 2024-10-10 17:59:55 UTC |
-|summary| Current large multimodal models LMMs face challenges in grounding whichrequires the model to relate language components to visual entities. Contraryto the common practice that fine-tunes LMMs with additional groundingsupervision we find that the grounding ability can in fact emerge in LMMstrained without explicit grounding supervision. To reveal this emerginggrounding we introduce an attend-and-segment method which leveragesattention maps from standard LMMs to perform pixel-level segmentation.Furthermore to enhance the grounding ability we propose DIFFLMM an LMMutilizing a diffusion-based visual encoder as opposed to the standard CLIPvisual encoder and trained with the same weak supervision. Without beingconstrained by the biases and limited scale of grounding-specific supervisiondata our approach is more generalizable and scalable. We achieve competitiveperformance on both grounding-specific and general visual question answeringbenchmarks compared with grounding LMMs and generalist LMMs respectively.Notably we achieve a 44.2 grounding mask recall on grounded conversationgeneration without any grounding supervision outperforming the extensivelysupervised model GLaMM. Project page: https://groundLMM.github.io. |
+|idx| 2410.09038v1 |
+|title| SimpleStrat: Diversifying Language Model Generation with Stratification |
+|authors| Justin WongYury OrlovskiyMichael LuoSanjit A. SeshiaJoseph E. Gonzalez
+|links| http://arxiv.org/abs/2410.09038v1 |
+|updated| 2024-10-11 17:54:14 UTC |
+|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposemethod an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08208v1 |
-|title| SPA: 3D Spatial-Awareness Enables Effective Embodied Representation |
-|authors| Haoyi ZhuHonghui YangYating WangJiange YangLimin WangTong He
-|links| http://arxiv.org/abs/2410.08208v1 |
-|updated| 2024-10-10 17:59:51 UTC |
-|summary| In this paper we introduce SPA a novel representation learning frameworkthat emphasizes the importance of 3D spatial awareness in embodied AI. Ourapproach leverages differentiable neural rendering on multi-view images toendow a vanilla Vision Transformer ViT with intrinsic spatial understanding.We present the most comprehensive evaluation of embodied representationlearning to date covering 268 tasks across 8 simulators with diverse policiesin both single-task and language-conditioned multi-task scenarios. The resultsare compelling: SPA consistently outperforms more than 10 state-of-the-artrepresentation methods including those specifically designed for embodied AIvision-centric tasks and multi-modal applications while using less trainingdata. Furthermore we conduct a series of real-world experiments to confirm itseffectiveness in practical scenarios. These results highlight the critical roleof 3D spatial awareness for embodied representation learning. Our strongestmodel takes more than 6000 GPU hours to train and we are committed toopen-sourcing all code and model weights to foster future research in embodiedrepresentation learning. Project Page: https://haoyizhu.github.io/spa/. |
+|idx| 2410.09037v1 |
+|title| Mentor-KD: Making Small Language Models Better Multi-step Reasoners |
+|authors| Hojae LeeJunho KimSangKeun Lee
+|links| http://arxiv.org/abs/2410.09037v1 |
+|updated| 2024-10-11 17:53:27 UTC |
+|summary| Large Language Models LLMs have displayed remarkable performances acrossvarious complex tasks by leveraging Chain-of-Thought CoT prompting. Recentlystudies have proposed a Knowledge Distillation KD approach reasoningdistillation which transfers such reasoning ability of LLMs throughfine-tuning language models of multi-step rationales generated by LLM teachers.However they have inadequately considered two challenges regardinginsufficient distillation sets from the LLM teacher model in terms of 1 dataquality and 2 soft label provision. In this paper we propose Mentor-KD whicheffectively distills the multi-step reasoning capability of LLMs to smaller LMswhile addressing the aforementioned challenges. Specifically we exploit amentor intermediate-sized task-specific fine-tuned model to augmentadditional CoT annotations and provide soft labels for the student model duringreasoning distillation. We conduct extensive experiments and confirmMentor-KDs effectiveness across various models and complex reasoning tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08197v1 |
-|title| From Exploration to Mastery: Enabling LLMs to Master Tools via Self-Driven Interactions |
-|authors| Changle QuSunhao DaiXiaochi WeiHengyi CaiShuaiqiang WangDawei YinJun XuJi-Rong Wen
-|links| http://arxiv.org/abs/2410.08197v1 |
-|updated| 2024-10-10 17:58:44 UTC |
-|summary| Tool learning enables Large Language Models LLMs to interact with externalenvironments by invoking tools serving as an effective strategy to mitigatethe limitations inherent in their pre-training data. In this process tooldocumentation plays a crucial role by providing usage instructions for LLMsthereby facilitating effective tool utilization. This paper concentrates on thecritical challenge of bridging the comprehension gap between LLMs and externaltools due to the inadequacies and inaccuracies inherent in existinghuman-centric tool documentation. We propose a novel framework DRAFT aimed atDynamically Refining tool documentation through the Analysis of Feedback andTrails emanating from LLMs interactions with external tools. This methodologypivots on an innovative trial-and-error approach consisting of three distinctlearning phases: experience gathering learning from experience anddocumentation rewriting to iteratively enhance the tool documentation. Thisprocess is further optimized by implementing a diversity-promoting explorationstrategy to ensure explorative diversity and a tool-adaptive terminationmechanism to prevent overfitting while enhancing efficiency. Extensiveexperiments on multiple datasets demonstrate that DRAFTs iterativefeedback-based refinement significantly ameliorates documentation qualityfostering a deeper comprehension and more effective utilization of tools byLLMs. Notably our analysis reveals that the tool documentation refined via ourapproach demonstrates robust cross-model generalization capabilities. |
+|idx| 2410.09034v1 |
+|title| PEAR: A Robust and Flexible Automation Framework for Ptychography Enabled by Multiple Large Language Model Agents |
+|authors| Xiangyu YinChuqiao ShiYimo HanYi Jiang
+|links| http://arxiv.org/abs/2410.09034v1 |
+|updated| 2024-10-11 17:50:59 UTC |
+|summary| Ptychography is an advanced computational imaging technique in X-ray andelectron microscopy. It has been widely adopted across scientific researchfields including physics chemistry biology and materials science as wellas in industrial applications such as semiconductor characterization. Inpractice obtaining high-quality ptychographic images requires simultaneousoptimization of numerous experimental and algorithmic parameters.Traditionally parameter selection often relies on trial and error leading tolow-throughput workflows and potential human bias. In this work we develop thePtychographic Experiment and Analysis Robot PEAR a framework thatleverages large language models LLMs to automate data analysis inptychography. To ensure high robustness and accuracy PEAR employs multiple LLMagents for tasks including knowledge retrieval code generation parameterrecommendation and image reasoning. Our study demonstrates that PEARsmulti-agent design significantly improves the workflow success rate even withsmaller open-weight models such as LLaMA 3.1 8B. PEAR also supports variousautomation levels and is designed to work with customized local knowledgebases ensuring flexibility and adaptability across different researchenvironments. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08209v1 |
-|title| Emerging Pixel Grounding in Large Multimodal Models Without Grounding Supervision |
-|authors| Shengcao CaoLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2410.08209v1 |
-|updated| 2024-10-10 17:59:55 UTC |
-|summary| Current large multimodal models LMMs face challenges in grounding whichrequires the model to relate language components to visual entities. Contraryto the common practice that fine-tunes LMMs with additional groundingsupervision we find that the grounding ability can in fact emerge in LMMstrained without explicit grounding supervision. To reveal this emerginggrounding we introduce an attend-and-segment method which leveragesattention maps from standard LMMs to perform pixel-level segmentation.Furthermore to enhance the grounding ability we propose DIFFLMM an LMMutilizing a diffusion-based visual encoder as opposed to the standard CLIPvisual encoder and trained with the same weak supervision. Without beingconstrained by the biases and limited scale of grounding-specific supervisiondata our approach is more generalizable and scalable. We achieve competitiveperformance on both grounding-specific and general visual question answeringbenchmarks compared with grounding LMMs and generalist LMMs respectively.Notably we achieve a 44.2 grounding mask recall on grounded conversationgeneration without any grounding supervision outperforming the extensivelysupervised model GLaMM. Project page: https://groundLMM.github.io. |
+|idx| 2410.09047v1 |
+|title| Unraveling and Mitigating Safety Alignment Degradation of Vision-Language Models |
+|authors| Qin LiuChao ShangLing LiuNikolaos PappasJie MaNeha Anna JohnSrikanth DossLluis MarquezMiguel BallesterosYassine Benajiba
+|links| http://arxiv.org/abs/2410.09047v1 |
+|updated| 2024-10-11 17:59:31 UTC |
+|summary| The safety alignment ability of Vision-Language Models VLMs is prone to bedegraded by the integration of the vision module compared to its LLM backbone.We investigate this phenomenon dubbed as safety alignment degradation inthis paper and show that the challenge arises from the representation gap thatemerges when introducing vision modality to VLMs. In particular we show thatthe representations of multi-modal inputs shift away from that of text-onlyinputs which represent the distribution that the LLM backbone is optimized for.At the same time the safety alignment capabilities initially developed withinthe textual embedding space do not successfully transfer to this newmulti-modal representation space. To reduce safety alignment degradation weintroduce Cross-Modality Representation Manipulation CMRM an inference timerepresentation intervention method for recovering the safety alignment abilitythat is inherent in the LLM backbone of VLMs while simultaneously preservingthe functional capabilities of VLMs. The empirical results show that ourframework significantly recovers the alignment ability that is inherited fromthe LLM backbone with minimal impact on the fluency and linguistic capabilitiesof pre-trained VLMs even without additional training. Specifically the unsaferate of LLaVA-7B on multi-modal input can be reduced from 61.53 to as low as3.15 with only inference-time intervention.  WARNING: This paper contains examples of toxic or harmful language. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08208v1 |
-|title| SPA: 3D Spatial-Awareness Enables Effective Embodied Representation |
-|authors| Haoyi ZhuHonghui YangYating WangJiange YangLimin WangTong He
-|links| http://arxiv.org/abs/2410.08208v1 |
-|updated| 2024-10-10 17:59:51 UTC |
-|summary| In this paper we introduce SPA a novel representation learning frameworkthat emphasizes the importance of 3D spatial awareness in embodied AI. Ourapproach leverages differentiable neural rendering on multi-view images toendow a vanilla Vision Transformer ViT with intrinsic spatial understanding.We present the most comprehensive evaluation of embodied representationlearning to date covering 268 tasks across 8 simulators with diverse policiesin both single-task and language-conditioned multi-task scenarios. The resultsare compelling: SPA consistently outperforms more than 10 state-of-the-artrepresentation methods including those specifically designed for embodied AIvision-centric tasks and multi-modal applications while using less trainingdata. Furthermore we conduct a series of real-world experiments to confirm itseffectiveness in practical scenarios. These results highlight the critical roleof 3D spatial awareness for embodied representation learning. Our strongestmodel takes more than 6000 GPU hours to train and we are committed toopen-sourcing all code and model weights to foster future research in embodiedrepresentation learning. Project Page: https://haoyizhu.github.io/spa/. |
+|idx| 2410.09046v1 |
+|title| Linear Convergence of Diffusion Models Under the Manifold Hypothesis |
+|authors| Peter PotaptchikIskander AzangulovGeorge Deligiannidis
+|links| http://arxiv.org/abs/2410.09046v1 |
+|updated| 2024-10-11 17:58:30 UTC |
+|summary| Score-matching generative models have proven successful at sampling fromcomplex high-dimensional data distributions. In many applications thisdistribution is believed to concentrate on a much lower d-dimensionalmanifold embedded into D-dimensional space this is known as the manifoldhypothesis. The current best-known convergence guarantees are either linear inD or polynomial superlinear in d. The latter exploits a novel integrationscheme for the backward SDE. We take the best of both worlds and show that thenumber of steps diffusion models require in order to converge inKullback-LeiblerKL divergence is linear up to logarithmic terms in theintrinsic dimension d. Moreover we show that this linear dependency issharp. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08207v1 |
-|title| DICE: Discrete Inversion Enabling Controllable Editing for Multinomial Diffusion and Masked Generative Models |
-|authors| Xiaoxiao HeLigong HanQuan DaoSong WenMinhao BaiDi LiuHan ZhangMartin Renqiang MinFelix Juefei-XuChaowei TanBo LiuKang LiHongdong LiJunzhou HuangFaez AhmedAkash SrivastavaDimitris Metaxas
-|links| http://arxiv.org/abs/2410.08207v1 |
-|updated| 2024-10-10 17:59:48 UTC |
-|summary| Discrete diffusion models have achieved success in tasks like imagegeneration and masked language modeling but face limitations in controlledcontent editing. We introduce DICE Discrete Inversion for ControllableEditing the first approach to enable precise inversion for discrete diffusionmodels including multinomial diffusion and masked generative models. Byrecording noise sequences and masking patterns during the reverse diffusionprocess DICE enables accurate reconstruction and flexible editing of discretedata without the need for predefined masks or attention manipulation. Wedemonstrate the effectiveness of DICE across both image and text domainsevaluating it on models such as VQ-Diffusion Paella and RoBERTa. Our resultsshow that DICE preserves high data fidelity while enhancing editingcapabilities offering new opportunities for fine-grained content manipulationin discrete spaces. For project webpage seehttps://hexiaoxiao-cs.github.io/DICE/. |
+|idx| 2410.09032v1 |
+|title| Alberta Wells Dataset: Pinpointing Oil and Gas Wells from Satellite Imagery |
+|authors| Pratinav SethMichelle LinBrefo Dwamena YawJade BoutotMary KangDavid Rolnick
+|links| http://arxiv.org/abs/2410.09032v1 |
+|updated| 2024-10-11 17:49:50 UTC |
+|summary| Millions of abandoned oil and gas wells are scattered across the worldleaching methane into the atmosphere and toxic compounds into the groundwater.Many of these locations are unknown preventing the wells from being pluggedand their polluting effects averted. Remote sensing is a relatively unexploredtool for pinpointing abandoned wells at scale. We introduce the firstlarge-scale benchmark dataset for this problem leveraging medium-resolutionmulti-spectral satellite imagery from Planet Labs. Our curated datasetcomprises over 213000 wells abandoned suspended and active from Alberta aregion with especially high well density sourced from the Alberta EnergyRegulator and verified by domain experts. We evaluate baseline algorithms forwell detection and segmentation showing the promise of computer visionapproaches but also significant room for improvement. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08201v1 |
-|title| Efficient Dictionary Learning with Switch Sparse Autoencoders |
-|authors| Anish MudideJoshua EngelsEric J. MichaudMax TegmarkChristian Schroeder de Witt
-|links| http://arxiv.org/abs/2410.08201v1 |
-|updated| 2024-10-10 17:59:11 UTC |
-|summary| Sparse autoencoders SAEs are a recent technique for decomposing neuralnetwork activations into human-interpretable features. However in order forSAEs to identify all features represented in frontier models it will benecessary to scale them up to very high width posing a computationalchallenge. In this work we introduce Switch Sparse Autoencoders a novel SAEarchitecture aimed at reducing the compute cost of training SAEs. Inspired bysparse mixture of experts models Switch SAEs route activation vectors betweensmaller expert SAEs enabling SAEs to efficiently scale to many morefeatures. We present experiments comparing Switch SAEs with other SAEarchitectures and find that Switch SAEs deliver a substantial Paretoimprovement in the reconstruction vs. sparsity frontier for a given fixedtraining compute budget. We also study the geometry of features across expertsanalyze features duplicated across experts and verify that Switch SAE featuresare as interpretable as features found by other SAE architectures. |
+|idx| 2410.09027v1 |
+|title| Variance reduction combining pre-experiment and in-experiment data |
+|authors| Zhexiao LinPablo Crespo
+|links| http://arxiv.org/abs/2410.09027v1 |
+|updated| 2024-10-11 17:45:29 UTC |
+|summary| Online controlled experiments A/B testing are essential in data-drivendecision-making for many companies. Increasing the sensitivity of theseexperiments particularly with a fixed sample size relies on reducing thevariance of the estimator for the average treatment effect ATE. Existingmethods like CUPED and CUPAC use pre-experiment data to reduce variance buttheir effectiveness depends on the correlation between the pre-experiment dataand the outcome. In contrast in-experiment data is often more stronglycorrelated with the outcome and thus more informative. In this paper weintroduce a novel method that combines both pre-experiment and in-experimentdata to achieve greater variance reduction than CUPED and CUPAC withoutintroducing bias or additional computation complexity. We also establishasymptotic theory and provide consistent variance estimators for our method.Applying this method to multiple online experiments at Etsy we reachsubstantial variance reduction over CUPAC with the inclusion of only a fewin-experiment covariates. These results highlight the potential of our approachto significantly improve experiment sensitivity and accelerate decision-making. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08198v1 |
-|title| Adam Exploits $\ell_\infty$-geometry of Loss Landscape via Coordinate-wise Adaptivity |
-|authors| Shuo XieMohamad Amin MohamadiZhiyuan Li
-|links| http://arxiv.org/abs/2410.08198v1 |
-|updated| 2024-10-10 17:58:53 UTC |
-|summary| Adam outperforms SGD when training language models. Yet this advantage is notwell-understood theoretically -- previous convergence analysis for Adam and SGDmainly focuses on the number of steps T and is already minimax-optimal innon-convex cases which are both widetildeOT-1/4. In this work weargue that the exploitation of nice ell_infty-geometry is the key advantageof Adam over SGD. More specifically we give a new convergence analysis forAdam under novel assumptions that loss is smooth under ell_infty-geometryrather than the more common ell_2-geometry which yields a much betterempirical smoothness constant for GPT-2 and ResNet models. Our experimentsconfirm that Adam performs much worse when the favorable ell_infty-geometryis changed while SGD provably remains unaffected. We also extend theconvergence analysis to blockwise Adam under novel blockwise smoothnessassumptions. |
+|idx| 2410.09024v1 |
+|title| AgentHarm: A Benchmark for Measuring Harmfulness of LLM Agents |
+|authors| Maksym AndriushchenkoAlexandra SoulyMateusz DziemianDerek DuenasMaxwell LinJustin WangDan HendrycksAndy ZouZico KolterMatt FredriksonEric WinsorJerome WynneYarin GalXander Davies
+|links| http://arxiv.org/abs/2410.09024v1 |
+|updated| 2024-10-11 17:39:22 UTC |
+|summary| The robustness of LLMs to jailbreak attacks where users design prompts tocircumvent safety measures and misuse model capabilities has been studiedprimarily for LLMs acting as simple chatbots. Meanwhile LLM agents -- whichuse external tools and can execute multi-stage tasks -- may pose a greater riskif misused but their robustness remains underexplored. To facilitate researchon LLM agent misuse we propose a new benchmark called AgentHarm. The benchmarkincludes a diverse set of 110 explicitly malicious agent tasks 440 withaugmentations covering 11 harm categories including fraud cybercrime andharassment. In addition to measuring whether models refuse harmful agenticrequests scoring well on AgentHarm requires jailbroken agents to maintaintheir capabilities following an attack to complete a multi-step task. Weevaluate a range of leading LLMs and find 1 leading LLMs are surprisinglycompliant with malicious agent requests without jailbreaking 2 simpleuniversal jailbreak templates can be adapted to effectively jailbreak agentsand 3 these jailbreaks enable coherent and malicious multi-step agentbehavior and retain model capabilities. We publicly release AgentHarm to enablesimple and reliable evaluation of attacks and defenses for LLM-based agents. Wepublicly release the benchmark athttps://huggingface.co/ai-safety-institute/AgentHarm. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08211v1 |
-|title| LatteCLIP: Unsupervised CLIP Fine-Tuning via LMM-Synthetic Texts |
-|authors| Anh-Quan CaoMaximilian JaritzMatthieu GuillauminRaoul de CharetteLoris Bazzani
-|links| http://arxiv.org/abs/2410.08211v1 |
-|updated| 2024-10-10 17:59:59 UTC |
-|summary| Large-scale vision-language pre-trained VLP models e.g. CLIP arerenowned for their versatility as they can be applied to diverse applicationsin a zero-shot setup. However when these models are used in specific domainstheir performance often falls short due to domain gaps or theunder-representation of these domains in the training data. While fine-tuningVLP models on custom datasets with human-annotated labels can address thisissue annotating even a small-scale dataset e.g. 100k samples can be anexpensive endeavor often requiring expert annotators if the task is complex.To address these challenges we propose LatteCLIP an unsupervised method forfine-tuning CLIP models on classification with known class names in customdomains without relying on human annotations. Our method leverages LargeMultimodal Models LMMs to generate expressive textual descriptions for bothindividual images and groups of images. These provide additional contextualinformation to guide the fine-tuning process in the custom domains. SinceLMM-generated descriptions are prone to hallucination or missing details weintroduce a novel strategy to distill only the useful information and stabilizethe training. Specifically we learn rich per-class prototype representationsfrom noisy generated texts and dual pseudo-labels. Our experiments on 10domain-specific datasets show that LatteCLIP outperforms pre-trained zero-shotmethods by an average improvement of 4.74 points in top-1 accuracy and otherstate-of-the-art unsupervised methods by 3.45 points. |
+|idx| 2410.09049v1 |
+|title| SceneCraft: Layout-Guided 3D Scene Generation |
+|authors| Xiuyu YangYunze ManJun-Kun ChenYu-Xiong Wang
+|links| http://arxiv.org/abs/2410.09049v1 |
+|updated| 2024-10-11 17:59:58 UTC |
+|summary| The creation of complex 3D scenes tailored to user specifications has been atedious and challenging task with traditional 3D modeling tools. Although somepioneering methods have achieved automatic text-to-3D generation they aregenerally limited to small-scale scenes with restricted control over the shapeand texture. We introduce SceneCraft a novel method for generating detailedindoor scenes that adhere to textual descriptions and spatial layoutpreferences provided by users. Central to our method is a rendering-basedtechnique which converts 3D semantic layouts into multi-view 2D proxy maps.Furthermore we design a semantic and depth conditioned diffusion model togenerate multi-view images which are used to learn a neural radiance fieldNeRF as the final scene representation. Without the constraints of panoramaimage generation we surpass previous methods in supporting complicated indoorspace generation beyond a single room even as complicated as a wholemulti-bedroom apartment with irregular shapes and layouts. Through experimentalanalysis we demonstrate that our method significantly outperforms existingapproaches in complex indoor scene generation with diverse textures consistentgeometry and realistic visual quality. Code and more results are available at:https://orangesodahub.github.io/SceneCraft |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08210v1 |
-|title| PointOBB-v2: Towards Simpler, Faster, and Stronger Single Point Supervised Oriented Object Detection |
-|authors| Botao RenXue YangYi YuJunwei LuoZhidong Deng
-|links| http://arxiv.org/abs/2410.08210v1 |
-|updated| 2024-10-10 17:59:56 UTC |
-|summary| Single point supervised oriented object detection has gained attention andmade initial progress within the community. Diverse from those approachesrelying on one-shot samples or powerful pretrained models e.g. SAM PointOBBhas shown promise due to its prior-free feature. In this paper we proposePointOBB-v2 a simpler faster and stronger method to generate pseudo rotatedboxes from points without relying on any other prior. Specifically we firstgenerate a Class Probability Map CPM by training the network with non-uniformpositive and negative sampling. We show that the CPM is able to learn theapproximate object regions and their contours. Then Principal ComponentAnalysis PCA is applied to accurately estimate the orientation and theboundary of objects. By further incorporating a separation mechanism weresolve the confusion caused by the overlapping on the CPM enabling itsoperation in high-density scenarios. Extensive comparisons demonstrate that ourmethod achieves a training speed 15.58x faster and an accuracy improvement of11.60/25.15/21.19 on the DOTA-v1.0/v1.5/v2.0 datasets compared to theprevious state-of-the-art PointOBB. This significantly advances the cuttingedge of single point supervised oriented detection in the modular track. |
+|idx| 2410.09045v1 |
+|title| MiRAGeNews: Multimodal Realistic AI-Generated News Detection |
+|authors| Runsheng HuangLiam DuganYue YangChris Callison-Burch
+|links| http://arxiv.org/abs/2410.09045v1 |
+|updated| 2024-10-11 17:58:02 UTC |
+|summary| The proliferation of inflammatory or misleading fake news content hasbecome increasingly common in recent years. Simultaneously it has becomeeasier than ever to use AI tools to generate photorealistic images depictingany scene imaginable. Combining these two -- AI-generated fake news content --is particularly potent and dangerous. To combat the spread of AI-generated fakenews we propose the MiRAGeNews Dataset a dataset of 12500 high-quality realand AI-generated image-caption pairs from state-of-the-art generators. We findthat our dataset poses a significant challenge to humans 60 F-1 andstate-of-the-art multi-modal LLMs  24 F-1. Using our dataset we train amulti-modal detector MiRAGe that improves by 5.1 F-1 over state-of-the-artbaselines on image-caption pairs from out-of-domain image generators and newspublishers. We release our code and data to aid future work on detectingAI-generated content. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08209v1 |
-|title| Emerging Pixel Grounding in Large Multimodal Models Without Grounding Supervision |
-|authors| Shengcao CaoLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2410.08209v1 |
-|updated| 2024-10-10 17:59:55 UTC |
-|summary| Current large multimodal models LMMs face challenges in grounding whichrequires the model to relate language components to visual entities. Contraryto the common practice that fine-tunes LMMs with additional groundingsupervision we find that the grounding ability can in fact emerge in LMMstrained without explicit grounding supervision. To reveal this emerginggrounding we introduce an attend-and-segment method which leveragesattention maps from standard LMMs to perform pixel-level segmentation.Furthermore to enhance the grounding ability we propose DIFFLMM an LMMutilizing a diffusion-based visual encoder as opposed to the standard CLIPvisual encoder and trained with the same weak supervision. Without beingconstrained by the biases and limited scale of grounding-specific supervisiondata our approach is more generalizable and scalable. We achieve competitiveperformance on both grounding-specific and general visual question answeringbenchmarks compared with grounding LMMs and generalist LMMs respectively.Notably we achieve a 44.2 grounding mask recall on grounded conversationgeneration without any grounding supervision outperforming the extensivelysupervised model GLaMM. Project page: https://groundLMM.github.io. |
+|idx| 2410.09032v1 |
+|title| Alberta Wells Dataset: Pinpointing Oil and Gas Wells from Satellite Imagery |
+|authors| Pratinav SethMichelle LinBrefo Dwamena YawJade BoutotMary KangDavid Rolnick
+|links| http://arxiv.org/abs/2410.09032v1 |
+|updated| 2024-10-11 17:49:50 UTC |
+|summary| Millions of abandoned oil and gas wells are scattered across the worldleaching methane into the atmosphere and toxic compounds into the groundwater.Many of these locations are unknown preventing the wells from being pluggedand their polluting effects averted. Remote sensing is a relatively unexploredtool for pinpointing abandoned wells at scale. We introduce the firstlarge-scale benchmark dataset for this problem leveraging medium-resolutionmulti-spectral satellite imagery from Planet Labs. Our curated datasetcomprises over 213000 wells abandoned suspended and active from Alberta aregion with especially high well density sourced from the Alberta EnergyRegulator and verified by domain experts. We evaluate baseline algorithms forwell detection and segmentation showing the promise of computer visionapproaches but also significant room for improvement. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08208v1 |
-|title| SPA: 3D Spatial-Awareness Enables Effective Embodied Representation |
-|authors| Haoyi ZhuHonghui YangYating WangJiange YangLimin WangTong He
-|links| http://arxiv.org/abs/2410.08208v1 |
-|updated| 2024-10-10 17:59:51 UTC |
-|summary| In this paper we introduce SPA a novel representation learning frameworkthat emphasizes the importance of 3D spatial awareness in embodied AI. Ourapproach leverages differentiable neural rendering on multi-view images toendow a vanilla Vision Transformer ViT with intrinsic spatial understanding.We present the most comprehensive evaluation of embodied representationlearning to date covering 268 tasks across 8 simulators with diverse policiesin both single-task and language-conditioned multi-task scenarios. The resultsare compelling: SPA consistently outperforms more than 10 state-of-the-artrepresentation methods including those specifically designed for embodied AIvision-centric tasks and multi-modal applications while using less trainingdata. Furthermore we conduct a series of real-world experiments to confirm itseffectiveness in practical scenarios. These results highlight the critical roleof 3D spatial awareness for embodied representation learning. Our strongestmodel takes more than 6000 GPU hours to train and we are committed toopen-sourcing all code and model weights to foster future research in embodiedrepresentation learning. Project Page: https://haoyizhu.github.io/spa/. |
+|idx| 2410.09010v1 |
+|title| CVAM-Pose: Conditional Variational Autoencoder for Multi-Object Monocular Pose Estimation |
+|authors| Jianyu ZhaoWei QuanBogdan J. Matuszewski
+|links| http://arxiv.org/abs/2410.09010v1 |
+|updated| 2024-10-11 17:26:27 UTC |
+|summary| Estimating rigid objects poses is one of the fundamental problems incomputer vision with a range of applications across automation and augmentedreality. Most existing approaches adopt one network per object class strategydepend heavily on objects 3D models depth data and employ a time-consumingiterative refinement which could be impractical for some applications. Thispaper presents a novel approach CVAM-Pose for multi-object monocular poseestimation that addresses these limitations. The CVAM-Pose method employs alabel-embedded conditional variational autoencoder network to implicitlyabstract regularised representations of multiple objects in a singlelow-dimensional latent space. This autoencoding process uses only imagescaptured by a projective camera and is robust to objects occlusion and sceneclutter. The classes of objects are one-hot encoded and embedded throughout thenetwork. The proposed label-embedded pose regression strategy interprets thelearnt latent space representations utilising continuous pose representations.Ablation tests and systematic evaluations demonstrate the scalability andefficiency of the CVAM-Pose method for multi-object scenarios. The proposedCVAM-Pose outperforms competing latent space approaches. For example it isrespectively 25 and 20 better than AAE and Multi-Path methods when evaluatedusing the mathrmAR_VSD metric on the Linemod-Occluded dataset. It alsoachieves results somewhat comparable to methods reliant on 3D models reportedin BOP challenges. Code available: https://github.com/JZhao12/CVAM-Pose |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08207v1 |
-|title| DICE: Discrete Inversion Enabling Controllable Editing for Multinomial Diffusion and Masked Generative Models |
-|authors| Xiaoxiao HeLigong HanQuan DaoSong WenMinhao BaiDi LiuHan ZhangMartin Renqiang MinFelix Juefei-XuChaowei TanBo LiuKang LiHongdong LiJunzhou HuangFaez AhmedAkash SrivastavaDimitris Metaxas
-|links| http://arxiv.org/abs/2410.08207v1 |
-|updated| 2024-10-10 17:59:48 UTC |
-|summary| Discrete diffusion models have achieved success in tasks like imagegeneration and masked language modeling but face limitations in controlledcontent editing. We introduce DICE Discrete Inversion for ControllableEditing the first approach to enable precise inversion for discrete diffusionmodels including multinomial diffusion and masked generative models. Byrecording noise sequences and masking patterns during the reverse diffusionprocess DICE enables accurate reconstruction and flexible editing of discretedata without the need for predefined masks or attention manipulation. Wedemonstrate the effectiveness of DICE across both image and text domainsevaluating it on models such as VQ-Diffusion Paella and RoBERTa. Our resultsshow that DICE preserves high data fidelity while enhancing editingcapabilities offering new opportunities for fine-grained content manipulationin discrete spaces. For project webpage seehttps://hexiaoxiao-cs.github.io/DICE/. |
+|idx| 2410.09009v1 |
+|title| Semantic Score Distillation Sampling for Compositional Text-to-3D Generation |
+|authors| Ling YangZixiang ZhangJunlin HanBohan ZengRunjia LiPhilip TorrWentao Zhang
+|links| http://arxiv.org/abs/2410.09009v1 |
+|updated| 2024-10-11 17:26:00 UTC |
+|summary| Generating high-quality 3D assets from textual descriptions remains a pivotalchallenge in computer graphics and vision research. Due to the scarcity of 3Ddata state-of-the-art approaches utilize pre-trained 2D diffusion priorsoptimized through Score Distillation Sampling SDS. Despite progress craftingcomplex 3D scenes featuring multiple objects or intricate interactions is stilldifficult. To tackle this recent methods have incorporated box or layoutguidance. However these layout-guided compositional methods often struggle toprovide fine-grained control as they are generally coarse and lackexpressiveness. To overcome these challenges we introduce a novel SDSapproach Semantic Score Distillation Sampling SemanticSDS designed toeffectively improve the expressiveness and accuracy of compositional text-to-3Dgeneration. Our approach integrates new semantic embeddings that maintainconsistency across different rendering views and clearly differentiate betweenvarious objects and parts. These embeddings are transformed into a semanticmap which directs a region-specific SDS process enabling precise optimizationand compositional generation. By leveraging explicit semantic guidance ourmethod unlocks the compositional capabilities of existing pre-trained diffusionmodels thereby achieving superior quality in 3D content generationparticularly for complex objects and scenes. Experimental results demonstratethat our SemanticSDS framework is highly effective for generatingstate-of-the-art complex 3D content. Code:https://github.com/YangLing0818/SemanticSDS-3D |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08194v1 |
-|title| Features are fate: a theory of transfer learning in high-dimensional regression |
-|authors| Javan TahirSurya GanguliGrant M. Rotskoff
-|links| http://arxiv.org/abs/2410.08194v1 |
-|updated| 2024-10-10 17:58:26 UTC |
-|summary| With the emergence of large-scale pre-trained neural networks methods toadapt such foundation models to data-limited downstream tasks have become anecessity. Fine-tuning preference optimization and transfer learning have allbeen successfully employed for these purposes when the target task closelyresembles the source task but a precise theoretical understanding of tasksimilarity is still lacking. While conventional wisdom suggests that simplemeasures of similarity between source and target distributions such asphi-divergences or integral probability metrics can directly predict thesuccess of transfer we prove the surprising fact that in general this is notthe case. We adopt instead a feature-centric viewpoint on transfer learningand establish a number of theoretical results that demonstrate that when thetarget task is well represented by the feature space of the pre-trained modeltransfer learning outperforms training from scratch. We study deep linearnetworks as a minimal model of transfer learning in which we can analyticallycharacterize the transferability phase diagram as a function of the targetdataset size and the feature space overlap. For this model we establishrigorously that when the feature space overlap between the source and targettasks is sufficiently strong both linear transfer and fine-tuning improveperformance especially in the low data limit. These results build on anemerging understanding of feature learning dynamics in deep linear networksand we demonstrate numerically that the rigorous results we derive for thelinear case also apply to nonlinear networks. |
+|idx| 2410.09046v1 |
+|title| Linear Convergence of Diffusion Models Under the Manifold Hypothesis |
+|authors| Peter PotaptchikIskander AzangulovGeorge Deligiannidis
+|links| http://arxiv.org/abs/2410.09046v1 |
+|updated| 2024-10-11 17:58:30 UTC |
+|summary| Score-matching generative models have proven successful at sampling fromcomplex high-dimensional data distributions. In many applications thisdistribution is believed to concentrate on a much lower d-dimensionalmanifold embedded into D-dimensional space this is known as the manifoldhypothesis. The current best-known convergence guarantees are either linear inD or polynomial superlinear in d. The latter exploits a novel integrationscheme for the backward SDE. We take the best of both worlds and show that thenumber of steps diffusion models require in order to converge inKullback-LeiblerKL divergence is linear up to logarithmic terms in theintrinsic dimension d. Moreover we show that this linear dependency issharp. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08125v1 |
-|title| Generalizing Stochastic Smoothing for Differentiation and Gradient Estimation |
-|authors| Felix PetersenChristian BorgeltAashwin MishraStefano Ermon
-|links| http://arxiv.org/abs/2410.08125v1 |
-|updated| 2024-10-10 17:10:00 UTC |
-|summary| We deal with the problem of gradient estimation for stochastic differentiablerelaxations of algorithms operators simulators and other non-differentiablefunctions. Stochastic smoothing conventionally perturbs the input of anon-differentiable function with a differentiable density distribution withfull support smoothing it and enabling gradient estimation. Our theory startsat first principles to derive stochastic smoothing with reduced assumptionswithout requiring a differentiable density nor full support and we present ageneral framework for relaxation and gradient estimation of non-differentiableblack-box functions f:mathbbRntomathbbRm. We develop variancereduction for gradient estimation from 3 orthogonal perspectives. Empiricallywe benchmark 6 distributions and up to 24 variance reduction strategies fordifferentiable sorting and ranking differentiable shortest-paths on graphsdifferentiable rendering for pose estimation as well as differentiable cryo-ETsimulations. |
+|idx| 2410.09005v1 |
+|title| Analyzing Neural Scaling Laws in Two-Layer Networks with Power-Law Data Spectra |
+|authors| Roman WorschechBernd Rosenow
+|links| http://arxiv.org/abs/2410.09005v1 |
+|updated| 2024-10-11 17:21:42 UTC |
+|summary| Neural scaling laws describe how the performance of deep neural networksscales with key factors such as training data size model complexity andtraining time often following power-law behaviors over multiple orders ofmagnitude. Despite their empirical observation the theoretical understandingof these scaling laws remains limited. In this work we employ techniques fromstatistical mechanics to analyze one-pass stochastic gradient descent within astudent-teacher framework where both the student and teacher are two-layerneural networks. Our study primarily focuses on the generalization error andits behavior in response to data covariance matrices that exhibit power-lawspectra. For linear activation functions we derive analytical expressions forthe generalization error exploring different learning regimes and identifyingconditions under which power-law scaling emerges. Additionally we extend ouranalysis to non-linear activation functions in the feature learning regimeinvestigating how power-law spectra in the data covariance matrix impactlearning dynamics. Importantly we find that the length of the symmetricplateau depends on the number of distinct eigenvalues of the data covariancematrix and the number of hidden units demonstrating how these plateaus behaveunder various configurations. In addition our results reveal a transition fromexponential to power-law convergence in the specialized phase when the datacovariance matrix possesses a power-law spectrum. This work contributes to thetheoretical understanding of neural scaling laws and provides insights intooptimizing learning performance in practical scenarios involving complex datastructures. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08111v1 |
-|title| Active Fourier Auditor for Estimating Distributional Properties of ML Models |
-|authors| Ayoub AjarraBishwamittra GhoshDebabrota Basu
-|links| http://arxiv.org/abs/2410.08111v1 |
-|updated| 2024-10-10 16:57:01 UTC |
-|summary| With the pervasive deployment of Machine Learning ML models in real-worldapplications verifying and auditing properties of ML models have become acentral concern. In this work we focus on three properties: robustnessindividual fairness and group fairness. We discuss two approaches for auditingML model properties: estimation with and without reconstruction of the targetmodel under audit. Though the first approach is studied in the literature thesecond approach remains unexplored. For this purpose we develop a newframework that quantifies different properties in terms of the Fouriercoefficients of the ML model under audit but does not parametricallyreconstruct it. We propose the Active Fourier Auditor AFA which queriessample points according to the Fourier coefficients of the ML model andfurther estimates the properties. We derive high probability error bounds onAFAs estimates along with the worst-case lower bounds on the samplecomplexity to audit them. Numerically we demonstrate on multiple datasets andmodels that AFA is more accurate and sample-efficient to estimate theproperties of interest than the baselines. |
+|idx| 2410.08997v1 |
+|title| Hierarchical Universal Value Function Approximators |
+|authors| Rushiv Arora
+|links| http://arxiv.org/abs/2410.08997v1 |
+|updated| 2024-10-11 17:09:26 UTC |
+|summary| There have been key advancements to building universal approximators formulti-goal collections of reinforcement learning value functions -- keyelements in estimating long-term returns of states in a parameterized manner.We extend this to hierarchical reinforcement learning using the optionsframework by introducing hierarchical universal value function approximatorsH-UVFAs. This allows us to leverage the added benefits of scaling planningand generalization expected in temporal abstraction settings. We developsupervised and reinforcement learning methods for learning embeddings of thestates goals options and actions in the two hierarchical value functions:Qs g o theta and Qs g o a theta. Finally we demonstrategeneralization of the HUVFAs and show they outperform corresponding UVFAs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08087v1 |
-|title| Noether's razor: Learning Conserved Quantities |
-|authors| Tycho F. A. van der OuderaaMark van der WilkPim de Haan
-|links| http://arxiv.org/abs/2410.08087v1 |
-|updated| 2024-10-10 16:29:49 UTC |
-|summary| Symmetries have proven useful in machine learning models improvinggeneralisation and overall performance. At the same time recent advancementsin learning dynamical systems rely on modelling the underlying Hamiltonian toguarantee the conservation of energy. These approaches can be connected via aseminal result in mathematical physics: Noethers theorem which states thatsymmetries in a dynamical system correspond to conserved quantities. This workuses Noethers theorem to parameterise symmetries as learnable conservedquantities. We then allow conserved quantities and associated symmetries to belearned directly from train data through approximate Bayesian model selectionjointly with the regular training procedure. As training objective we derive avariational lower bound to the marginal likelihood. The objective automaticallyembodies an Occams Razor effect that avoids collapse of conservation laws tothe trivial constant without the need to manually add and tune additionalregularisers. We demonstrate a proof-of-principle on n-harmonic oscillatorsand n-body systems. We find that our method correctly identifies the correctconserved quantities and Un and SEn symmetry groups improving overallperformance and predictive accuracy on test data. |
+|idx| 2410.08994v1 |
+|title| Optimal Downsampling for Imbalanced Classification with Generalized Linear Models |
+|authors| Yan ChenJose BlanchetKrzysztof DembczynskiLaura Fee NernAaron Flores
+|links| http://arxiv.org/abs/2410.08994v1 |
+|updated| 2024-10-11 17:08:13 UTC |
+|summary| Downsampling or under-sampling is a technique that is utilized in the contextof large and highly imbalanced classification models. We study optimaldownsampling for imbalanced classification using generalized linear modelsGLMs. We propose a pseudo maximum likelihood estimator and study itsasymptotic normality in the context of increasingly imbalanced populationsrelative to an increasingly large sample size. We provide theoreticalguarantees for the introduced estimator. Additionally we compute the optimaldownsampling rate using a criterion that balances statistical accuracy andcomputational efficiency. Our numerical experiments conducted on bothsynthetic and empirical data further validate our theoretical results anddemonstrate that the introduced estimator outperforms commonly availablealternatives. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08071v1 |
-|title| Gaussian Process Thompson Sampling via Rootfinding |
-|authors| Taiwo A. AdebiyiBach DoRuda Zhang
-|links| http://arxiv.org/abs/2410.08071v1 |
-|updated| 2024-10-10 16:06:45 UTC |
-|summary| Thompson sampling TS is a simple effective stochastic policy in Bayesiandecision making. It samples the posterior belief about the reward profile andoptimizes the sample to obtain a candidate decision. In continuousoptimization the posterior of the objective function is often a Gaussianprocess GP whose sample paths have numerous local optima making theirglobal optimization challenging. In this work we introduce an efficient globaloptimization strategy for GP-TS that carefully selects starting points forgradient-based multi-start optimizers. It identifies all local optima of theprior sample via univariate global rootfinding and optimizes the posteriorsample using a differentiable decoupled representation. We demonstrateremarkable improvement in the global optimization of GP posterior samplesespecially in high dimensions. This leads to dramatic improvements in theoverall performance of Bayesian optimization using GP-TS acquisition functionssurprisingly outperforming alternatives like GP-UCB and EI. |
+|idx| 2410.08977v1 |
+|title| Online-to-PAC generalization bounds under graph-mixing dependencies |
+|authors| Baptiste AbélèsEugenio ClericoGergely Neu
+|links| http://arxiv.org/abs/2410.08977v1 |
+|updated| 2024-10-11 16:49:01 UTC |
+|summary| Traditional generalization results in statistical learning require a trainingdata set made of independently drawn examples. Most of the recent efforts torelax this independence assumption have considered either purely temporalmixing dependencies or graph-dependencies where non-adjacent verticescorrespond to independent random variables. Both approaches have their ownlimitations the former requiring a temporal ordered structure and the latterlacking a way to quantify the strength of inter-dependencies. In this work webridge these two lines of work by proposing a framework where dependenciesdecay with graph distance. We derive generalization bounds leveraging theonline-to-PAC framework by deriving a concentration result and introducing anonline learning framework incorporating the graph structure. The resultinghigh-probability generalization guarantees depend on both the mixing rate andthe graphs chromatic number. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08136v1 |
-|title| SoundScape: A Human-AI Co-Creation System Making Your Memories Heard |
-|authors| Chongjun ZhongJiaxing YuYingping CaoSongruoyao WuWenqi WuKejun Zhang
-|links| http://arxiv.org/abs/2410.08136v1 |
-|updated| 2024-10-10 17:19:50 UTC |
-|summary| Sound plays a significant role in human memory yet it is often overlooked bymainstream life-recording methods. Most current UGC User-Generated Contentcreation tools emphasize visual content while lacking user-friendly sounddesign features. This paper introduces SoundScape a human-AI co-creationsystem that allows users to easily create sound memories on mobile devicesthrough innovative interaction. By integrating sound effects and music withvisual scenes SoundScape encourages users to enrich their creations withimmersive sound elements enhancing the atmosphere of their works. To supportpublic creation SoundScape incorporates a conversational agent and AI musicgeneration technology. User studies indicate that our approach is effective forsound memory creation with SoundScape outperforming existing tools in terms ofuser experience and the perceived quality of produced works. |
+|idx| 2410.09006v1 |
+|title| From Interaction to Impact: Towards Safer AI Agents Through Understanding and Evaluating UI Operation Impacts |
+|authors| Zhuohao Jerry ZhangEldon SchoopJeffrey NicholsAnuj MahajanAmanda Swearngin
+|links| http://arxiv.org/abs/2410.09006v1 |
+|updated| 2024-10-11 17:24:00 UTC |
+|summary| With advances in generative AI there is increasing work towards creatingautonomous agents that can manage daily tasks by operating user interfacesUIs. While prior research has studied the mechanics of how AI agents mightnavigate UIs and understand UI structure the effects of agents and theirautonomous actions-particularly those that may be risky or irreversible-remainunder-explored. In this work we investigate the real-world impacts andconsequences of UI actions by AI agents. We began by developing a taxonomy ofthe impacts of UI actions through a series of workshops with domain experts.Following this we conducted a data synthesis study to gather realistic UIscreen traces and action data that users perceive as impactful. We then usedour impact categories to annotate our collected data and data repurposed fromexisting UI navigation datasets. Our quantitative evaluations of differentlarge language models LLMs and variants demonstrate how well different LLMscan understand the impacts of UI actions that might be taken by an agent. Weshow that our taxonomy enhances the reasoning capabilities of these LLMs forunderstanding the impacts of UI actions but our findings also revealsignificant gaps in their ability to reliably classify more nuanced or complexcategories of impact. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08090v1 |
-|title| Crossing Margins: Intersectional Users' Ethical Concerns about Software |
-|authors| Lauren OlsonTom P. HumbertRicarda Anna-Lena FischerBob WesterveldFlorian KunnemanEmitzá Guzmán
-|links| http://arxiv.org/abs/2410.08090v1 |
-|updated| 2024-10-10 16:33:05 UTC |
-|summary| Many modern software applications present numerous ethical concerns due toconflicts between users values and companies priorities. Intersectionalcommunities those with multiple marginalized identities aredisproportionately affected by these ethical issues leading to legalfinancial and reputational issues for software companies as well asreal-world harm for intersectional users. Historically the voices ofintersectional communities have been systematically marginalized and excludedfrom contributing their unique perspectives to software design perpetuatingsoftware-related ethical concerns.  This work aims to fill the gap in research on intersectional userssoftware-related perspectives and provide software practitioners with astarting point to address their ethical concerns. We aggregated and analyzedthe intersectional users ethical concerns over time and developed aprioritization method to identify critical concerns. To achieve this wecollected posts from over 700 intersectional subreddits discussing softwareapplications utilized deep learning to identify ethical concerns in theseposts and employed state-of-the-art techniques to analyze their content inrelation to time and priority. Our findings revealed that intersectionalcommunities report textitcritical complaints related to cyberbullyinginappropriate content and discrimination highlighting significant flaws inmodern software particularly for intersectional users. Based on thesefindings we discuss how to better address the ethical concerns ofintersectional users in software development. |
+|idx| 2410.08974v1 |
+|title| UniGlyph: A Seven-Segment Script for Universal Language Representation |
+|authors| G. V. Bency SherinA. Abijesh EuphrineA. Lenora MoreenL. Arun Jose
+|links| http://arxiv.org/abs/2410.08974v1 |
+|updated| 2024-10-11 16:46:09 UTC |
+|summary| UniGlyph is a constructed language conlang designed to create a universaltransliteration system using a script derived from seven-segment characters.The goal of UniGlyph is to facilitate cross-language communication by offeringa flexible and consistent script that can represent a wide range of phoneticsounds. This paper explores the design of UniGlyph detailing its scriptstructure phonetic mapping and transliteration rules. The system addressesimperfections in the International Phonetic Alphabet IPA and traditionalcharacter sets by providing a compact versatile method to represent phoneticdiversity across languages. With pitch and length markers UniGlyph ensuresaccurate phonetic representation while maintaining a small character set.Applications of UniGlyph include artificial intelligence integrations such asnatural language processing and multilingual speech recognition enhancingcommunication across different languages. Future expansions are discussedincluding the addition of animal phonetic sounds where unique scripts areassigned to different species broadening the scope of UniGlyph beyond humancommunication. This study presents the challenges and solutions in developingsuch a universal script demonstrating the potential of UniGlyph to bridgelinguistic gaps in cross-language communication educational phonetics andAI-driven applications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07997v1 |
-|title| APOLLO: A GPT-based tool to detect phishing emails and generate explanations that warn users |
-|authors| Giuseppe DesoldaFrancesco GrecoLuca Viganò
-|links| http://arxiv.org/abs/2410.07997v1 |
-|updated| 2024-10-10 14:53:39 UTC |
-|summary| Phishing is one of the most prolific cybercriminal activities with attacksbecoming increasingly sophisticated. It is therefore imperative to explorenovel technologies to improve user protection across both technical and humandimensions. Large Language Models LLMs offer significant promise for textprocessing in various domains but their use for defense against phishingattacks still remains scarcely explored. In this paper we present APOLLO atool based on OpenAIs GPT-4o to detect phishing emails and generateexplanation messages to users about why a specific email is dangerous thusimproving their decision-making capabilities. We have evaluated the performanceof APOLLO in classifying phishing emails the results show that the LLM modelshave exemplary capabilities in classifying phishing emails 97 percent accuracyin the case of GPT-4o and that this performance can be further improved byintegrating data from third-party services resulting in a near-perfectclassification rate 99 percent accuracy. To assess the perception of theexplanations generated by this tool we also conducted a study with 20participants comparing four different explanations presented as phishingwarnings. We compared the LLM-generated explanations to four baselines: amanually crafted warning and warnings from Chrome Firefox and Edge browsers.The results show that not only the LLM-generated explanations were perceived ashigh quality but also that they can be more understandable interesting andtrustworthy than the baselines. These findings suggest that using LLMs as adefense against phishing is a very promising approach with APOLLO representinga proof of concept in this research direction. |
+|idx| 2410.08926v1 |
+|title| Zero-Shot Pupil Segmentation with SAM 2: A Case Study of Over 14 Million Images |
+|authors| Virmarie MaquilingSean Anthony ByrneDiederick C. NiehorsterMarco CarminatiEnkelejda Kasneci
+|links| http://arxiv.org/abs/2410.08926v1 |
+|updated| 2024-10-11 15:50:53 UTC |
+|summary| We explore the transformative potential of SAM 2 a vision foundation modelin advancing gaze estimation and eye tracking technologies. By significantlyreducing annotation time lowering technical barriers through its ease ofdeployment and enhancing segmentation accuracy SAM 2 addresses criticalchallenges faced by researchers and practitioners. Utilizing its zero-shotsegmentation capabilities with minimal user input-a single click per video-wetested SAM 2 on over 14 million eye images from diverse datasets includingvirtual reality setups and the worlds largest unified dataset recorded usingwearable eye trackers. Remarkably in pupil segmentation tasks SAM 2 matchesthe performance of domain-specific models trained solely on eye imagesachieving competitive mean Intersection over Union mIoU scores of up to 93without fine-tuning. Additionally we provide our code and segmentation masksfor these widely used datasets to promote further research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07991v1 |
-|title| Human and LLM Biases in Hate Speech Annotations: A Socio-Demographic Analysis of Annotators and Targets |
-|authors| Tommaso GiorgiLorenzo CimaTiziano FagniMarco AvvenutiStefano Cresci
-|links| http://arxiv.org/abs/2410.07991v1 |
-|updated| 2024-10-10 14:48:57 UTC |
-|summary| The rise of online platforms exacerbated the spread of hate speech demandingscalable and effective detection. However the accuracy of hate speechdetection systems heavily relies on human-labeled data which is inherentlysusceptible to biases. While previous work has examined the issue theinterplay between the characteristics of the annotator and those of the targetof the hate are still unexplored. We fill this gap by leveraging an extensivedataset with rich socio-demographic information of both annotators and targetsuncovering how human biases manifest in relation to the targets attributes.Our analysis surfaces the presence of widespread biases which wequantitatively describe and characterize based on their intensity andprevalence revealing marked differences. Furthermore we compare human biaseswith those exhibited by persona-based LLMs. Our findings indicate that whilepersona-based LLMs do exhibit biases these differ significantly from those ofhuman annotators. Overall our work offers new and nuanced results on humanbiases in hate speech annotations as well as fresh insights into the design ofAI-driven hate speech detection systems. |
+|idx| 2410.08922v1 |
+|title| Exploring the Design Space of Cognitive Engagement Techniques with AI-Generated Code for Enhanced Learning |
+|authors| Majeed KazemitabaarOliver HuangSangho SuhAustin Z. HenleyTovi Grossman
+|links| http://arxiv.org/abs/2410.08922v1 |
+|updated| 2024-10-11 15:49:42 UTC |
+|summary| Novice programmers are increasingly relying on Large Language Models LLMsto generate code for learning programming concepts. However this interactioncan lead to superficial engagement giving learners an illusion of learning andhindering skill development. To address this issue we conducted a systematicdesign exploration to develop seven cognitive engagement techniques aimed atpromoting deeper engagement with AI-generated code. In this paper we describeour design process the initial seven techniques and results from abetween-subjects study N82. We then iteratively refined the top techniquesand further evaluated them through a within-subjects study N42. We evaluatethe friction each technique introduces their effectiveness in helping learnersapply concepts to isomorphic tasks without AI assistance and their success inaligning learners perceived and actual coding abilities. Ultimately ourresults highlight the most effective technique: guiding learners through thestep-by-step problem-solving process where they engage in an interactivedialog with the AI prompting what needs to be done at each stage before thecorresponding code is revealed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07920v1 |
-|title| Post-Training Quantization in Brain-Computer Interfaces based on Event-Related Potential Detection |
-|authors| Hubert CecottiDalvir DhaliwalHardip SinghYogesh Kumar Meena
-|links| http://arxiv.org/abs/2410.07920v1 |
-|updated| 2024-10-10 13:47:30 UTC |
-|summary| Post-training quantization PTQ is a technique used to optimize and reducethe memory footprint and computational requirements of machine learning models.It has been used primarily for neural networks. For Brain-Computer InterfacesBCI that are fully portable and usable in various situations it is necessaryto provide approaches that are lightweight for storage and computation. In thispaper we propose the evaluation of post-training quantization onstate-of-the-art approaches in brain-computer interfaces and assess theirimpact on accuracy. We evaluate the performance of the single-trial detectionof event-related potentials representing one major BCI paradigm. The area underthe receiver operating characteristic curve drops from 0.861 to 0.825 with PTQwhen applied on both spatial filters and the classifier while reducing thesize of the model by about times 15. The results support the conclusion thatPTQ can substantially reduce the memory footprint of the models while keepingroughly the same level of accuracy. |
+|idx| 2410.08899v1 |
+|title| Utilizing ChatGPT in a Data Structures and Algorithms Course: A Teaching Assistant's Perspective |
+|authors| Pooriya JamieReyhaneh HajihashemiSharareh Alipour
+|links| http://arxiv.org/abs/2410.08899v1 |
+|updated| 2024-10-11 15:18:48 UTC |
+|summary| Integrating large language models LLMs like ChatGPT is revolutionizing thefield of computer science education. These models offer new possibilities forenriching student learning and supporting teaching assistants TAs inproviding prompt feedback and supplementary learning resources. This researchdelves into the use of ChatGPT in a data structures and algorithms DSAcourse particularly when combined with TA supervision. The findingsdemonstrate that incorporating ChatGPT with structured prompts and active TAguidance enhances students understanding of intricate algorithmic conceptsboosts engagement and elevates academic performance. However challenges existin addressing academic integrity and the limitations of LLMs in tacklingcomplex problems. The study underscores the importance of active TA involvementin reducing students reliance on AI-generated content and amplifying theoverall educational impact. The results suggest that while LLMs can beadvantageous for education their successful integration demands continuousoversight and a thoughtful balance between AI and human guidance. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08050v1 |
-|title| Agent-based modeling for realistic reproduction of human mobility and contact behavior to evaluate test and isolation strategies in epidemic infectious disease spread |
-|authors| David KerkmannSascha KorfKhoa NguyenDaniel AbeleAlain SchengenCarlotta GersteinJens Henrik GöbbertAchim BasermannMartin J. KühnMichael Meyer-Hermann
-|links| http://arxiv.org/abs/2410.08050v1 |
-|updated| 2024-10-10 15:45:27 UTC |
-|summary| Agent-based models have proven to be useful tools in supportingdecision-making processes in different application domains. The advent ofmodern computers and supercomputers has enabled these bottom-up approaches torealistically model human mobility and contact behavior. The COVID-19 pandemicshowcased the urgent need for detailed and informative models that can answerresearch questions on transmission dynamics. We present a sophisticatedagent-based model to simulate the spread of respiratory diseases. The model ishighly modularized and can be used on various scales from a small collectionof buildings up to cities or countries. Although not being the focus of thispaper the model has undergone performance engineering on a single core andprovides an efficient intra- and inter-simulation parallelization fortime-critical decision-making processes.  In order to allow answering research questions on individual levelresolution nonpharmaceutical intervention strategies such as face masks orvenue closures can be implemented for particular locations or agents. Inparticular we allow for sophisticated testing and isolation strategies tostudy the effects of minimal-invasive infectious disease mitigation. Withrealistic human mobility patterns for the region of Brunswick Germany westudy the effects of different interventions between March 1st and May 30 2021in the SARS-CoV-2 pandemic. Our analyses suggest that symptom-independenttesting has limited impact on the mitigation of disease dynamics if the darkfigure in symptomatic cases is high. Furthermore we found that quarantinelength is more important than quarantine efficiency but that with sufficientsymptomatic control also short quarantines can have a substantial effect. |
+|idx| 2410.09034v1 |
+|title| PEAR: A Robust and Flexible Automation Framework for Ptychography Enabled by Multiple Large Language Model Agents |
+|authors| Xiangyu YinChuqiao ShiYimo HanYi Jiang
+|links| http://arxiv.org/abs/2410.09034v1 |
+|updated| 2024-10-11 17:50:59 UTC |
+|summary| Ptychography is an advanced computational imaging technique in X-ray andelectron microscopy. It has been widely adopted across scientific researchfields including physics chemistry biology and materials science as wellas in industrial applications such as semiconductor characterization. Inpractice obtaining high-quality ptychographic images requires simultaneousoptimization of numerous experimental and algorithmic parameters.Traditionally parameter selection often relies on trial and error leading tolow-throughput workflows and potential human bias. In this work we develop thePtychographic Experiment and Analysis Robot PEAR a framework thatleverages large language models LLMs to automate data analysis inptychography. To ensure high robustness and accuracy PEAR employs multiple LLMagents for tasks including knowledge retrieval code generation parameterrecommendation and image reasoning. Our study demonstrates that PEARsmulti-agent design significantly improves the workflow success rate even withsmaller open-weight models such as LLaMA 3.1 8B. PEAR also supports variousautomation levels and is designed to work with customized local knowledgebases ensuring flexibility and adaptability across different researchenvironments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.08032v1 |
-|title| Strategic Classification With Externalities |
-|authors| Yiling ChenSafwan HossainEvi MichaAriel Procaccia
-|links| http://arxiv.org/abs/2410.08032v1 |
-|updated| 2024-10-10 15:28:04 UTC |
-|summary| We propose a new variant of the strategic classification problem: a principalreveals a classifier and n agents report their possibly manipulatedfeatures to be classified. Motivated by real-world applications our modelcrucially allows the manipulation of one agent to affect another that is itexplicitly captures inter-agent externalities. The principal-agent interactionsare formally modeled as a Stackelberg game with the resulting agentmanipulation dynamics captured as a simultaneous game. We show that undercertain assumptions the pure Nash Equilibrium of this agent manipulation gameis unique and can be efficiently computed. Leveraging this result PAC learningguarantees are established for the learner: informally we show that it ispossible to learn classifiers that minimize loss on the distribution even whena random number of agents are manipulating their way to a pure NashEquilibrium. We also comment on the optimization of such classifiers throughgradient-based approaches. This work sets the theoretical foundations for amore realistic analysis of classifiers that are robust against multiplestrategic actors interacting in a common environment. |
+|idx| 2410.08948v1 |
+|title| The Dynamics of Social Conventions in LLM populations: Spontaneous Emergence, Collective Biases and Tipping Points |
+|authors| Ariel Flint AsheryLuca Maria AielloAndrea Baronchelli
+|links| http://arxiv.org/abs/2410.08948v1 |
+|updated| 2024-10-11 16:16:38 UTC |
+|summary| Social conventions are the foundation for social and economic life. Aslegions of AI agents increasingly interact with each other and with humanstheir ability to form shared conventions will determine how effectively theywill coordinate behaviors integrate into society and influence it. Here weinvestigate the dynamics of conventions within populations of Large LanguageModel LLM agents using simulated interactions. First we show that globallyaccepted social conventions can spontaneously arise from local interactionsbetween communicating LLMs. Second we demonstrate how strong collective biasescan emerge during this process even when individual agents appear to beunbiased. Third we examine how minority groups of committed LLMs can drivesocial change by establishing new social conventions. We show that once theseminority groups reach a critical size they can consistently overturnestablished behaviors. In all cases contrasting the experimental results withpredictions from a minimal multi-agent model allows us to isolate the specificrole of LLM agents. Our results clarify how AI systems can autonomously developnorms without explicit programming and have implications for designing AIsystems that align with human values and societal goals. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07954v1 |
-|title| Dynamic Programming based Local Search approaches for Multi-Agent Path Finding problems on Directed Graphs |
-|authors| Irene SaccaniStefano ArdizzoniLuca ConsoliniMarco Locatelli
-|links| http://arxiv.org/abs/2410.07954v1 |
-|updated| 2024-10-10 14:20:19 UTC |
-|summary| Among sub-optimal Multi-Agent Path Finding MAPF solvers rule-basedalgorithms are particularly appealing since they are complete. Even in crowdedscenarios they allow finding a feasible solution that brings each agent to itstarget preventing deadlock situations. However generally rule-basedalgorithms provide much longer solutions than the shortest one. The maincontribution of this paper is introducing a new local search procedure forimproving a known feasible solution. We start from a feasible sub-optimalsolution and perform a local search in a neighborhood of this solution. If weare able to find a shorter solution we repeat this procedure until thesolution cannot be shortened anymore. At the end we obtain a solution that isstill sub-optimal but generally of much better quality than the initial one.We propose two different local search policies. In the first we explore allpaths in which the agents positions remain in a neighborhood of thecorresponding positions of the reference solution. In the second we set anupper limit to the number of agents that can change their path with respect tothe reference solution. These two different policies can also be alternated. Weexplore the neighborhoods by dynamic programming. The fact that our search islocal is fundamental in terms of time complexity. Indeed if the dynamicprogramming approach is applied to the full MAPF problem the number ofexplored states grows exponentially with the number of agents. Instead theintroduction of a locality constraint allows exploring the neghborhoods in atime that grows polynomially with respect to the number of agents. |
+|idx| 2410.08755v1 |
+|title| PILLAR: an AI-Powered Privacy Threat Modeling Tool |
+|authors| Majid MollaeefarAndrea BissoliSilvio Ranise
+|links| http://arxiv.org/abs/2410.08755v1 |
+|updated| 2024-10-11 12:13:03 UTC |
+|summary| The rapid evolution of Large Language Models LLMs has unlocked newpossibilities for applying artificial intelligence across a wide range offields including privacy engineering. As modern applications increasinglyhandle sensitive user data safeguarding privacy has become more critical thanever. To protect privacy effectively potential threats need to be identifiedand addressed early in the system development process. Frameworks like LINDDUNoffer structured approaches for uncovering these risks but despite theirvalue they often demand substantial manual effort expert input and detailedsystem knowledge. This makes the process time-consuming and prone to errors.Current privacy threat modeling methods such as LINDDUN typically rely oncreating and analyzing complex data flow diagrams DFDs and systemdescriptions to pinpoint potential privacy issues. While these approaches arethorough they can be cumbersome relying heavily on the precision of the dataprovided by users. Moreover they often generate a long list of threats withoutclear guidance on how to prioritize them leaving developers unsure of where tofocus their efforts. In response to these challenges we introduce PILLARPrivacy risk Identification with LINDDUN and LLM Analysis Report a new toolthat integrates LLMs with the LINDDUN framework to streamline and enhanceprivacy threat modeling. PILLAR automates key parts of the LINDDUN processsuch as generating DFDs classifying threats and prioritizing risks. Byleveraging the capabilities of LLMs PILLAR can take natural languagedescriptions of systems and transform them into comprehensive threat modelswith minimal input from users reducing the workload on developers and privacyexperts while improving the efficiency and accuracy of the process. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07869v1 |
-|title| Benchmarking Agentic Workflow Generation |
-|authors| Shuofei QiaoRunnan FangZhisong QiuXiaobin WangNingyu ZhangYong JiangPengjun XieFei HuangHuajun Chen
-|links| http://arxiv.org/abs/2410.07869v1 |
-|updated| 2024-10-10 12:41:19 UTC |
-|summary| Large Language Models LLMs with their exceptional ability to handle a widerange of tasks have driven significant advancements in tackling reasoning andplanning tasks wherein decomposing complex problems into executable workflowsis a crucial step in this process. Existing workflow evaluation frameworkseither focus solely on holistic performance or suffer from limitations such asrestricted scenario coverage simplistic workflow structures and laxevaluation standards. To this end we introduce WorFBench a unified workflowgeneration benchmark with multi-faceted scenarios and intricate graph workflowstructures. Additionally we present WorFEval a systemic evaluation protocolutilizing subsequence and subgraph matching algorithms to accurately quantifythe LLM agents workflow generation capabilities. Through comprehensiveevaluations across different types of LLMs we discover distinct gaps betweenthe sequence planning capabilities and graph planning capabilities of LLMagents with even GPT-4 exhibiting a gap of around 15. We also train twoopen-source models and evaluate their generalization abilities on held-outtasks. Furthermore we observe that the generated workflows can enhancedownstream tasks enabling them to achieve superior performance with less timeduring inference. Code and dataset will be available athttps://github.com/zjunlp/WorFBench. |
+|idx| 2410.08651v1 |
+|title| Edge AI Collaborative Learning: Bayesian Approaches to Uncertainty Estimation |
+|authors| Gleb RadchenkoVictoria Andrea Fill
+|links| http://arxiv.org/abs/2410.08651v1 |
+|updated| 2024-10-11 09:20:16 UTC |
+|summary| Recent advancements in edge computing have significantly enhanced the AIcapabilities of Internet of Things IoT devices. However these advancementsintroduce new challenges in knowledge exchange and resource managementparticularly addressing the spatiotemporal data locality in edge computingenvironments. This study examines algorithms and methods for deployingdistributed machine learning within autonomous network-capable AI-enablededge devices. We focus on determining confidence levels in learning outcomesconsidering the spatial variability of data encountered by independent agents.Using collaborative mapping as a case study we explore the application of theDistributed Neural Network Optimization DiNNO algorithm extended withBayesian neural networks BNNs for uncertainty estimation. We implement a 3Denvironment simulation using the Webots platform to simulate collaborativemapping tasks decouple the DiNNO algorithm into independent processes forasynchronous network communication in distributed learning and integratedistributed uncertainty estimation using BNNs. Our experiments demonstrate thatBNNs can effectively support uncertainty estimation in a distributed learningcontext with precise tuning of learning hyperparameters crucial for effectiveuncertainty assessment. Notably applying Kullback-Leibler divergence forparameter regularization resulted in a 12-30 reduction in validation lossduring distributed BNN training compared to other regularization strategies. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.07713v1 |
-|title| A Hate Speech Moderated Chat Application: Use Case for GDPR and DSA Compliance |
-|authors| Jan FilliesTheodoros MitsikasRalph SchäfermeierAdrian Paschke
-|links| http://arxiv.org/abs/2410.07713v1 |
-|updated| 2024-10-10 08:28:38 UTC |
-|summary| The detection of hate speech or toxic content online is a complex andsensitive issue. While the identification itself is highly dependent on thecontext of the situation sensitive personal attributes such as age languageand nationality are rarely available due to privacy concerns. Additionallyplatforms struggle with a wide range of local jurisdictions regarding onlinehate speech and the evaluation of content based on their internal ethicalnorms. This research presents a novel approach that demonstrates aGDPR-compliant application capable of implementing legal and ethical reasoninginto the content moderation process. The application increases theexplainability of moderation decisions by utilizing user information. Two usecases fundamental to online communication are presented and implemented usingtechnologies such as GPT-3.5 Solid Pods and the rule language Prova. Thefirst use case demonstrates the scenario of a platform aiming to protectadolescents from potentially harmful content by limiting the ability to postcertain content when minors are present. The second use case aims to identifyand counter problematic statements online by providing counter hate speech. Thecounter hate speech is generated using personal attributes to appeal to theuser. This research lays the groundwork for future DSA compliance of onlineplatforms. The work proposes a novel approach to reason within different legaland ethical definitions of hate speech and plan the fitting counter hatespeech. Overall the platform provides a fitted protection to users and a moreexplainable and individualized response. The hate speech detection service thechat platform and the reasoning in Prova are discussed and the potentialbenefits for content moderation and algorithmic hate speech detection areoutlined. A selection of important aspects for DSA compliance is outlined. |
+|idx| 2410.08540v1 |
+|title| Kaleidoscope: Learnable Masks for Heterogeneous Multi-agent Reinforcement Learning |
+|authors| Xinran LiLing PanJun Zhang
+|links| http://arxiv.org/abs/2410.08540v1 |
+|updated| 2024-10-11 05:22:54 UTC |
+|summary| In multi-agent reinforcement learning MARL parameter sharing is commonlyemployed to enhance sample efficiency. However the popular approach of fullparameter sharing often leads to homogeneous policies among agents potentiallylimiting the performance benefits that could be derived from policy diversity.To address this critical limitation we introduce emphKaleidoscope a noveladaptive partial parameter sharing scheme that fosters policy heterogeneitywhile still maintaining high sample efficiency. Specifically Kaleidoscopemaintains one set of common parameters alongside multiple sets of distinctlearnable masks for different agents dictating the sharing of parameters. Itpromotes diversity among policy networks by encouraging discrepancy among thesemasks without sacrificing the efficiencies of parameter sharing. This designallows Kaleidoscope to dynamically balance high sample efficiency with a broadpolicy representational capacity effectively bridging the gap between fullparameter sharing and non-parameter sharing across various environments. Wefurther extend Kaleidoscope to critic ensembles in the context of actor-criticalgorithms which could help improve value estimations.Our empiricalevaluations across extensive environments including multi-agent particleenvironment multi-agent MuJoCo and StarCraft multi-agent challenge v2demonstrate the superior performance of Kaleidoscope compared with existingparameter sharing approaches showcasing its potential for performanceenhancement in MARL. The code is publicly available aturlhttps://github.com/LXXXXR/Kaleidoscope. |
 
 
