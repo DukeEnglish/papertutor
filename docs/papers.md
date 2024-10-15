@@ -32,12 +32,12 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.09038v1 |
+|idx| 2410.09038v2 |
 |title| SimpleStrat: Diversifying Language Model Generation with Stratification |
 |authors| Justin WongYury OrlovskiyMichael LuoSanjit A. SeshiaJoseph E. Gonzalez
-|links| http://arxiv.org/abs/2410.09038v1 |
-|updated| 2024-10-11 17:54:14 UTC |
-|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposemethod an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
+|links| http://arxiv.org/abs/2410.09038v2 |
+|updated| 2024-10-14 17:32:26 UTC |
+|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposeSimpleStrat an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
 
 
 | Item |Content|
@@ -74,12 +74,12 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.09038v1 |
+|idx| 2410.09038v2 |
 |title| SimpleStrat: Diversifying Language Model Generation with Stratification |
 |authors| Justin WongYury OrlovskiyMichael LuoSanjit A. SeshiaJoseph E. Gonzalez
-|links| http://arxiv.org/abs/2410.09038v1 |
-|updated| 2024-10-11 17:54:14 UTC |
-|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposemethod an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
+|links| http://arxiv.org/abs/2410.09038v2 |
+|updated| 2024-10-14 17:32:26 UTC |
+|summary| Generating diverse responses from large language models LLMs is crucial forapplications such as planning/search and synthetic data generation wherediversity provides distinct answers across generations. Prior approaches relyon increasing temperature to increase diversity. However contrary to popularbelief we show not only does this approach produce lower quality individualgenerations as temperature increases but it depends on models next-tokenprobabilities being similar to the true distribution of answers. We proposeSimpleStrat an alternative approach that uses the language model itself topartition the space into strata. At inference a random stratum is selected anda sample drawn from within the strata. To measure diversity we introduceCoverageQA a dataset of underspecified questions with multiple equallyplausible answers and assess diversity by measuring KL Divergence between theoutput distribution and uniform distribution over valid ground truth answers.As computing probability per response/solution for proprietary models isinfeasible we measure recall on ground truth solutions. Our evaluation showusing SimpleStrat achieves higher recall by 0.05 compared to GPT-4o and 0.36average reduction in KL Divergence compared to Llama 3. |
 
 
 | Item |Content|
@@ -146,12 +146,12 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.09024v1 |
+|idx| 2410.09024v2 |
 |title| AgentHarm: A Benchmark for Measuring Harmfulness of LLM Agents |
 |authors| Maksym AndriushchenkoAlexandra SoulyMateusz DziemianDerek DuenasMaxwell LinJustin WangDan HendrycksAndy ZouZico KolterMatt FredriksonEric WinsorJerome WynneYarin GalXander Davies
-|links| http://arxiv.org/abs/2410.09024v1 |
-|updated| 2024-10-11 17:39:22 UTC |
-|summary| The robustness of LLMs to jailbreak attacks where users design prompts tocircumvent safety measures and misuse model capabilities has been studiedprimarily for LLMs acting as simple chatbots. Meanwhile LLM agents -- whichuse external tools and can execute multi-stage tasks -- may pose a greater riskif misused but their robustness remains underexplored. To facilitate researchon LLM agent misuse we propose a new benchmark called AgentHarm. The benchmarkincludes a diverse set of 110 explicitly malicious agent tasks 440 withaugmentations covering 11 harm categories including fraud cybercrime andharassment. In addition to measuring whether models refuse harmful agenticrequests scoring well on AgentHarm requires jailbroken agents to maintaintheir capabilities following an attack to complete a multi-step task. Weevaluate a range of leading LLMs and find 1 leading LLMs are surprisinglycompliant with malicious agent requests without jailbreaking 2 simpleuniversal jailbreak templates can be adapted to effectively jailbreak agentsand 3 these jailbreaks enable coherent and malicious multi-step agentbehavior and retain model capabilities. We publicly release AgentHarm to enablesimple and reliable evaluation of attacks and defenses for LLM-based agents. Wepublicly release the benchmark athttps://huggingface.co/ai-safety-institute/AgentHarm. |
+|links| http://arxiv.org/abs/2410.09024v2 |
+|updated| 2024-10-14 17:28:08 UTC |
+|summary| The robustness of LLMs to jailbreak attacks where users design prompts tocircumvent safety measures and misuse model capabilities has been studiedprimarily for LLMs acting as simple chatbots. Meanwhile LLM agents -- whichuse external tools and can execute multi-stage tasks -- may pose a greater riskif misused but their robustness remains underexplored. To facilitate researchon LLM agent misuse we propose a new benchmark called AgentHarm. The benchmarkincludes a diverse set of 110 explicitly malicious agent tasks 440 withaugmentations covering 11 harm categories including fraud cybercrime andharassment. In addition to measuring whether models refuse harmful agenticrequests scoring well on AgentHarm requires jailbroken agents to maintaintheir capabilities following an attack to complete a multi-step task. Weevaluate a range of leading LLMs and find 1 leading LLMs are surprisinglycompliant with malicious agent requests without jailbreaking 2 simpleuniversal jailbreak templates can be adapted to effectively jailbreak agentsand 3 these jailbreaks enable coherent and malicious multi-step agentbehavior and retain model capabilities. To enable simple and reliableevaluation of attacks and defenses for LLM-based agents we publicly releaseAgentHarm at https://huggingface.co/datasets/ai-safety-institute/AgentHarm. |
 
 
 # cs.CV 

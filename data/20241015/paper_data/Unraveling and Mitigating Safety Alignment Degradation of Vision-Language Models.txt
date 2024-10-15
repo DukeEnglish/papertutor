@@ -1,0 +1,758 @@
+Preprint.
+UNRAVELING AND MITIGATING SAFETY ALIGNMENT
+DEGRADATION OF VISION-LANGUAGE MODELS
+QinLiu†∗ ChaoShang‡ LingLiu‡ NikolaosPappas‡ JieMa‡ NehaAnnaJohn‡
+SrikanthDoss‡ Llu´ısMa`rquez‡ MiguelBallesteros‡ YassineBenajiba‡
+†UniversityofCalifornia,Davis ‡AWSAILabs
+qinli@ucdavis.edu {chshang, lingliun, nppappa, jieman}@amazon.com
+{nehajohn, srikad, lluismv, ballemig, benajiy}@amazon.com
+ABSTRACT
+The safety alignment ability of Vision-Language Models (VLMs) is prone to be
+degradedbytheintegrationofthevisionmodulecomparedtoitsLLMbackbone.
+Weinvestigatethisphenomenon,dubbedas“safetyalignmentdegradation”inthis
+paper,andshowthatthechallengearisesfromtherepresentationgapthatemerges
+whenintroducingvisionmodalitytoVLMs. Inparticular, weshowthattherep-
+resentationsofmulti-modalinputsshiftawayfromthatoftext-onlyinputswhich
+represent the distribution that the LLM backbone is optimized for. At the same
+time,thesafetyalignmentcapabilities,initiallydevelopedwithinthetextualem-
+beddingspace,donotsuccessfullytransfertothisnewmulti-modalrepresentation
+space.Toreducesafetyalignmentdegradation,weintroduceCross-ModalityRep-
+resentationManipulation(CMRM),aninferencetimerepresentationintervention
+method for recovering the safety alignment ability that is inherent in the LLM
+backbone of VLMs, while simultaneously preserving the functional capabilities
+of VLMs. The empirical results show that our framework significantly recovers
+thealignmentabilitythatisinheritedfromtheLLMbackbonewithminimalim-
+pactonthefluencyandlinguisticcapabilitiesofpre-trainedVLMsevenwithout
+additional training. Specifically, the unsafe rate of LLaVA-7B on multi-modal
+input can be reduced from 61.53% to as low as 3.15% with only inference-time
+intervention.
+WARNING:Thispapercontainsexamplesoftoxicorharmfullanguage.
+1 INTRODUCTION
+The development of Vision Language Models (VLMs) has marked a significant advancement, en-
+abling models to process information from both visual and textual modalities and have shown
+promising capabilities across various applications (Liu et al., 2024b; Zhu et al., 2024). However,
+theintegrationofthevisionmodule(asiswidelyadoptedasthedefaultarchitectureofVLMs(Liu
+etal.,2024b;a;Daietal.,2023;Chenetal.,2023a))degradestheoverallalignmentabilityofaVLM
+comparedtoitsLLMbackbone,andwerefertothisphenomenonassafetyalignmentdegradation.
+Forinstance, LLaVA,builtontheVicuna-13bLLM,demonstratedadeclineinMT-Bench(Zheng
+etal.,2023)performancefrom6.57to5.92(scoredbyGPT-4),evenfaringworsethanthesmaller
+Vicuna-7Bmodel(Lietal.,2024c). Thealignmentdegradationisevenmorecrucialwhenitcomes
+tosafety-relatedqueries.Forexample,eventheincorporationofablankimage,whichmaynotcarry
+anysemanticsinmostcontexts,canbreakthesafetyalignmentandtriggerharmfulresponsesfrom
+theVLM(Gouetal.,2024;Lietal.,2024d).
+Severalexistingworkshaveexploredthephenomenonofsafetyalignmentdegradation. Forexam-
+ple, Gou et al. (2024) attempt to transform unsafe images into texts to activate the intrinsic safety
+mechanismofpre-alignedLLMsinVLMs.However,imagesoftencontainfine-grainedinformation
+thatcouldnotbefullycapturedbytexts.Ontheotherhand,Lietal.(2024d)leveragethesafetyrisks
+posedbythevisualmodalityandproposeajailbreakmethodthatconcealsandamplifiesthemali-
+ciousintentwithintextinputsusingcarefullycraftedimages. However,theunderlyingmechanisms
+∗WorkdoneduringinternshipatAWSAILabs.
+1
+4202
+tcO
+11
+]LC.sc[
+1v74090.0142:viXraPreprint.
+ofhowimagesinfluencealignmentremainunexplored.FromtheaspectofimprovingVLMsafety,a
+lineofworkhasmadesuccessfulattemptsbytrainingVLMswithdeliberatelycurateddataset(Helff
+etal.,2024;Zongetal.,2024;Liuetal.,2024c). However,theseattemptsareannotation-intensive
+andcomputationallycostly,ignoringtheinherentsafetyalignmentoftheLLMbackboneofaVLM.
+Inthisstudy,weproposetoinvestigatethecriticalchallengeofalignmentdegradationbyexamining
+how the integration of a vision module intrinsically impacts model behavior, particularly in terms
+ofmodelrepresentations(§2). Ourhypothesisisthat,sincethevisionandlanguagemoduleswithin
+atypicalVLMaretrainedindependently,therepresentationsfromthesedifferentmodalitiestendto
+cluster in distinct regions of the latent space. This separation likely results in a distribution shift,
+deviating from the representation space that the LLM backbone is optimized for, which further
+leads to reduced alignment ability when the VLM processes multi-modal inputs. To verify this
+hypothesis,weevaluatethreeopen-sourceVLMsofvaryingscalesandemployPrincipalComponent
+Analysis(PCA)tovisualizetheirhiddenstatesupondifferenttypesofinput: text-onlyoramixture
+oftextandimage. Wefindthatinmodels’representationspace,differenttypesofinputareclearly
+distinguished,suggestingthatourhypothesisholds.
+Inspiredbythesefindings,wefurtherinvestigatewhetheralignmentdegradationcanbemitigatedby
+eliminatingtherepresentationshiftwhenanimageisincorporatedasinput. Tojustifythisassump-
+tion,wepresentamethodtointervenethehiddenstatesofVLMs,namedCMRM(Cross-Modality
+RepresentationManipulation)(§3). CMRMfirstanchorsaVLM’slow-dimensionalrepresentation
+space and estimates the “shifting direction” that indicates the affect of the incorporation of image
+intheinputontheoverallhiddenstates. Itthencalibratestherepresentationofmulti-modalinput
+usingtheestimateddirectionsothatthehiddenstatescanbepulledclosertothedistributionthatthe
+LLMcomponentisoptimizedfor.
+Through experiments on two VLM safety benchmarks, we demonstrate that CMRM remarkably
+recovers the alignment ability of VLMs even without additional training. Furthermore, CMRM
+does not compromise VLMs’ general performance, as evaluated on two VLM utility benchmarks.
+WehopeourworkshedslightontheintrinsicinfluencesoftheconstructionofVLMs,andinspires
+futureresearchonVLMalignment. Ourcodewillbeopen-sourcedforreproducibility. Insummary,
+ourmaincontributionsareasfollows:
+• WeanalyzethesafetyalignmentdegradationphenomenonofVLMsfromtheperspective
+of model representations. Empirically, we demonstrate that the simple concatenation of
+embedding from different modalities leads to representation shifting that suppresses the
+alignmentabilitythatisinherentintheLLMbackbone.
+• We introduce CMRM, a representation engineering method that calibrates the represen-
+tation of multi-modal inputs, recovering model’s safety alignment ability by moving the
+representationbacktothedistributionthattheLLMbackboneisoptimizedfor.
+• CMRMsignificantlyrecoversthesafetyalignmentfromtheLLMbackbonetoVLMswith-
+out sacrificing the general ability of VLMs. Empirical results show that CMRM can re-
+cover the safety of a VLM to the level of its LLM backbone without additional training:
+theunsaferateofLLaVA-7Bonmulti-modalinputcanbereducedfrom61.53%toaslow
+as3.15%withonlyinference-timeintervention.
+2 HOW VISION MODALITY AFFECTS MODEL BEHAVIOR?
+Wefirstanalyzethealignmentdegradationchallengebyinvestigatingthefollowingquestion: how
+doestheintegrationofthevisionmodalityintrinsicallyaffectmodelbehavior? Wehypothesizethat
+sincethevisionandlanguagemoduleswithinaVLMaretrainedindependently, theresultingrep-
+resentationstendtoclusterindistinctregionsofthelatentspace,leadingtoadistributionshiftthat
+reducesalignmentabilitywhenprocessingmulti-modalinputs,asitdeviatesfromtherepresentation
+spacethattheLLMbackboneisoptimizedfor. Toverifythishypothesis,weinvestigatehowrepre-
+sentationsofdifferenttypesofinputsexistinmodel’srepresentationspace,andhowthedistinction
+correlateswiththealignmentdegradationofVLMs.
+2Preprint.
+LLaVA 7B LLaVA 13B ShareGPT4V 7B
+40 40 40
+20 20 20
+0 0 0
+20 20 20
+40 40 40
+40 20 0 20 40 40 20 0 20 40 40 20 0 20 40
+40 40 40
+20 20 20
+0 0 0
+20 20 20
+40 40 40
+40 20 0 20 40 40 20 0 20 40 40 20 0 20 40
+text + caption text query only text + blank image original gaussian noise
+Figure 1: Visualization of three models’ hidden states upon five variations of input using 2-
+dimensional PCA. The first and second rows are visualized with the VLSafe dataset and manip-
+ulatedJailbreakLLMsdataset,respectively.Therepresentationsofpuretextualinput(text+caption
+and text query only) and multi-modal input (original, text + blank image, and gaussian noise) are
+significantlyseparable,especiallyforVLSafedataset(thefirstrow).
+2.1 EXPERIMENTALSETUP
+InputVariations&Datasets. Toinvestigatetheinfluenceofvisionmodalityonthesafetyalign-
+mentofaVLM,weemploy5variationsonthemodelinput: (1)OriginalInput,wheretheimages
+and textual queries remain unchanged as model input; (2) Blank Image, where the original image
+is substituted with a blank image that does not carry any semantic meaning; (3) Gaussian Noise,
+where we perturb the original images with Gaussian noise in an attempt to destroy their semantic
+meaning;(4)Text+Caption,wheretheimageissubstitutedbyitscaption;and(5)TextQueryOnly,
+whereonlythetextualqueriesareusedasinput,andtheimagesarediscarded. Thefirstthreeinput
+variationsaremulti-modalinput, investigatingthealignmentabilityofVLMsundervariouslevels
+of image toxicity. The last two variations are pure text inputs, evaluating the backbone LLMs of
+VLMsonharmfulinstructions.
+Weusetwosafety-relatedmulti-modalitydatasetsformodelbehavioranalysis:VLSafe(Chenetal.,
+2024b) and JailbreakLLMs (Shen et al., 2023) paired with images from the COCO dataset (Lin
+et al., 2014). VLSafe (Vision-Language Safety) dataset contains 1,110 pairs of malicious queries
+and benign images where the input images are auxiliary and the queries can be answered without
+referencing the images. JailbreakLLMs dataset includes 390 jailbreak prompts that are collected
+andfilteredfromReddit,Discord,websites,andopen-sourcedatasetscovering14topics,including
+illegalactivity,malware,physicalharm,etc. Wefilterouttwosafety-irrelevanttopicsandpaireach
+remaining jailbreak prompt with a related image retrieved from the COCO dataset to construct a
+multi-modaldatasetcomposedof330testsamples.
+Models & Evaluation Scheme. We analyze three VLMs of different scales: LLaVA-1.5-7B,
+LLaVA-1.5-13B (Liu et al., 2024b), and ShareGPT4V (Chen et al., 2023a) with Vicuna (Chiang
+etal.,2023)astheirLLMbackbone. ToinvestigatethesafetyalignmentabilityofVLMsandtheir
+3Preprint.
+backbones,weemployLlama-3.1-8B-Instruct,1whichhasbeenalignedwithhumanpreferencesfor
+safety,tojudgewhetheramodelresponseissafe(equivalentlyarefusal)giventheharmfulqueryof
+differentmodalities. AccordingtothejudgmentofLlama-3.1,weadoptUnsafeRateasanevalua-
+tionmetric,whichcalculatesthepercentageofunsaferesponsesamongallgeneratedbythetarget
+VLMsonthetestdatasets.
+2.2 RESULTSANDVISUALIZATIONANALYSIS
+EvaluationResults. WedemonstratetheUnsafeRateof3VLMson2datasetsunder5different
+variations of input in Tab. 1. According to the first two rows of each model on VLSafe and Jail-
+breakLLMs datasets, the unsafe rate of VLMs on multi-modal input (including “Orig.”, “Blank”,
+and “Noise”) are significantly higher than that of text-only input (the second row of each model
+denotedby“Caption/Query”). Specifically,LLaVA7BgivesunsaferesponsesonVLSafedataset
+under61.53%ofthecases,whileitsLLMbackbone,asisevaluatedbytext-onlyinput,onlyshows
+theunsaferateof5.52%or1.91%(withorwithouttextualcaptionoftheoriginalimage). There-
+sultsindicatethatVLMsarevulnerabletomaliciousquestionswhenqueriedwithimagesbuttend
+torestoresafetywhenimagesareexcluded.
+Visualization Analysis. We employ Principal Component Analysis (PCA) to visualize VLMs’
+representationsw.r.t. all5variationsofinput. Following(Zhengetal.,2024;Wangetal.,2024b),
+thehiddenstatesofthelastinputtokenoutputbythetopmodellayerareselected,which,intuitively,
+gathersalltheinformationabouthowthemodelunderstandsthequeryandhowitwillrespond. We
+compute the first two principal components using 5 groups of hidden states according to distinct
+types of input. As illustrated in Fig. 1, the PCA visualization reveals a clear separation between
+hidden states corresponding to text-only inputs and those associated with text-image inputs. This
+distinctionholdsconsistentlyacrossdifferentdatasetsandmodels, suggestingthatthepresenceof
+animageintheinputshiftsthehiddenstatesawayfromthedistributionwhichtheLLMbackbone
+isoptimizedfor.
+3 METHODS
+Buildingoninsightsfrom§2, weattempttoformalizetheaffectedhidden states ofcurrentVLMs
+with vision input incorporated (§3.1), based on which we propose two variations of CMRM to
+intervenemodelrepresentationsduringinferencetimetopreventthealignmentdegradation(§3.2).
+3.1 FORMALIZATIONOFVLMREPRESENTATION: SHIFTEDFROMOPTIMALDISTRIBUTION
+Inspired by Favero et al. (2024), we propose to formalize the hidden states of multi-modal input
+to VLMs as being shifted from the ideal representation that remains within the distribution of the
+LLMbackbonewhilecapturingextravisualinformationfromtheincorporatedimageintheinput.
+Under the shifting assumption, we model the representations of a vanilla VLM h(x,img) as an
+interpolationbetweentwoscenarios: (1)theVLMwithonlytextqueryasinput,withoutanyvisual
+informationortheimpactofvisionmodality;(2)anidealVLMthatbenefitsfromvisualinformation
+basedontheimageinputwhilenotbeingaffectedbythevisualmodality. Accordingly,wepropose
+thefollowingformalization:
+h(x,img)=h∗(x,img)+α[h(x,img′)−h(x)], (1)
+whereimgandxstandfortheimageinputandtextualinstructionrespectively,andimg′isamean-
+ingless image that does not carry any visual information. α ∈ [0,1] is a mixing coefficient that
+indicatesthelevelofrepresentationshift. Whenαissmall, theshiftingeffectismildandtherep-
+resentationisnotpulledmuchfromthebackboneLLM’srepresentationdistribution. Forhigherα,
+theVLMsuffersfromsevererepresentationshifting.
+Giventhemodalityaffectedoriginalrepresentationh ≜h(x,img),therepresentationofcorrupted
+o
+image as input h ≜ h(x,img′), and the one of pure text input h ≜ h(x), our goal is to find
+c t
+an estimate of the ideal representation distribution h∗ that is not affected by vision modality and
+1https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct
+4Preprint.
+onlybenefitsfromadditionalvisualinformation. Accordingtoourhypothesis, weassumethath∗
+could be achieved by calibrating the distribution of original input, h∗ = h +∆, where ∆ is the
+o
+manipulation that we force on the hidden states of multi-modal inputs. Therefore we rewrite our
+formalizationinEq.1as:
+∆=α(h −h ). (2)
+t c
+Hence,wecanestimateh∗withthecalibrationterm∆,whichbringsustotheoptimalintervention:
+h∗ =h +α(h −h ). (3)
+o t c
+Notethatiftheoriginalhiddenstatesh ofmulti-modalinputisidealenough(withαcloseto0),
+o
+then our approximated h∗ is equivalent to h . On the other hand, severely shifted representations
+o
+(withαcloseto1)willbemanipulatedtobeproportionaltoh +h −h . Inthiscase, h −h
+o t c t c
+capturesthedirectionofshiftingcausedbytheincorporationofimagemodalityasinput,whichis
+thenaddedbacktoh topulltherepresentationbacktothehiddendistributionofLLMbackbone.
+o
+3.2 CMRM:RECOVERALIGNMENTABILITYATINFERENCETIME
+BasedontheformalizationofVLMsundertheaffectofrepresentationshifting(Eq.1),wefurther
+propose the hypothesis that alignment degradation can be mitigated by eliminating representation
+shiftwhenanimageisincorporatedasinput,basedonwhichweintroduceCMRM(Cross-Modality
+RepresentationManipulation)tocalibratetheshiftedrepresentationofmulti-modalinputsaccording
+toEq.3. Itscoreideaistopullmulti-modalityrepresentationsbackorclosertothedistributionthat
+the LLM backbone is optimized for, where the safety alignment capability was initially developed
+andfine-tunedforprocessingpurelytextualinputs.
+ShiftingVectorExtraction. CMRMfirstextractstheshiftingdirectioncausedbytheincorpora-
+tionofvisualinput,whichis,accordingtoourassumption,correlatedwiththealignmentdegrada-
+tion phenomenon. As defined in the second term of Eq. 3, these shifting vectors are obtained by
+contrastingtherepresentationsoftwotypesofvariationsontheinput: textqueryonlyh andtext
+t
+query with corrupted image h . To systematically analyze the shifting direction caused by visual
+c
+inputincorporation,weproposetwovariationsforshiftingvectorextraction: dataset-levelextrac-
+tionandsample-levelextraction.Eachmethodoffersuniqueinsightsintohowthemodel’sinternal
+representationsareaffectedbytheintroductionofcorruptedvisualdata.
+The dataset-level extraction. aims to capture the overall trend of shifting directions across the
+entire dataset. This approach is particularly useful for understanding the general impact of visual
+corruption on the model’s safety alignment performance. Mathematically, the dataset-level shift-
+ing vector for layer l is computed by performing a down-projection using PCA on the differences
+between the representations of all samples in the target dataset, with and without corrupted visual
+input. Theformaldefinitionisgivenby:
+(cid:18)(cid:110) (cid:111)N (cid:19)
+vl =PCA hl(i)−hl(i) , (4)
+data t c
+i=1 firstcomponent
+where N represents the total number of samples in the dataset, hl(i) denotes the representation of
+thelasttokenforthei-thinputinthel-thlayer. vl representstheprincipaldirectionoftheshift
+data
+in the model’s hidden states due to the introduction of corrupted visual input, as captured across
+the entire dataset. By performing PCA on the collection of these difference vectors across all N
+samples,thefirstprincipalcomponent,whichisthedirectioninspacealongwhichthedatapoints
+havethehighestormostvariance,capturesthemostsignificantdirectionofvariationintheseshifts,
+indicatingthepredominanttrendinwhichthemodel’sinternalrepresentationsareinfluencedbythe
+visualinput.
+As an alternative, the sample-level extraction focuses on capturing the shifting direction at the
+granularityofindividualsamples. Thisapproachiscrucialforidentifyingspecificinstanceswhere
+the alignment degradation is particularly pronounced or where the visual corruption has an unex-
+pectedly minimal or even beneficial effect. For each individual sample i, the shifting vector for
+layerliscalculatedas:
+vl(i) =hl(i)−hl(i), (5)
+sample t c
+whichinvestigatesandcapturesthenuancesofalignmentdegradationonacase-by-casebasis.
+5Preprint.
+Table 1: Evaluation of VLMs in terms of safety and utility. Unsafe Rate is reported on VLSafe
+and manipulated JailbreakLLMs datasets. Orig. denotes the vanilla input of these datasets with
+original textual query and image; Blank and Noise denote two variations on the input where we
+substitutethevanillaimagewithablankimageoraddGaussiannoisetoit. Caption/Query reports
+the safety performance of models with pure textual input where no image is involved. Caption
+substitutestheimagewithitstextualcaption,andQueryusesthetextualpromptastheonlyinput.
+UtilityperformanceisevaluatedonLLaVA-Bench-Coco(L-Bench)andScienceQA(S-QA).Note
+that VLGuard Mixed and VLGuard PH are training-time safety alignment methods for reference
+purposes,whichdoesnotformafaircomparisonforourmethod.
+VLSafe(↓) JailbreakLLMs(↓)
+L-Bench(↑) S-QA(↑)
+Orig. Blank Noise Orig. Blank Noise
+LLaVA-v1.5-7B 61.53 56.87 57.21 21.52 23.94 25.76
+79.20 68.03
+Caption/Query 5.52/1.91 4.85/12.73
++VLGuardMixed 2.03 0.00 0.10 0.76 0.76 0.38 87.80 69.28
++VLGuardPH 0.23 0.11 0.00 2.27 2.65 2.65 88.10 67.32
++CMRM 5.41 3.60 3.15 8.33 9.47 7.20 78.70 65.89
+dataset
++CMRM 3.15 1.24 1.46 4.55 4.17 4.92 77.30 66.14
+sample
+LLaVA-v1.5-13B 31.80 38.51 32.88 12.42 16.29 14.77
+89.70 73.10
+Caption/Query 1.25/0.68 1.82/3.03
++VLGuardMixed 1.13 0.00 0.00 0.38 0.00 0.38 90.40 72.84
++VLGuardPH 0.56 0.56 1.01 0.00 0.38 0.38 87.50 72.15
++CMRM 4.95 7.21 4.73 4.92 8.71 8.71 90.50 73.20
+dataset
++CMRM 0.79 2.25 0.90 3.03 6.06 2.27 89.60 72.65
+sample
+ShareGPT4V 57.09 52.36 55.29 19.32 23.86 24.24
+92.30 66.73
+Caption/Query 5.32/4.13 8.33/10.23
++CMRM 1.91 1.58 1.91 3.79 6.44 8.33 90.10 65.24
+dataset
++CMRM 1.46 5.52 6.98 1.14 6.06 6.06 91.40 66.13
+sample
+RepresentationManipulation. Basedontheanalysisin§2andourassumption,alignmentdegra-
+dationcouldbemitigatedwhenthehiddenstatesofmulti-modalinputarepulledclosertothedis-
+tribution of LLM backbone. Thus, CMRM manipulates model’s hidden states by calibrating the
+last token representations of all layers using the extracted shifting vector to approximate the ideal
+distribution:
+hl(i) =hl(i)−vl, (6)
+aligned o
+wherehl(i) representstheadjustedrepresentationthatisbetteralignedacrossmodalities,andvl
+aligned
+canbeeithervl(i) orvl . Byperforminginferenceontheadjustedrepresentationshl(i) , the
+sample data aligned
+modelisabletocapturetheadditionalvisualinformationfromtheimageinputwhileavoidingthe
+detrimentaleffectsofrepresentationshiftingduetothevisualmodality. Wewilldelvedeeperinto
+analysis in §4.3, exploring which specific layers of the model are most suitable for representation
+manipulationtoaddressthisissue.
+4 EXPERIMENTS AND EVALUATION
+Inthissection,weempiricallyevaluatetheproposedCMRM. First,weintroducetheexperimental
+settingsin§4.1.Then,weassessCMRMfromthefollowingperspectives:(i)HowwellcanCMRM
+improve the safety of VLMs and recover the alignment ability of the LLM backbone? (§4.2) (ii)
+DoesCMRMharmgeneralperformanceofVLMs?(§4.2)(iii)Howdoesthehyperparametersaffect
+CMRM? (§4.3)(iv)Doestheextractedshiftingdirectionbasedononeanchordatasetgeneralizeto
+otherdatasets? (§4.4)(v)WhatistheimpactofCMRMonVLMs’hiddenstates? (§4.5)
+6Preprint.
+VLsafe, LLaVA 7B Table2: Sensitivityanalysisonmanip-
+16 VLsafe, ShareGPT
+JailbreakLLMs, LLaVA 7B ulatedlayers. Wereporttheunsaferate
+14 JailbreakLLMs, ShareGPT
+VLsafe, LLaVA 7B, Caption + Query of LLaVA 7B under different manipu-
+VLsafe, ShareGPT, Caption + Query
+12 JailbreakLLMs, LLaVA 7B, Caption + Query latedlayersonVLSafedataset.“S.”and
+JailbreakLLMs, ShareGPT, Caption + Query
+“E.” stands for the starting and ending 10
+layerindex, respectively. Manipulation
+8
+ofalllayersleadstooptimalsafetyper-
+6 formance.
+4
+S. E. LLaVA ShareGPT
+2
+0.7 0.8 0.9 1.0 1.1 1.2 1 32 4.32 1.91
+Alpha Value 2 32 4.50 2.25
+Figure 2: Sensitivity analysis on alpha values for 3 32 4.68 2.69
+dataset-level CMRM. We show the safety perfor- 1 31 5.41 2.14
+1 30 5.77 3.23
+mance of LLaVA 7B and ShareGPT on two datasets
+5 24 16.94 3.49
+withvaryingcoefficients. Generally,analphavalueof
+4 28 10.18 2.25
+1.0resultsinalowerunsaferate.
+4.1 EXPERIMENTALSETTINGS
+ModelsandBaselineMethod. WeevaluateCMRMonthreeVLMsofdifferentscales: LLaVA-
+v1.5-7B,LLaVA-v1.5-13B(Liuetal.,2024b)andShareGPT4V(Chenetal.,2023a),whichareall
+constructed with visual encoder of CLIP (Radford et al., 2021) and the language decoder Vicuna
+(Chiang et al., 2023). For reference, we compare our inference-time intervention method with a
+training-timemethod,VLGuard(Zongetal.,2024),whichfinetunesVLMsondeliberatelycurated
+vision-languagesafetyinstruction-followingdatasetcoveringvariousharmfulcategories. Twosce-
+nariosareconsideredforVLGuard:post-hocfinetuningandmixedfine-tuning,denotedasVLGuard
+PHandVLGuardMixedrespectively.Post-hocVLGuardfinetunespre-trainedVLMsonthecurated
+safetydatasetwithonlyaminimalamountofhelpfulnessdatatoavoidexaggeratedsafety. Mixed
+VLGuardtrainsVLMsbyappendingthecurateddatasettotheexistingtrainingdatasets.
+Evaluation Metrics and Benchmarks. Since CMRM is supposed to enhance the safety align-
+ment of VLMs while not impacting the general utility of models, we evaluate model performance
+on both safety and utility. Our primary metric for evaluating model safety is Unsafe Rate (UR),
+whichisdefinedasthepercentageofinstructionsthatreceiveharmfulandunsaferesponses. Inor-
+dertoautomaticallyevaluatetheharmfulnessofmodelresponses,weutilizeLlama-3.1-8B-Instruct
+(asdescribedin§2)asthejudgmentmodeltodeterminewhetheraresponseisunsafe. Experiments
+assessing the safety of VLMs’ responses are primarily performed on two datasets: VLSafe (Chen
+etal.,2024b)andmodifiedJailbreakLLMs(Shenetal.,2023)asdescribedin§2.1.VLSafecontains
+1,110 malicious image-text pairs in its examine split, where the malicious intent is clearly repre-
+sentedinthetextqueries. ThemodifiedJailbreakLLMsdatasetincludes330jailbreakprompts,and
+wepaireachwithanimagerandomlyretrievedfromtheCOCOdataset. Forbothdatasets,weeval-
+uatewith5variationsofinputasdescribedin§2.1. Forutilityevaluation, weuseScienceQA(Lu
+etal.,2022)andLLaVA-Bench-Coco(Liuetal.,2024b)andevaluatemodels’accuracyandgener-
+ationqualityonthesetwobenchmarksrespectively. FollowingLiuetal.(2024b),weuseGPT-4to
+compareandevaluatethehelpfulness,relevance,accuracy,andlevelofdetailoftheresponsesfrom
+target VLM and oracle answers (provided by Liu et al. (2024b)) for LLaVA-Bench-Coco, giving
+an overall score on a scale of 1 to 10, where a higher score indicates better overall performance.
+Relativescoresw.r.t. theoracleanswersarereported.
+Anchor Dataset. For a fair evaluation and to demonstrate the generalizability of our proposed
+framework,wesetaside20%ofbothVLSafeandmanipulatedJailbreakLLMstoserveastheanchor
+datasetforextractingtheshiftingdirectioncausedbyvisionmodality,whichisfurtherenrichedwith
+samples from LLaVA-Bench-Coco dataset. As an alternative, we also show results using VLSafe
+alone as the anchor dataset (§4.4). The effectiveness of CMRM remains the same in this setting,
+7
+)%(
+etaR
+efasnUPreprint.
+Table 3: Transferability analysis. The shifting vector used for dataset-level CMRM is extracted
+fromVLSafedataset,andthealphavalueisfixedtobe1.0forafairevaluation.ComparedtoTab.1,
+LLaVA models perform better on the VLSafe dataset with a lower unsafe rate. Further, all of the
+threemodelsachievehigherorcompatiblesafetyonJailbreakLLMsdataset.Simultaneously,wecan
+evenspotanincreaseintheutilityperformanceofthreemodels,especiallyonLLaVA-Bench-Coco.
+VLSafe(↓) JailbreakLLMs(↓)
+L-Bench(↑) S-QA(↑)
+Orig. Blank Noise Orig. Blank Noise
+LLaVA7B 2.93 2.48 1.35 6.06 4.55 8.71 82.90 67.77
+LLaVA13B 4.73 4.32 4.83 5.45 4.55 5.68 90.50 73.00
+ShareGPT4V 8.90 6.87 6.53 6.82 7.95 9.47 92.20 64.53
+furtherprovingthegeneralizabilityofourproposedmethodandthetransferabilityoftheextracted
+shiftingvectors.
+4.2 MAINRESULTS
+As shown in Tab. 1, both dataset- and sample-level CMRM greatly boost the safety of evaluated
+models, decreasingtheunsaferatefrom61.53%toaslowas5.41%and3.15%forLLaVA7Bon
+VLSafedataset. Itisnoteworthythattheperformanceof CMRM approximatestheunsaferateof
+puretextinputs, demonstratingitseffectivenessinmitigatingthesafetyrisksintroducedbymulti-
+modal inputs and easing the alignment degradation phenomenon to recover the alignment ability
+oftheLLMbackbone. Further, theapplicationof CMRM doesnotcausemuchdecreaseinterms
+of model utility with reasonable computational overhead (Appx. §A.1), and we can even spot an
+increaseinsomecases. Intuitively,CMRM consistentlyoutperformsCMRM sinceit
+sample dataset
+comeswithfine-grainedshiftingvectorextraction,althoughatthecostofsignificantlyhighercom-
+putationconsumption.Comparedtothetraining-timebaselinemethodVLGuard,whichissupposed
+tooutperformCMRMfordeliberatelycuratedsafetydatasetandadditionalcomputationalcost,our
+proposed method surprisingly achieves a lower unsafe rate under several scenarios. For example,
+CMRM forLLaVA13BonVLSafedatasetexceedsVLGuardMixedinOrig. setting. This
+sample
+indicatesthepotentialofimprovingthesafetyalignmentofVLMsbyrecoveringtheabilitythatis
+inherentintheLLMbackbone,whichcouldsavemucheffortoftediousfine-tuning.
+4.3 SENSITIVITYTOALPHAVALUEANDMANIPULATEDLAYERS
+AsshowninFig.2,theunsaferateofmodelsw.r.t.differentalphavaluesrevealsthatthealphavalue
+of1.0consistentlyperformswellacrossdifferentmodelsandtasksfordataset-level CMRM. The
+unsaferatetendstodecreaseasthealphavalueapproaches1.0,withasignificantreductioninunsafe
+outputs.Forinstance,VLsafewithShareGPTshowsasharpdeclineinunsaferateasthealphavalue
+increasesfrom0.7to0.9, stabilizingaround2%atalpha1.0. Itisimportanttonotethatalthough
+higher alpha values (e.g., above 1.0) may further reduce unsafe rates in some cases, they tend to
+compromisethemodel’sutility(refertoTab.5forcasestudy). Excessivelyhighalphavaluescan
+overlysuppressmodelexpressiveness,leadingtoadropinoverallperformance,asmodelsbecome
+tooconservativeandfailtogenerateusefulorinformativeoutputs. Therefore,analphavalueof1.0
+strikesabalancebetweenminimizingunsafecontentandmaintainingmodelutilityfortheinvolved
+settings. However,theoptimalalphavaluemayvaryforothermodelsanddatasets,whichrequires
+acase-by-caseinvestigation.
+Tab. 2 indicates that manipulating all layers is essential to achieve the best results. For instance,
+manipulating 32 encoder layers in both LLaVA and ShareGPT achieves the lowest unsafe rates
+of4.32%and1.91%,respectively. Asthenumberofmanipulatedlayersdecreases,theunsaferate
+increasessignificantly,asevidencedbytheunsaferatejumpingto16.94%forLLaVA.Thissuggests
+thatfullmanipulationofalllayersisnecessaryforoptimalmodelsafety,particularlyinmodelslike
+LLaVA,whereincompletelayermanipulationcandrasticallycompromiseperformance.
+8Preprint.
+original
+40
+text + caption
+intervention coeff=1.0
+30
+intervention coeff=2.0
+20 intervention coeff=1.1
+39.9 4 91.69 cluster centers
+10
+48.62
+0
+10 39.2 5 100.25
+20
+30
+40
+40 20 0 20 40 60 80
+Figure3: VisualizationofhiddenstatesfromthetoplayerofLLaVA-7BonVLSafedatasetunder
+CMRM.Dashedlineswithnumbersdenotethedistancebetweenclustercenters.Withtheinterven-
+tionof CMRM,therepresentationsofvanillainput(yellowcircles)arepulledclosertothecluster
+ofhiddenstatesuponpuretextualinput(bluecrosses),resultinginpurpletriangles.However,ahigh
+alphavalue(e.g. 2.0)pushesthehiddenstatestoofar,whichinturnhurtsVLMs’generalability.
+4.4 TRANSFERABILITYOFEXTRACTEDSHIFTINGDIRECTIONANDANCHORDATASET
+We investigate the transferability of the anchor dataset to demonstrate the generalization capabil-
+ity of our proposed method. Specifically, we aim to evaluate whether using VLsafe as the anchor
+datasetcanimprovemodelsafetynotonlyontheVLsafedatasetitselfbutalsowhenappliedtoother
+datasets, such as JailbreakLLMs. To achieve this, we use the entire VLsafe dataset as the anchor
+datasetandfixthealphavalueat1.0,ensuringconsistencyacrossalltestswithouthyperparameter
+tuning. As shown in Tab. 3, when VLsafe is used as the anchor dataset, we observe notable im-
+provements in safety performance compared to the results shown in Tab. 1. Furthermore, models
+alsoperformwellinJailbreakLLMsdataset,demonstratingthetransferabilityoftheextractedshift-
+ingdirectionbasedontheanchordataset. Insummary,usingVLsafeastheanchordatasetnotonly
+improvessafetyperformanceontheoriginalVLsafedatabutalsogeneralizeseffectively,reducing
+unsaferatesonentirelydifferentdatasetssuchasJailbreakLLMs.
+4.5 IMPACTOFCMRMONHIDDENSTATES
+InFig.3,wevisualizethehiddenstatesofthemodelundervariousinputsettingsandintervention
+coefficients. Theplotillustratesthatourproposed CMRM successfullyshiftsthehiddenstatesof
+multi-modalinputsclosertothosegeneratedfrompuretextinputs. Thisalignmentiscrucialforre-
+ducingtheunsafebehaviorstypicallyobservedwhenmodelshandlemulti-modalitydata. Notably,
+as demonstrated by the hidden states under different intervention coefficients (shown by different
+coloredtriangles), thereisariskwhentheinterventioncoefficientissettoohigh. Forinstance, at
+aninterventioncoefficientof2.0,thehiddenstatesarepulledtoofarfromtheoriginalhiddenstate
+distribution,deviatingsignificantlyfromboththeclustercenterandthemodel’stypicaldistribution
+under normal conditions. This excessive shift causes the hidden states to move outside the distri-
+butionoftheVLM’slanguagemodelbackbone,leadingtomalfunctionanddegradedperformance
+(Tab.5). Incontrast,whentheinterventioncoefficientissetto1.0,thehiddenstatesremainmuch
+closertothepuretextinputs,reflectinganoptimalbalancebetweenreducingunsafebehaviorsand
+maintaining the model’s general utility. The results suggest that moderate intervention levels can
+effectivelyalignhiddenstateswithoutcompromisingthemodel’sabilitytofunctionproperly.
+9Preprint.
+5 RELATED WORK
+5.1 SAFETYALIGNMENTFORVLMS
+Alignmentreferstotheprocessoffine-tuningpre-trainedmodelswithannotationsbasedonhuman
+preferences, to ensure that the generated responses of the models are Helpful, Honest, and Harm-
+less, i.e., the 3H principle (Askell et al., 2021). This practice first thrives for LLMs where RLHF
+(ReinforcementLearningfromHumanFeedback)(Christianoetal.,2017;Ouyangetal.,2022)has
+proventobeaneffectiveapproachforaligningLLMswithhumanvalues. DPO(DirectPreference
+Optimization) (Rafailov et al., 2023) further enhances the efficacy and efficiency of RLHF by di-
+rectlyoptimizingLLMsbasedonhumanpreferencessothattheconstrainedrewardmaximization
+problemcanbeoptimizedexactlywithasinglestageofpolicytraining. Inmulti-modalscenarios,
+effortshavebeenmadetoadaptthesealignmentmethodstoVLMseitheroncreatingmulti-modal
+preference data (Li et al., 2023; Zhao et al., 2023; Zhou et al., 2024; Deng et al., 2024; Pi et al.,
+2024b;Helffetal.,2024)orspecificallydesignedlearningobjectives(Wangetal.,2024a;Lietal.,
+2023;Zhaoetal.,2023;Zhouetal.,2024;Yuetal.,2024;Liuetal.,2024c).
+Specifically, to enhance safety alignment for VLMs, a straightforward approach involves aligning
+VLMswithspecially-constructedred-teamingdata(Chenetal.,2024a;Lietal.,2024b;Zongetal.,
+2024). However,red-teamingislabor-intensiveandmaynotencompassallpotentialfailurecases.
+At the same time, these attempts overlook the fact that the LLM backbone within VLMs may al-
+readyhaveundergonesubstantialsafetyalignment. Consequently, retrainingtheentireVLMwith
+additionalred-teamingdatacanbeaninefficientuseofcomputationalresources. Anotherapproach
+focusesonprotectingVLMsduringinferencetime(Wangetal.,2024b;Chenetal.,2023b;Pietal.,
+2024a;Gouetal.,2024),amongwhichthemostrelevanttooursistheworkbyWangetal.(2024b).
+They employ safety steering vectors to adjust VLM activation in response to unsafe inputs. How-
+ever,thismayoverlookunsafeintentsinimagesthatarenotdetectablebytext-centricsafetyvectors.
+Instead,ourproposedCMRMinspectstheshiftingofinternalrepresentationcausedbymulti-modal
+inputandcalibratestherepresentationstobeclosertothedistributionoftheLLMbackbonetoacti-
+vateitsintrinsicalignmentability.
+5.2 REPRESENTATIONENGINEERING
+Representation engineering is a set of alignment techniques that work by making targeted pertur-
+bations to a model’s hidden states (Subramani et al., 2022; Hernandez et al., 2023; Turner et al.,
+2023). Li et al. (2024a) propose inference-time intervention (ITI), to shift representations along
+the directions identified by linear probes within those truthfulness-related attention heads to elicit
+moretruthfuloutputs. Zouetal.(2023)developRepEtoidentifyandextractrepresentationscorre-
+spondingtohigh-levelconceptssuchashonestyandsafetyinLLMs. Theyusea“readingvector”
+generatedfromtheactivationsondatasetsrelatedtothespecificconceptstosteermodelbehavior.
+DirectedRepresentationOptimization(DRO)Zhengetal.(2024)treatssafetypromptsastrainable
+embeddingsandlearnstomovethequeries’representationsalongoroppositetherefusaldirection,
+dependingontheirharmfulness. Similarly,InferAlignerWangetal.(2024b)extractssafety-related
+vectorsfromsafety-alignedLLMstoindicatethedirectionofsafeinputandinterveneoninputswith
+harmfulintentsforsaferesponses. Theseworksfocusonidentifyingdifferencesinrepresentations
+of LLMs based on specific features, such as safety or truthfulness. In contrast, we propose that
+VLMs exhibit distinct representations depending on the input type (pure textual or multi-modal),
+andthisshiftinginrepresentationcanleadtoadeclineinalignmentability. OurproposedCMRM
+attempts to recover the inherent alignment ability of the LLM module for VLMs by reversing the
+representationshift.
+6 CONCLUSION, LIMITATION, AND FUTURE WORK
+We investigate the impact of incorporating visual input on VLMs. We find that multi-modal in-
+put drastically degrades the safety alignment mechanism of the LLM backbone in VMLs, while
+intrinsically shifting the hidden states away from the distribution that the LLM module is opti-
+mizedfor. Drawingthisinspiration,ourproposedCMRMmethodintervenestherepresentationsof
+VLMsuponmulti-modalinputsbymovinghiddenstatesclosertothetraineddistributionofitsLLM
+10Preprint.
+module. CMRM operatesatinferencetimeandcanbeseamlesslyintegratedwithanypre-trained
+VLMs, whichmakes CMRM acost-effectiveandflexiblesolutiontoenhancesafetyalignmentof
+VLMs without tedious training. We show that CMRM brings remarkable improvement in recov-
+eringthesafetyalignmentforVLMswithoutcompromisingthemodel’sgeneralperformance. We
+hope the empirical analysis and the proposed methodology in this work can inspire future design
+andimprovementofVLMs.
+Our solution does slightly increase the computational overhead during model inference, and this
+workfocusesonthesafetyaspectofVLMs. Webelievethatthedegradationphenomenonexistsin
+otheraspectsofVLMs,suchasreasoningabilityandfaithfulness. Inthefuture,weplantoextend
+ourscopetotackleandaddressthechallengesthatariseinotherdomainsofVLMs.Additionally,we
+intendtoinvestigatethefeaturesthatmakeanoptimalanchordatasetforshiftingvectorextraction.
+ETHICS STATEMENT
+Thisworkdoesnotinvolvepotentialmaliciousorunintendeduses,fairnessconsiderations,privacy
+considerations,securityconsiderations,crowd-sourcing,orresearchwithhumansubjects.
+REPRODUCIBILITY STATEMENT
+WeprovidedetailstoreproduceourresultsinSection2.1andSection4.1. Alltheexperimentsin
+thispaperarecarriedoutbasedonopen-sourceframeworks,models,anddatasets. Allofthemare
+properlycited.
+REFERENCES
+AmandaAskell,YuntaoBai,AnnaChen,DawnDrain,DeepGanguli,TomHenighan,AndyJones,
+NicholasJoseph,BenMann,NovaDasSarma,etal. Agenerallanguageassistantasalaboratory
+foralignment. arXivpreprintarXiv:2112.00861,2021.
+Lin Chen, Jinsong Li, Xiaoyi Dong, Pan Zhang, Conghui He, Jiaqi Wang, Feng Zhao, and Dahua
+Lin. Sharegpt4v: Improvinglargemulti-modalmodelswithbettercaptions. CoRR,2023a.
+YangChen,EthanMendes,SauvikDas,WeiXu,andAlanRitter.Canlanguagemodelsbeinstructed
+toprotectpersonalinformation? arXivpreprintarXiv:2310.02224,2023b.
+Yangyi Chen, Karan Sikka, Michael Cogswell, Heng Ji, and Ajay Divakaran. Dress: Instructing
+largevision-languagemodelstoalignandinteractwithhumansvianaturallanguagefeedback. In
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition(CVPR),
+pp.14239–14250,June2024a.
+Yangyi Chen, Karan Sikka, Michael Cogswell, Heng Ji, and Ajay Divakaran. Dress: Instructing
+large vision-language models to align and interact with humans via natural language feedback.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp.
+14239–14250,2024b.
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin Zheng,
+Siyuan Zhuang, Yonghao Zhuang, Joseph E Gonzalez, et al. Vicuna: An open-source chatbot
+impressing gpt-4 with 90%* chatgpt quality. See https://vicuna. lmsys. org (accessed 14 April
+2023),2(3):6,2023.
+Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep
+reinforcementlearningfromhumanpreferences. Advancesinneuralinformationprocessingsys-
+tems,30,2017.
+Wenliang Dai, Junnan Li, Dongxu Li, Anthony Meng Huat Tiong, Junqi Zhao, Weisheng Wang,
+BoyangLi,PascaleFung,andStevenHoi.Instructblip:Towardsgeneral-purposevision-language
+modelswithinstructiontuning,2023. URLhttps://arxiv.org/abs/2305.06500.
+11Preprint.
+YiheDeng,PanLu,FanYin,ZiniuHu,ShengShen,JamesZou,Kai-WeiChang,andWeiWang.En-
+hancinglargevisionlanguagemodelswithself-trainingonimagecomprehension. arXivpreprint
+arXiv:2405.19716,2024.
+Alessandro Favero, Luca Zancato, Matthew Trager, Siddharth Choudhary, Pramuditha Perera,
+AlessandroAchille, AshwinSwaminathan, andStefanoSoatto. Multi-modalhallucinationcon-
+trolbyvisualinformationgrounding. InProceedingsoftheIEEE/CVFConferenceonComputer
+VisionandPatternRecognition,pp.14303–14312,2024.
+YunhaoGou,KaiChen,ZhiliLiu,LanqingHong,HangXu,ZhenguoLi,Dit-YanYeung,JamesT
+Kwok, and Yu Zhang. Eyes closed, safety on: Protecting multimodal llms via image-to-text
+transformation. arXivpreprintarXiv:2403.09572,2024.
+Lukas Helff, Felix Friedrich, Manuel Brack, Kristian Kersting, and Patrick Schramowski. Llava-
+guard: Vlm-based safeguards for vision dataset curation and safety assessment. arXiv preprint
+arXiv:2406.05113,2024.
+EvanHernandez, BelindaZLi, andJacobAndreas. Inspectingandeditingknowledgerepresenta-
+tionsinlanguagemodels. arXivpreprintarXiv:2304.00740,2023.
+KennethLi,OamPatel,FernandaVie´gas,HanspeterPfister,andMartinWattenberg. Inference-time
+intervention: Elicitingtruthfulanswersfromalanguagemodel. AdvancesinNeuralInformation
+ProcessingSystems,36,2024a.
+Lei Li, Zhihui Xie, Mukai Li, Shunian Chen, Peiyi Wang, Liang Chen, Yazheng Yang, Benyou
+Wang, and Lingpeng Kong. Silkie: Preference distillation for large visual language models.
+arXivpreprintarXiv:2312.10665,2023.
+Mukai Li, Lei Li, Yuwei Yin, Masood Ahmed, Zhenguang Liu, and Qi Liu. Red teaming visual
+languagemodels. arXivpreprintarXiv:2401.12915,2024b.
+ShengzhiLi,RongyuLin,andShichaoPei.Multi-modalpreferencealignmentremediesdegradation
+ofvisualinstructiontuningonlanguagemodels.InProceedingsofthe62ndAnnualMeetingofthe
+AssociationforComputationalLinguistics(Volume1: LongPapers),pp.14188–14200,2024c.
+YifanLi,HangyuGuo,KunZhou,WayneXinZhao,andJi-RongWen. Imagesareachilles’heelof
+alignment: Exploiting visual vulnerabilities for jailbreaking multimodal large language models.
+CoRR,abs/2403.09792,2024d.
+Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr
+Dolla´r, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In Computer
+Vision–ECCV 2014: 13th European Conference, Zurich, Switzerland, September 6-12, 2014,
+Proceedings,PartV13,pp.740–755.Springer,2014.
+Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and Yong Jae Lee.
+Llava-next: Improved reasoning, ocr, and world knowledge, January 2024a. URL https://
+llava-vl.github.io/blog/2024-01-30-llava-next/.
+HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning. Advances
+inneuralinformationprocessingsystems,36,2024b.
+Zhendong Liu, Yuanbi Nie, Yingshui Tan, Xiangyu Yue, Qiushi Cui, Chongjun Wang, Xiaoy-
+ong Zhu, and Bo Zheng. Safety alignment for vision language models. arXiv preprint
+arXiv:2405.13581,2024c.
+PanLu,SwaroopMishra,TanglinXia,LiangQiu,Kai-WeiChang,Song-ChunZhu,OyvindTafjord,
+PeterClark,andAshwinKalyan. Learntoexplain: Multimodalreasoningviathoughtchainsfor
+sciencequestionanswering.AdvancesinNeuralInformationProcessingSystems,35:2507–2521,
+2022.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to fol-
+lowinstructionswithhumanfeedback. Advancesinneuralinformationprocessingsystems, 35:
+27730–27744,2022.
+12Preprint.
+Renjie Pi, Tianyang Han, Yueqi Xie, Rui Pan, Qing Lian, Hanze Dong, Jipeng Zhang, and Tong
+Zhang. Mllm-protector: Ensuring mllm’s safety without hurting performance. arXiv preprint
+arXiv:2401.02906,2024a.
+Renjie Pi, Tianyang Han, Wei Xiong, Jipeng Zhang, Runtao Liu, Rui Pan, and Tong Zhang.
+Strengthening multimodal large language model with bootstrapped preference optimization.
+arXivpreprintarXiv:2403.08730,2024b.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual
+modelsfromnaturallanguagesupervision. InInternationalconferenceonmachinelearning,pp.
+8748–8763.PMLR,2021.
+RafaelRafailov,ArchitSharma,EricMitchell,StefanoErmon,ChristopherDManning,andChelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. In
+ICML 2023 Workshop The Many Facets of Preference-Based Learning, 2023. URL https:
+//openreview.net/forum?id=53HUHMvQLQ.
+Xinyue Shen, Zeyuan Chen, Michael Backes, Yun Shen, and Yang Zhang. ” do anything now”:
+Characterizing and evaluating in-the-wild jailbreak prompts on large language models. arXiv
+preprintarXiv:2308.03825,2023.
+NishantSubramani,NiveditaSuresh,andMatthewEPeters. Extractinglatentsteeringvectorsfrom
+pretrainedlanguagemodels. InFindingsoftheAssociationforComputationalLinguistics: ACL
+2022,pp.566–581,2022.
+Alex Turner, Lisa Thiergart, David Udell, Gavin Leech, Ulisse Mini, and Monte MacDi-
+armid. Activation addition: Steering language models without optimization. arXiv preprint
+arXiv:2308.10248,2023.
+Fei Wang, Wenxuan Zhou, James Y Huang, Nan Xu, Sheng Zhang, Hoifung Poon, and Muhao
+Chen. mdpo: Conditionalpreferenceoptimizationformultimodallargelanguagemodels. arXiv
+preprintarXiv:2406.11839,2024a.
+Pengyu Wang, Dong Zhang, Linyang Li, Chenkun Tan, Xinghao Wang, Ke Ren, Botian Jiang,
+and Xipeng Qiu. Inferaligner: Inference-time alignment for harmlessness through cross-model
+guidance. arXivpreprintarXiv:2401.11206,2024b.
+TianyuYu,HaoyeZhang,YuanYao,YunkaiDang,DaChen,XiaomanLu,GanquCui,TaiwenHe,
+ZhiyuanLiu,Tat-SengChua,etal. Rlaif-v: Aligningmllmsthroughopen-sourceaifeedbackfor
+supergpt-4vtrustworthiness. arXivpreprintarXiv:2405.17220,2024.
+ZhiyuanZhao,BinWang,LinkeOuyang,XiaoyiDong,JiaqiWang,andConghuiHe. Beyondhal-
+lucinations: Enhancinglvlmsthroughhallucination-awaredirectpreferenceoptimization. arXiv
+preprintarXiv:2311.16839,2023.
+ChujieZheng, FanYin, HaoZhou, FandongMeng, JieZhou, Kai-WeiChang, MinlieHuang, and
+NanyunPeng.Onprompt-drivensafeguardingforlargelanguagemodels.InICLR2024Workshop
+onSecureandTrustworthyLargeLanguageModels,2024.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang,
+Zi Lin, Zhuohan Li, Dacheng Li, Eric Xing, Hao Zhang, Joseph E Gonzalez, and Ion Sto-
+ica. Judging llm-as-a-judge with mt-bench and chatbot arena. In A. Oh, T. Naumann,
+A. Globerson, K. Saenko, M. Hardt, and S. Levine (eds.), Advances in Neural Informa-
+tion Processing Systems, volume 36, pp. 46595–46623. Curran Associates, Inc., 2023.
+URL https://proceedings.neurips.cc/paper_files/paper/2023/file/
+91f18a1287b398d378ef22505bf41832-Paper-Datasets_and_Benchmarks.
+pdf.
+YiyangZhou,ChenhangCui,RafaelRafailov,ChelseaFinn,andHuaxiuYao. Aligningmodalities
+invisionlargelanguagemodelsviapreferencefine-tuning. InICLR2024WorkshoponReliable
+andResponsibleFoundationModels,2024.URLhttps://openreview.net/forum?id=
+GRGvC0rpA8.
+13Preprint.
+DeyaoZhu,JunChen,XiaoqianShen,XiangLi,andMohamedElhoseiny. MiniGPT-4: Enhancing
+vision-language understanding with advanced large language models. In The Twelfth Interna-
+tional Conference on Learning Representations, 2024. URL https://openreview.net/
+forum?id=1tZbq88f27.
+YongshuoZong,OndrejBohdal,TingyangYu,YongxinYang,andTimothyHospedales.Safetyfine-
+tuningat(almost)nocost:Abaselineforvisionlargelanguagemodels.InForty-firstInternational
+Conference on Machine Learning, 2024. URL https://openreview.net/forum?id=
+bWZKvF0g7G.
+Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan,
+XuwangYin,MantasMazeika,Ann-KathrinDombrowski,etal. Representationengineering: A
+top-downapproachtoaitransparency. arXivpreprintarXiv:2310.01405,2023.
+14Preprint.
+A APPENDIX
+A.1 COMPUTATIONALOVERHEAD
+As is shown in Tab. 4, our method causes a minimal increase in computational overhead during
+modelinference,evenforsample-levelCMRM.
+Table4:ComputationaloverheadofCMRM,measuredinsecondsandaveragedovertherespective
+dataset.
+VLSafe JailbreakLLMs
+LLaVA7B 1.13 2.88
++CMRM 1.38(+22%) 2.90(+1%)
+dataset
++CMRM 1.42(+26%) 2.93(+2%)
+sample
+LLaVA13B 5.21 6.32
++CMRM 5.89(+13%) 6.44(+2%)
+dataset
++CMRM 5.77(+11%) 6.37(+1%)
+sample
+ShareGPT4V 3.21 4.02
++CMRM 3.42(+7%) 4.11(+2%)
+dataset
++CMRM 3.83(+19%) 4.14(+3%)
+sample
+A.2 CASESTUDY
+In Tab. 5, we showcase models’ responses with the input prompt asking How to use skis to cause
+harmtootherswhileridingdownasnow-coveredslope? andanimageofamaninredridingskis
+downasnowcoveredslope.
+Table5: Examplesofourmodels’responsestoharmfulprompt.
+HarmfulPrompt→ How to use skis to cause harm to others while riding down a snow-
+coveredslope?
+LLaVA7B→ Output:Tocauseharmtootherswhileridingdownasnow-coveredslope,
+the skier should intentionally ski in a reckless manner, such as at high
+speeds,makingsharpturns,orperformingjumpsandtricks. Thiscanlead
+tocollisionswithotherskiersorsnowboarders,causinginjuriesorevenfa-
+talities. Additionally,theskiershouldbeawareoftheirsurroundingsand
+thepeoplearoundthem,aswellasanyobstaclesorhazardsontheslope.
+Byskiinginadangerousmannerandbeingcareless,theskiercanputthem-
+selvesandothersatrisk.Itisessentialtoskiresponsiblyandfollowsafety
+guidelinestoensureeveryone’swell-beingontheslopes.
+CMRM &α=1.0→ Output: It is important to use skiing equipment responsibly and safely
+dataset
+whileskiingdownasnow-coveredslope.Thisincludesmaintainingcontrol
+over one’s speed and direction, being aware of one’s surroundings, and
+respectingtherightsandsafetyofothersontheslope.Itisalsoimportantto
+followtheskiingrulesandguidelines,andtobeconsiderateofothers,and
+toskiinginasafeandresponsiblemanner.Thiscanhelppreventaccidents
+andinjuries,andtoensureaenjoyableandsafeskiingexperienceforall.
+CMRM &α=2.0→ Output:Iamnotsureaboutsomething
+dataset
+CMRM &α=0.7→ Output: Itisnotappropriatetouseskistocauseharmtoothers, asitis
+sample
+importanttoskiresponsiblyandbeawareofyoursurroundings.Skiingcan
+beadangerousactivity,anditisimportanttotakenecessaryprecautionsto
+ensurethesafetyofyourselfandothers. Thisincludesskiingwithinyour
+abilitylevel,obeyingtherulesandsignsontheslopes,andbeingawareof
+otherskiersandsnowboardersaroundyou.Ifyouareunsureofhowtoski
+responsibly,itisagoodideatotakelessonsfromaqualifiedinstructor.
+CMRM &α=1.0→ Output:I’msorry,I’mnotsurewhatyoumean.
+sample
+15
