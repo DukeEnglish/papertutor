@@ -1,0 +1,1218 @@
+Preprint.
+ADAPTIVE DATA OPTIMIZATION:
+DYNAMIC SAMPLE SELECTION WITH SCALING LAWS
+YidingJiang†∗ AllanZhou‡∗ ZhiliFeng† SadhikaMalladi§ J.ZicoKolter†
+CarnegieMellonUniversity† StanfordUniversity‡ PrincetonUniversity§
+yidngji@cs.cmu.edu, ayz@cs.stanford.edu
+ABSTRACT
+The composition of pretraining data is a key determinant of foundation models’
+performance,butthereisnostandardguidelineforallocatingalimitedcomputa-
+tionalbudgetacrossdifferentdatasources.Mostcurrentapproacheseitherrelyon
+extensiveexperimentswithsmallermodelsordynamicdataadjustmentsthatalso
+require proxy models, both of which significantly increase the workflow com-
+plexity and computational overhead. In this paper, we introduce Adaptive Data
+Optimization (ADO), an algorithm that optimizes data distributions in an online
+fashion, concurrent with model training. Unlike existing techniques, ADO does
+notrequireexternalknowledge,proxymodels,ormodificationstothemodelup-
+date.Instead,ADOusesper-domainscalinglawstoestimatethelearningpotential
+ofeachdomainduringtrainingandadjuststhedatamixtureaccordingly,making
+itmorescalableandeasiertointegrate. ExperimentsdemonstratethatADOcan
+achievecomparableorbetterperformancethanpriormethodswhilemaintaining
+computationalefficiencyacrossdifferentcomputationscales,offeringapractical
+solution for dynamically adjusting data distribution without sacrificing flexibil-
+ity or increasing costs. Beyond its practical benefits, ADO also provides a new
+perspectiveondatacollectionstrategiesviascalinglaws.
+1 INTRODUCTION
+Foundation models, large neural networks pre-trained on vast amounts of data, are the backbone
+for a wide range of today’s machine learning workload (Bommasani et al., 2021). It is well es-
+tablished that the composition of the pretraining data plays a crucial role in these models’ final
+performance(Gadreetal.,2024); however,therearecurrentlynostandardguidelinesforselecting
+goodpretrainingdata.Mostexistingdatasetsarefilteredandcuratedsnapshotsofthewebdata(Gao
+etal.,2020;Penedoetal.,2024),oftencategorizedintodistinctheterogeneousdomains(e.g.,Com-
+monCrawlandGithub). Evenafterfiltering,achallengeremains: decidinghowtoallocatecompu-
+tationalresourcesacrossthesedifferentdomains. Giventheeverincreasingcostofpretraininglarge
+foundation models (Sharir et al., 2020), optimizing the data composition is a potential avenue for
+improvingperformancewithoutincreasingcomputationalcost.
+Therearetwopopularapproachestoadjustingthedatadistribution. Astraightforwardapproachto
+this problem is to experiment with smaller models, test different data policies, and then apply the
+best-performingpolicytothelargermodel(Yeetal.,2024;Geetal.,2024). However,thisstrategy
+hasseveraldrawbacks. First,asthenumberofdomainsincreases,thecostoftrainingonallpossible
+policies can grow linearly or even exponentially (if the level of discretization remains the same),
+making even small-scale experiments costly. Second, the optimal data policy for a smaller model
+doesnotnecessarilygeneralizetolargermodels(Yeetal.,2024;Albalaketal.,2023). Anotherap-
+proachinvolvesdynamicallyadjustingthedatapolicyduringtrainingbasedonvariousstatistics(Xie
+etal.,2024;Chenetal.,2024;Qinetal.,2024;Fanetal.,2023). However,thesemethodsoftenre-
+quiretrainingasmallerproxymodeltoguidethedatapolicy,whosecostisstillnon-negligible.
+Asignificantlimitationofalmostallexistingmethods(withtheexceptionofAlbalaketal.(2023))is
+theirrequirementforadditionalcomputationalstepsbeyondstandardtraining. Thisextracomplex-
+ityentailssubstantialmodificationstothetrainingpipeline,makingitchallengingtointegratethese
+∗Equalcontribution.
+1
+4202
+tcO
+51
+]GL.sc[
+1v02811.0142:viXraPreprint.
+Multi-staged data selection with proxy models Adaptive Data Optimization (ADO)
+Data ADO
+selection update
+Train one or
+Optimized data Train the full Data distribution Train the full model Data distribution
+more small
+distribution model at time t for one step at time t+1
+proxy models
+Figure 1: ADO is a cheap online technique for adjusting the data distribution while training large
+models. In contrast to prior methods, ADO tailors its data distribution to the model as it is being
+trained,anddoesnotrequiretrainingsmallerproxymodelsinadvance.
+methodswhenothercomponentsarevaried(e.g.,thearchitecture,tokenizer,oroptimizer).Thecon-
+sequenceofthisusagebarrieristhatthesemethodshavenotbeentestedwidely,makingthemless
+popularforthosetraininganewmodel. Toenablebroaderadoptionofdatamixtureoptimization,
+wearguethatitmustbeimplementedinanonlinefashion,concurrentwithmodeltraining,without
+disruptingthestandardtrainingprocess,whichmeansthatthedatamixturemustadaptitselfbased
+onthefeedbackfromthemodel. Thisiscloselyrelatedtocurriculumlearning(Bengioetal.,2009),
+atrainingstrategywheremodelsareprogressivelyexposedtodomainsinacuratedorder.
+Atafundamentallevel,thisworkdevelopsandempiricallyinvestigatesquestionsabouttheexistence
+ofgoodpretrainingcurriculaandthefeasibilityofcheaplyidentifyingthem.Wefirstdemonstratein
+controlledexperimentsthatgoodcurriculacangenerallybefoundwithmorecomputationandthat
+itishardtoaccuratelypredictlargermodels’performancewithonlyafewsmallmodels. Thisleads
+toourmaincontribution,AdaptiveDataOptimization(ADO):analgorithmforadaptivelyadjusting
+thedatamixtureonlineduringtraining(Figure1). Inexperimentsonlanguagemodelsupto1.3B
+parameterstrainedonthePile(Gaoetal.,2020),wefindthatADOimprovesperformanceacrossa
+varietyofcommonbenchmarksandimprovesvalidationlossonSlimPajama(Sobolevaetal.,2023)
+andFineWeb(Penedoetal.,2023),bothofwhichareconsideredtobehigher-qualitydatasets. Most
+importantly, ADO achieves these without requiring significant additional computation (less than
+0.4%wallclocktimefor1.3B),proxymodels,orextensivemodificationtothetrainingpipelines.
+2 MOTIVATIONS
+The drawbacks of small proxy models. At first
+Extrapolating Pile validation loss
+glance,transferringdataselectionstrategiesfromsmaller
+tolargermodelsseemsplausible,withpositiveresultsin
+specific cases, such as in Mindermann et al. (2022) and 3×100
+Xiaetal.(2024b). However,asshowninFigure2,using
+asmallnumberofmodelstopredictthebehavioroflarger
+models can exhibit high variance on the Pythia model
+family(Bidermanetal.,2023),indicatingthattheycannot
+reliably forecast larger models’ performance. At a per-
+domainlevel(Figure7),thevariationbecomesevenmore 2×100 All
+410M
+pronounced. While this does not fully rule out the pos-
+1B
+sibility of transfer, it raises doubts about whether small
+1.4B
+models can reliably select data mixtures for larger mod-
+els. Anotherissueisthattheefficacyofdistributionsgen-
+108 109 1010
+Params
+eratedbyproxymodelsishighlysensitivetofactorslike
+the tokenizer and other hyperparameters (Albalak et al., Figure2: Extrapolatinglargermodels’loss
+2023). Our findings also confirm this brittleness (Sec- using scaling laws up to a threshold model
+tion4). Thismeansthattheoptimizeddistributionsfrom size, where the threshold is indicated by
+one experiment might not transfer, and they need to be color.Extrapolationsbecomemoreaccurate
+retrained for a new model. This is undesirable because withmoremodels.
+proxymodelsaddnon-trivialoverhead—Geetal.(2024)
+estimatedthatasingleroundofDoReMiproxytrainingrequires760GPUhourson8NvidiaA100
+GPUs,andseveralproxytrainingroundsareneededbeforetrainingthefullmodel.
+2
+ssol
+noitadilaVPreprint.
+1.0 Perceptron Multi-layer perceptron 480 Meta loss: MLP
+0.9 m rae nt da o- mop oti rm deiz red order 0.7 m rae nt da o- mop oti rm deiz red order 460
+0.8 0.6 440
+0.7 420
+0.5
+0.6 400
+0.5 0.4 380
+0.4 360
+0.3
+0.3 340
+0.2 0.2
+0 100 200 300 400 500 0 200 400 600 800 1000 0 200 400 600 800 1000
+Steps Steps Steps
+Figure3:TheaveragelearningcurvesofSGDandthemeta-optimizedcurriculaforalogisticregression(Left)
+andanMLP(Middle). Themeta-optimizedcurriculaconsistentlyoutperformSGD.Further,themetalossfor
+curriculaisstilldecreasingafter1000steps(Right). Thefirsttwofiguresareaveragedover50runsandthe
+shadedregioncorrespondsto1standarddeviation.
+The existence of good curricula. Curriculum learning (Bengio et al., 2009) is a conceptually
+appealingideathathasbeenregularlystudiedovertheyears,butthesemethodshavenotbeenwidely
+adoptedindeeplearningoutsideofafewrelativelynicheareas(Gravesetal.,2017;Florensaetal.,
+2017; Jesson et al., 2018; Tang et al., 2018). To the best of our knowledge, there is no consensus
+on why curriculum learning has not had wide success in deep learning. Some hypothesize that
+deeplearningisdifferentfromhumanlearningorthatoverparameterizationmakescurriculumless
+effective(Wuetal.,2021;Mannellietal.,2024). Ontheotherhand, someexperimentalevidence
+suggests that deep neural networks implicitly learn functions of increasing complexity from easy
+to hard (Kalimeris et al., 2019; Baldock et al., 2021), loosely resembling some aspects of human
+learning(Lawrence,1952;Baker&Osgood,1954;Skinner,1958). Foroverparameterization,itis
+not clear if modern foundation model pretraining is in the overparameterized regime since dataset
+sizegenerallyscaleswiththenumberofmodelparameters(Hoffmannetal.,2022).
+Tomotivateourlaterwork,weproposeanalternativehypothesis: goodcurriculaexistbuttheyare
+computationallydifficulttofind. Let’sstartwithaninstructiveexperimentoffindinggoodcurricula
+withmorecomputation. SupposewehaveafixeddatasetofsizeN andwanttotrainSGDatamini-
+batchsizeof1for1epoch(i.e.,eachdatapointisusedonce,whichiscommonforlanguagemodel
+pretraining). Weareinterestedinfindingadataorderingthatisbetterthanarandomshufflewhen
+training a model initialized at random. Brute force search is intractable even for a small dataset.
+Unlikemostexistingcurriculathatrelyonsomepriornotionsofdifficulty,wewillfindagoodcur-
+riculum with only training data by optimizing over the space of permutations with meta learning.
+Duetospaceconstraints,wedeferthedetailsofthismetalearningproceduretoAppendixB.
+Weapplythisproceduretoalogisticregressionproblemaswellasamulti-layerperceptronwhere
+thegoalistoimitateateacher. Werandomlysampletheinitializationθ , groundtruthθ⋆ andthe
+0
+dataZ ={(x , f(x ;θ⋆))}N .Forafixedsetofdatapoints,werunthemetaoptimizationforsome
+i i i=1
+steps(200forlogisticregressionand1000forMLP)andevaluatetheperformanceoflearnedorder-
+ing on a new initialization. We repeat this experiment 50 times and report the results in Figure 3.
+As can be seen from the results, the performance of meta-optimized data ordering is significantly
+betterthanthatofrandomordereventhoughduringevaluationthemodelsareinitializedatrandom.
+Inaconcurrentwork,Guetal.(2024)conductedasimilarexperimentbuttheirmetaobjectiveuses
+additionalvalidationdataandoptimizesadistributionoveralltrainingdatapointsratherthanSGD.
+This shows that given a dataset, it is possible to find an ordering that greatly outperforms random
+orderingwithoutcommittingtoanypriornotionofdifficulty. Thisproceduredoesnotleveragead-
+ditional data, but it requires significantly more computational resources than random ordering, so
+it is neither practical nor scalable. Moreover, given our limited understanding of the landscape of
+curriculum optimization, it is highly unlikely that we are identifying the globally optimal curricu-
+lum. AsshowninFigure3(right),eventhismeta-optimizationhasnotfullyconvergedafter1000
+steps. Nonetheless,itdemonstratesdefinitivelytheexistenceofagoodcurriculum,whichraisesthe
+questionofhowwecanfindabettercurriculuminacomputationallyefficientmanner1.
+1Sinceastaticmixtureisnothingbutafixedstationarycurriculumthroughoutthetraining,thiscomputa-
+tionaldifficultyappliestofindingastaticmixturetoo.
+3
+ssol
+tseT
+ssol
+tseT
+ssol
+ateMPreprint.
+3 ADAPTIVE DATA OPTIMIZATION
+Wedemonstratedaboveageneral,albeitcostly,strategyforfindinggoodcurriculabutitistooex-
+pensivetobepracticallyuseful.Webelievethatanidealonlinedataselectionstrategyforpretraining
+foundationmodelsshouldincuraminimalcomputationalcost.
+Furthermore, computational efficiency alone is not sufficient. Perhaps an equally important con-
+sideration is that such methods should avoid explicit dependence on any particular specification
+of downstream tasks. The fundamental premise of a foundation model is to serve as the basis for
+allreasonabledownstreamtasks; explicitlyrelyingonafixedsetofdownstreamtaskstopickpre-
+trainingdatadistributionrisksunintentionallyoverfittingtothedownstreamtasks(Goodhart,1985).
+Indeed,theevaluationofcurrentlanguagemodelshasbecomeincreasinglydifficultasperformance
+onexistingbenchmarksbecomessaturated. Whileevaluatingdownstreamtasksisundoubtedlyim-
+portantbecausetheyarerepresentativeofthemodels’mainusecases,webelievethatitisvaluable
+todefineanobjectiveforonlinedataselectionthatisagnostictothedownstreamtasks.
+PreviousworkslikeDoReMi(Xieetal.,2024),andDoGE(Fanetal.,2023)sharethistask-agnostic
+philosophyofdataselection. However,thesemethodsrequiretrainingproxymodelswhichmakes
+theminconvenientandexpensivetouse.Liftingtherequirementforaproxymodelwouldmakedata
+selectionmethodsmoreaccessibleandpractical.
+Thegoalofthisworkistoadvocatefordataselectionmethodsthatsatisfythefollowingdesiderata2:
+AdaptiveDataOptimization
+(i) Doesnotleverageextrainformationsuchasadditionaldataorexistingmodels.
+(ii) Doesnotdependonmulti-stagedtrainingwithdifferentproxymodels.
+(iii) Doesnotrequiresignificantcomputationalresourcesandcanberunonline.
+Basedonthesecriteria,weintroduceourmethodofonlinedataselection,AdaptiveDataOptimiza-
+tion (ADO). In the following sections, we present the algorithmic components of ADO. First, we
+discusshowwefitascalinglawforeachdomain,allowingthedatamixturetoaccountforvariations
+inthenaturaldiversityacrossdifferentdomains. Next,wedescribehowthedatamixtureisdynam-
+icallyadjustedbasedonthesescalinglawsduringmodeltraining. Eachdomainischaracterizedby
+two key quantities: 1. the domain’s learning potential, indicating the potential improvement from
+further optimization in that domain (Section 3.1), and 2. a credit assignment score that quantifies
+thedomain’scontributiontothereductionoftrainingloss(Section3.2). Toaddresspotentialnoise
+from simultaneously updating the data mixture and the model, we employ several time-averaging
+techniquestosmooththesequantities(Section3.3).
+3.1 CONSTRUCTIONNEURALSCALINGLAWSFOREACHDOMAIN
+To achieve our desiderata, it is crucial to be able to predict the evolution of our model’s training
+onlinewithcheapcomputationalroutinesthatdonotscalewiththesizeofthemodel.Toaccomplish
+this, we use neural scaling laws (Kaplan et al., 2020) to extrapolate the loss as a function of the
+amount of training data observed so far, which we denote n. It is important to highlight that this
+scalinglawisforpredictingthefuturetraininglosswithinasingletrainingrun. Incontrast,typical
+neuralscalinglaws(Hoffmannetal.,2022)usetheresultsofcompletedtrainingrunstoextrapolate
+thelossoffuturetrainingruns,typicallywithlargermodelsordatasets.
+Forsimplicityandinterpretability,weuseastandardpowerlaw: L(cid:98)(n;α,β,ε)=ε+βn−α,where
+α,β,ε are the parameters to be fitted, and L(cid:98)is a surrogate loss used to model the behavior of the
+trueloss. Theparameterεcanbeseenastheirreduciblelossorthe“entropy”ofthedata. Datawith
+highdiversity(e.g.,CommonCrawl)wouldnaturallyhaveahigherirreduciblelossanddatathatare
+morepredictable(e.g.,codeandmath)wouldtendtohavealowerirreducibleloss. Theparameterα
+measureshowquicklythelossdecreaseswithmoretrainingdata. Althoughsuchscalinglawsmay
+2Thesecriteriaarenotmutuallyexclusivewithproxymodelsorotherofflinedataselectionmethodsand
+canbeusedintandemifneeded(e.g.,trainingamodelthatspecializesincoding).
+4Preprint.
+beinaccurateatextrapolatingtraininglossfarintothefuture(e.g.,duetothelearningrateschedule),
+wecancheaplyrefittheparametersonthefly(AppendixA.1). Sincetheparametersfromeachfit
+areonlyusedforashortperiodbeforebeingupdatedandthelearningcurvesusuallydonotchange
+abruptly,ourscalinglawneedonlybelocallyaccurate.
+Instead of fitting a single scaling law for the overall loss (Kaplan et al., 2020; Hoffmann et al.,
+2022),wewillfitaseparatescalinglawforthelossoneachdomain,eachofwhichwillguideADO
+toadjusttheweightsofeachdomain.
+Definition1. Adomainscalinglawisatrainingsamplescalinglaw,L(cid:98)k(n)=L(cid:98)(n;α k,β k,ε k)=
+ε
+k
++β kn−αk, that predicts the kth domain’s training loss after training on n samples. ε k,β k,α
+k
+arefunctionsofthearchitecture,trainingalgorithms,andtheoveralldatadistribution.
+Thedomainscalinglawservesasatractablemiddlegroundbetweenmodelingtheoveralllossand
+modeling how every domain interacts with each other. Modeling the full dependencies faithfully
+maybechallengingwhiletrainingonlinebecausewecannotmodifythedatadistributiondrastically.
+Asthefirststeptowardsthisgoal,ourmethodwillonlymodelhoweachdomaininteractswithitself
+andleavemorecomplexmodelingtofutureworks. Nonetheless,thisscalinglawrevealsimportant
+informationabouteachdomain. Forexample,ε correspondstotheestimatedirreduciblelossofa
+k
+domain, which could be useful for various applications (Xia et al., 2024a). More importantly, we
+caninterpretthederivativeofthelosswithrespecttothenumberofsamplesasthefollowing:
+dL(cid:98)
+dk
+n(n)
+=
+−α kβ nkn−αk
+=−
+n1
+α
+k
+(L(cid:98)k(n)−ε k) . (1)
+Learningspeed Reducibleloss
+ThequantityL(cid:98)k(n)−ε
+k
+informsusabouthowfarawayaparticulardomainisfromtheestimated
+minimum loss, which coincides with the notion of population-level reducible loss (Mindermann
+etal.,2022), andα indicateshowfastthelossofaparticulardomainischangingwithnewdata.
+k
+This derivative informs us about how much loss decrease we can expect per data point locally.
+At a high level, the cross entropy loss has an information theoretic interpretation, so this quantity
+can be understood as a form of information density, or, the amount of information gain per unit
+of computation. Intuitively, prioritizing data with high information density is a likely better use
+of computation and could lead to richer representation as it implies more information is “stored
+in” the model weights. We leave the formalization of this statement to future works. It may be
+useful to contrast this quantity with Albalak et al. (2023, ODM) which only prioritizes domains
+with a high loss L (n) without considering the irreducible loss. This objective could lead to the
+k
+underrepresentationofdomainswithinherentlylowerentropysuchascodeormath3.
+3.2 THECONTRIBUTIONOFTHEDATAFROMEACHDOMAIN
+Incontrasttopriorworksthattrainmultiplemodelstofindoptimaldatapoliciesoffline(Yeetal.,
+2024; Ge et al., 2024), our online approach adaptively prioritizes selecting data so that the model
+learnsquickly,aspredictedbyscalinglawsthatwefitonthefly. Itconsistsofadatapolicyπ(t) ∈
+∆K thatspecifiesasamplingdistributionovertheK domains. Anintuitiveapproachwouldbeto
+prioritizesamplingdomainswherethemodelwilllearnquickly:e.g.,wecouldsamplefromdomain
+kinproportionto−dL(cid:98)k (Equation1).
+dn
+However,independentdomainscalinglawsdonotaccountforhowsamplesfromonedomainhelp
+learning on a different domain. Consider a thought experiment where the loss L is decreasing
+k
+rapidly,butwehavesampledverylittledatafromdomaink. Intuitively,datafromdomainkshould
+notgetmuchcreditforthislossdecrease,whichcaninsteadbeattributedtotransferlearningfrom
+otherdomains.Thiscallsforsomeformofcreditassignmentbasedonwhetheradomainhasactually
+beensampledrecently.
+Definition2. Acreditassignmentscore,λ (t),isarealpositive-valuedfunctionthatindicateshow
+k
+muchdatafromthekthdomaincontributedtorecentchangesinthelossL .
+k
+3Albalaketal.(2023)showedthatODMachieveshigherlossonGithubthanothermethods. Inour124M
+experiments,ODMachieves1.54validationlossonGithubwhileADOachieves1.40validationloss.
+5Preprint.
+Algorithm1AdaptiveDataOptimization(ADO)
+1: Input: priorµ∈∆K,updateintervalt update,warmupdurationt warmup,γ 1,γ 2,s,δ
+min
+2: Initializeh←µ, π¯ ←µ, {loss k←[]}
+k∈[K]
+3: Trainwithµfort stepstoinitializeeachloss k
+warmup
+4: Initializedomaink’sscalinglawwithloss k,fork ∈[K]
+5: fort=0→T do ▷Thetrainingloop
+6: ρ(t)←computethepreferencedistributionaccordingtoEquation3
+7: π(t)←clip(γ 2ρ(t)+(1−γ 2)π¯(t−1), δ min)
+8: {ℓ k}
+k∈[K]
+←trainthemodelaccordingtoπandadddomainklosstoloss k
+9: h(t)←γ 1π(t)+(1−γ 1)h(t−1)
+(cid:16) (cid:17)
+10: π¯(t)← 1 ρ(t)+ 1− 1 π¯(t−1)
+t+1 t+1
+11: ift mod t =0then
+update
+12: Updatedomainkscalinglawwithloss k,fork ∈[K]
+Ideally, wewouldliketounderstandhoweachdomainaffectseveryotherdomain. Unfortunately,
+thisinteractionmightbehighlycomplexandnotlocal(i.e.,thebestsolutionlocallyatagiventime
+stepmaynotbeoptimalinthelongrun). Asmentionedearlier,wefocusonmodelingthedomain’s
+contributiontoitselffornow. Areasonableassumptionisthatthecontributionadomainmakesto
+itsownlearningprogressispositivelycorrelatedwithwhatproportionoftherecentdatacamefrom
+thisdomain. Inotherwords,weassumethatifadomainwasusefulforitselfinrecenthistory,itwill
+likelycontinuetobeuseful. Basedonthisassumption,wekeepahistoryoftheexponentialmoving
+average of the recent data policy (with a coefficient of γ < 1) and apply a power transformation
+1
+withasmoothingparameters<1tosmooththedistributionsincetheassignmentcanbeinaccurate:
+h (t)=γ π (t)+(1−γ )h (t−1), λ (t)∝h (t)s. (2)
+k 1 k 1 k k k
+Wefindthatγ =0.1ands=0.5workwellconsistentlyforallscaleswetested.Weemphasizethat
+1
+thisdesignchoiceisasimpleheuristicthatcanbeeasilycomputedandotherchoicesarepossible.
+3.3 CONSTRUCTINGTHEDATAPOLICYUPDATE
+Todefineourdatapolicy,wecombinethetwoprincipleswehaveseenthusfar: prioritizesampling
+from a domain k if the model is decreasing its loss L quickly, but only if that decrease can be
+k
+attributed to data from domain k. Additionally, it is common to have a natural prior distribution
+µ∈∆K overthedomains(e.g.,numberoftokensineachdomain),whichwemayalsoincorporate:
+Definition3. Giventhelearningspeedforecastbyascalinglaw, ∂∂ nL(cid:98)k(n),creditassignmentscore
+λ (t),andapriordomainweightµ ,thepreferencedistributionis
+k k
+∂ 1
+ρ k(t)∝−µ
+k
+∂nL(cid:98)k(n)λ k(t)= nµ kλ k(t)α k(L(cid:98)k(n)−ε k). (3)
+Note that the preference distribution is not a perfect indication of the best possible distribution to
+learn from because we have no access to the true gradient of the data policy. As shown in the
+definitionofthecreditassignmentscore,wehavetoresorttovariousapproximations.
+Temporal average. This local estimate of a data policy may not be optimal globally. Both
+DoReMi(Xieetal.,2024)andDoGE(Fanetal.,2023)taketheproxymodel’sdatatrainingdistri-
+butionsoveralltimestepstoobtainthestationaryfinaldistributionwhichbothreportedtobebetter
+thanusingadynamicallychangingdistributions. Sinceourgoalistoselectadatapolicyonline,we
+donothavetheoptionforpost-hocprocessing. Instead,weuseanonlineanalogyofthisprocess:
+(cid:16) (cid:17)
+π¯ (t)= 1 ρ (t)+ 1− 1 π¯ (t−1), (4)
+k t+1 k t+1 k
+π (t)=γ ρ (t)+(1−γ )π¯ (t−1). (5)
+k 2 k 2 k
+π¯ (t) is a temporal moving average of the preference policy at every step and π (t) is a linear
+k k
+combinationofthemovingaverageandthechosenpolicyaccordingtowhichthedataaresampled
+from, which combines both the current preference distribution and the time-averaged distribution.
+6Preprint.
+Table1:Zero-shotperformanceofdifferentmethodsacrossdifferentdownstreamevaluations.High-
+lightedcellsindicatetop-performingmethods(deepercolorindicatesbetterperformance).
+HellaSwag WinoGrande PIQA ARC-E SciQ LogiQA2 LAMBADA Average
+124M-Pile 0.279 0.515 0.615 0.435 0.747 0.228 0.357 0.454
+124M-DoReMi 0.279 0.520 0.609 0.429 0.741 0.237 0.368 0.455
+124M-ODM 0.285 0.514 0.603 0.453 0.764 0.230 0.374 0.461
+124M-Balanced 0.280 0.511 0.610 0.447 0.762 0.227 0.362 0.457
+124M-Natural 0.290 0.503 0.624 0.435 0.755 0.234 0.401 0.463
+124M-ADO 0.290 0.520 0.635 0.456 0.771 0.244 0.371 0.470
+1.3B-DoReMi 0.416 0.582 0.707 0.609 0.870 0.228 0.615 0.575
+1.3B-Balanced 0.382 0.546 0.689 0.580 0.862 0.225 0.613 0.557
+1.3B-Natural 0.424 0.584 0.718 0.627 0.886 0.232 0.624 0.585
+1.3B-ADO 0.442 0.590 0.730 0.625 0.875 0.228 0.638 0.590
+Wefindthatγ =0.1workswellconsistently. ThisupdateissimilartoDefazioetal.(2024). Using
+2
+thecoefficientof 1 ensuresthatallthepreferencedistributionsfromalltimestepscontributeequally
+t
+tothefinalaverage,similartotheeffectofpost-hocaveraging. Doingsoensuresthatallhistoryis
+beingaccountedforequally. Finally,toensurethatnodomainwouldbecompletelyunsampled,we
+enforcethesmallestdomainprobabilitytobenosmallerthanδ =0.01byclippingtheprobability
+min
+(AppendixC).Algorithm1showsthepseudocodefortheentirealgorithm.
+4 EXPERIMENTS
+Evaluation. WeconductallourexperimentsonthePiledataset(Gaoetal.,2020)withdecoder-
+onlytransformerlanguagemodels(Vaswanietal.,2017)ofvaryingsizes. Weconsidertwotypesof
+metrics: 1. validationlossonthePile,anunweightedversionofthepilevalidationsetwhereeach
+domainreceivesequalprobability,SlimPajama(Sobolevaetal.,2023),anda1billiontokensubsetof
+FineWeb(Penedoetal.,2024),2.zero-shotdownstreamperformanceon6common-sensereasoning
+domainsfromthelanguagemodelevaluationharness(Gaoetal.,2024): HellaSwag(Zellersetal.,
+2019),WinoGrande(Sakaguchietal.,2019),PIQA(Bisketal.,2019),ARC-E(Clarketal.,2018),
+SciQ(Welbletal.,2017),LogiQA2(Liuetal.,2023)andLAMBADA(Papernoetal.,2016).
+Methods. Weconductexperimentsat2computationscales: 124millionparameters(124M)and
+1.3billionparameters(1.3B).For124Mmodels,weuseabatchsizeof256withacontextlengthof
+1024trainedfor60,000steps(approximately15billiontokens),andfor1.3B,weuseabatchsize
+of 2048 with a context length of 1024 trained for 60000 steps (approximately 125 billion tokens).
+Both scales use the natural distribution for µ and the same hyperparameters for ADO. Training
+detailscanbefoundinAppendixA.
+Comparisons. For comparison, we use the original Pile weights (Gao et al., 2020, Pile) and
+DoReMi weights (Xie et al., 2024, DoReMi)4 as the baselines. We also consider ODM (Albalak
+etal.,2023),anotheronlinemethod. Inaddition,weintroduceasimplebaselinethatissurprisingly
+missingfromtheliterature:weighingeachdomainbythenumberoftokensinit. Thismixturenatu-
+rallytakesintoaccountthetokenizerbeingusedandtrainingonthispolicyessentiallycorresponds
+to training on the natural distribution of the dataset (i.e., corresponds to empirical risk minimiza-
+tionwheretrain,validation,andtestsetsallfollowthesamedistributiondefinedbythetokenizer).
+We estimate the tokens per domain by randomly sampling 1000 documents from each domain to
+estimate each domain’s average tokens per document, and then multiply it by the total number of
+documents(AppendixA).WewillrefertothispolicyasNatural. Wealsouseasecondbaseline,
+Balanced,whichconsiderstheunweightedmixtureofallthedomains.
+Observations. TheresultsfordownstreamperformanceareshowninTable1. Wewillhighlight
+some key observations here. Observation 1: at 124M scale, ADO achieves the highest average
+accuracy;italsooutperformsallthebaselineson6outof7downstreamtasksandiscompetitiveon
+LAMBADA.At1.3Bscale,ADOalsoachievesthehighestaverageaccuracyandoutperformsthe
+4SinceDoReMiissensitivetothechoiceoftokenizer, weusedtheDoReMiweightsfromAlbalaketal.
+(2023)whousethesametokenizeraswedo.
+7Preprint.
+Perplexity on different domains
+16 Models
+1.3B-Natural
+14 1.3B-DoReMi
+1.3B-ADO
+12
+10
+8
+6
+4
+2
+0
+UnweiP gil he ted- SlP iil me Pajam Fa ineWeb BA or oX kiv Corpus D2 MB o Mo ak ts h3 e Em nat ri oc ns Email Es uroPar Fl ree GL ua tew nGi bt eh ru g b (PG H- a1 c9 k) er NN Ie H w Es x OP po ert ne Sr Ou pbt eit nle Ws ebTe Pxt hi2 lPap Pe ur bs P Mil ee d- C A PC b us btr Ma ect d Ss tC
+a
+Ue
+c
+Sn kt Pr E Ta xl Oc h Ba an cg ke grou Un bd us n Wt iu
+k
+iI p YR e oC d ui ta
+u
+( be en S) ubtitles
+Figure4:Perplexityof1.3Bmodelsondifferentdomains,trainedusingeitherDoReMi,Natural,orADO.
+Ontheleftsideoftheredline,wehavethevalidationperplexityonthePilevalidationset,theunweightedPile
+validationset,theSlimPajamavalidationset,andarandomsubsetofFineWeb.Ontherightsideoftheredline,
+weshowthevalidationperplexityofeachdomainofthePile.
+baselines on 4 out of 7 downstream tasks. Observation 2: interestingly, Natural turns out to be
+a very competitive baseline. It achieves the second-best average downstream performance at both
+scalesandperformswellonindividualdomains,too. Tothebestofourknowledge,veryfewworks
+ondataselectionhavebenchmarkedagainstusingtheempiricaldistributionoftokensgivenbythe
+dataset and tokenizer. As such, we recommend future works on data selection to compare against
+this simple baseline. Balanced also turns out to be a quite competitive baseline at 124M scale
+likely because smaller domains are not extensively repeated given the low total number of tokens
+processed at this scale. This observation is in line with the findings of Goyal et al. (2024) which
+suggestthatgooddatapoliciesaredifferentfordifferentcomputescales.
+Conventionally, validation loss is considered a good indicator of the models’ performance if they
+aretrainedonthesamedata, butitislessclearwhetheritremainsagoodindicatorwhenthedata
+policy is dynamically changing throughout the training. Empirically (Figure 4), we found that it
+is difficult to outperform Natural on the Pile validation loss (at least within the same training
+setupandwithoutspendingmuchmorecomputation), eventhoughwedooutperformthismixture
+onthedownstreamtasksasshownabove. Observation3: forvalidationloss,ADOslightlyunder-
+performsNaturalonthePilevalidationset,butonthevalidationsetofSlimPajamaandasubset
+ofFineWeb,ADOoutperformsNatural.SinceSlimPajamaandFineWebareheavilyfilteredtobe
+“higherquality”datacomparedtothePile,wespeculatethatADOmaybeabletoimplicitlyselect
+dataalignedwithsomenotionofhighqualitythroughoutthetrainingprocess(e.g.,byprioritizing
+learnability). Nonetheless,sinceitcanbechallengingtoquantifyorpreciselydefine“highquality”
+data,wewillleavethisinvestigationtofuturework.
+4.1 ANALYSIS
+Mixture over the training. A natural question about data selection methods is what does the
+distributionlooklike.WenowshowthatthecurriculalearnedbyADOdifferformodelsofdifferent
+scalesinFigure5. WeobservethatCommonCrawl(Pile-CC)receivesthemostprobabilitymass
+inboth124Mand1.3B.Thisobservationisconsistentwithsomepreviousworksthatputmostof
+theprobabilitymassonCommonCrawl(Xieetal.,2024). OpenWebText2alsoreceivesahigher
+proportion compared to the empirical mixture. Github receives a higher probability in 124M
+initially but eventually decays whereas in 1.3B it first decreases rapidly and gradually increases
+towards the end of the training. This is consistent with the intuition that code data naturally have
+8
+ytixelprep
+noitadilaVPreprint.
+Data mixture: 124M ADO Data mixture: 1.3B ADO
+0.35
+0.30
+0.25
+0.20
+0.15
+0.10
+0.05
+0.00
+0 1 2 3 4 5 6 0 1 2 3 4 5 6
+Training steps ×104 Training steps ×104
+Domains
+ArXiv Books3 Github OpenWebText2 Pile-CC PubMed Central
+Figure 5: The sampling distribution produced by our data policy during training on The Pile. For ease of
+visualization,weonlyhighlightthetop6largestdomains. ADOproducesqualitativelydifferentstrategiesat
+differentmodelscalesandadaptivelychangesitsweightingsovertime.
+Loss curve forecasts from scaling laws fit during training
+Pile-CC Wikipedia (en) Enron Emails
+2.6×100
+2.2×100
+2.9×100 2×100
+2.5×100
+2.8×100 1.8×100
+2.4×100
+1.6×100
+2.7×100
+2.3×100
+Training loss 1.4×100
+2.6×100 Fit @ 10k
+2.2×100 Fit @ 30k
+Fit @ 50k 1.2×100
+2.5×100
+104 104 104
+Training steps (log scale)
+Figure 6: Theforecastsfromourscalinglaws(fitonlinethroughouttraining)versustheactualtrainingloss
+ondifferentdomainsinthePile. Theforecastsshownwerefitat10,000,30,000,and50,000steps(timeof
+fitisshownindashedlines). Weobservethatthescalinglaws: (1)becomemoreaccurateoverthecourseof
+training,and(2)canbesurprisinglyaccurateatforecastingthefinallossevenveryearlyintotrainingonsome
+domains,suchasPile-CC.ForecastsfromalldomainsareshownintheAppendix,Figure8.
+much lower entropy so it is “easier” to learn in some sense. ADO does not account for the fact
+that code could be desirable for general capabilities such as reasoning (Ma et al., 2024) since it is
+agnostictothedownstreamtasks. Thisissuecanbepartiallyresolvedbyassigningahigherpriorto
+codebutfurtherresearchondataselectiontargetingreasoningislikelyneeded.
+Accuracyofthescalinglawthroughoutthetraining. Unlikemostapplicationsofscalinglaws,
+werefitthescalinglawsontheflyasthemodelstrainandthedatamixturesaredynamicallychang-
+ing. This introduces new challenges because the forecasts from scaling laws fit early on can be
+inaccurate for steps far in the future. In Figure 6, we show the predictions of the scaling laws for
+3 domains at various points during training (all domains are shown in the Appendix, Figure 8). It
+canbeseenthatwhilethepredictionsofourscalinglawseventuallydeviatefromthetruelearning
+curves, they are accurate locally for much of the training and thus can act as a learning signal for
+the data policy. More specifically, we can see that the scaling laws consistently overestimate the
+finallossforalldomains, likelyduetothepresenceoflearningrateschedules. Empirically, when
+the learning rate decays towards the end of the training, the training loss tends to decrease more
+rapidly, until a certain point when the learning rate is too small (Ha¨gele et al., 2024). We believe
+thatincorporatingrecenttechniquesforincorporatingtheeffectoflearningrateschedulesintothe
+scalinglaws(Tissueetal.,2024)couldfurtherimproveADO.
+9
+ytilibaborP
+)elacs
+gol(
+ssol
+gniniarT
+ytilibaborPPreprint.
+5 RELATED WORKS
+Data curation and selection. For current large language models, compute often poses a greater
+constraintthandataavailability,makingdataselectioncrucial(Albalaketal.,2024). Awidelyused
+approachisdatafiltering(Sobolevaetal.,2023;Penedoetal.,2023;2024),whereundesirabledata
+points are removed based on heuristics like perplexity, repetition (Lee et al., 2021), or semantic
+similarity (Abbas et al., 2023). This filtering process is foundational for constructing most large-
+scale datasets today. After filtering, data is often categorized into subsets or domains (e.g., code,
+books),anddecidinghowmuchdatatousefromeachdomainbecomesanimportantstep.
+Twoprimarystrategiesfordataselectionareprevalent: onefocusesondecidingwhetherindividual
+datapointsshouldbeincludedbasedonvariouscriteria(Mindermannetal.,2022;Engstrometal.,
+2024),andtheotherusesallavailabledatabutsamplesfromdifferentdomainswithvaryingproba-
+bilities(Xieetal.,2024;Fanetal.,2023;Albalaketal.,2023).Whiledataselectionaimstoenhance
+training efficiency, these methods may introduce considerable computational overhead (Xie et al.,
+2024;Chenetal.,2024;Fanetal.,2023).Moreover,Kaddouretal.(2023)showthatunderthesame
+computationalbudget,thesemethodsoftenfailtosurpassstandardtraining,andWangetal.(2024)
+provesthatthedataselection’sefficacydependsontheuser’sutilityfunction.
+Anotherlineofworkfocusesonselectingpre-trainingdatathatalignsmorecloselywithdownstream
+tasks(Kangetal.,2024). Dataselectionhasalsobeenexploredforcomputervision. Forexample,
+Evansetal.(2023)useasmallreferencemodeltoselectdataforCLIP,whileothersproposepruning
+batchesbasedondiversitycriteria(Qinetal.,2024;Hongetal.,2024)toimprovetrainingefficiency.
+Neural scaling laws. Studies have found that various quantities of interest for large pretrained
+models(e.g.,validationloss)canbereliablypredictedwithsimplestatisticssuchasthemodelsize,
+dataset size, or the amount of computation (Kaplan et al., 2020; Hoffmann et al., 2022). These
+findingshavebeencentraltothedesignoftrainingprotocolsforlargelanguagemodelswheretrial
+and error are expensive. More recent works have studied the relationship between data repetition
+andtheperformanceofthemodels(Hernandezetal.,2022;Muennighoffetal.,2024;Goyaletal.,
+2024).Datacuration,inparticularpruning,hasalsobeenshowntohavesignificanteffectstoachieve
+better scaling laws (Sorscher et al., 2022). Studying the loss curve via scaling law (Hutter, 2021)
+is relatively less well-explored because the loss curves do not follow a power law exactly due to
+thelearningrateschedule; however,wefoundthatapowerlawisstilladecentmodelforlearning
+curveswithcosinedecayforlanguagemodels. Recently,Tissueetal.(2024)showedthatlearning
+rateschedulescanbeincorporatedintoscalinglawstomakeevenmoreaccuratepredictions,though
+wedonotexplorethisdirectioninthiswork.
+6 CONCLUSION
+Dynamicdataselectionhasthepotentialtoimprovethepretrainingefficiencyoffoundationmodels,
+butmostexistingapproachesincuradditionalcomputationcosts.WeintroduceADO,acheaponline
+data selection method that dynamically adjusts data distribution over different domains based on
+domain scaling laws. The scaling laws forecast the model’s loss on different data domains and
+automaticallyadjustthetrainingdatadistributionbasedoneachdomain’slearningpotential. ADO
+doesnotrequireaproxymodelsoitnaturallytakesintoaccountthearchitecture,theoptimizer,and
+other hyperparameters of the training. In our experiments, with a single set of hyperparameters,
+ADO performs comparably to or better than existing methods on scales from 124M to 1.3B, with
+muchlessadditionalcomputation. Ourimplementationonlyadded20minutesofadditionalwall-
+clocktimetoa3.5-daytrainingrun(∼0.4%),andcanbeoptimizedfurther. Therelativecostwould
+decrease more at larger scales since ADO’s cost does not scale with the model size. Overall, we
+believeADOrepresentsanimportantsteptowardsaccessibleandautomatedonlinedataselection.
+Limitationsandfuturedirections. Givenfurthercomputationalresources,itwouldbeinteresting
+to scale ADO up to larger models and datasets and study its behaviors more thoroughly. On the
+technicalside,webelievethereareseveralpromisingdirections: 1. howtocreatebetterandmore
+fine-grained domains, 2. how to design more realistic scaling laws that can model inter-domain
+interactions and learning rate schedules, and 3. whether insights of ADO can be applied to other
+trainingsettingssuchascontinuedpretrainingorfinetuning.
+10Preprint.
+ACKNOWLEDGMENTS
+WearegratefultoJackRae,StephenMcAleer,ZhangirAzerbayev,MinqiJiang,RobertaRaileanu,
+MichaelXie,AndrewJesson,AlexRobey,SamSokota,SwaminathanGurumurthy,JeremyCohen,
+and Marc Finzi for helpful discussions during the early phase of this project. We would also like
+to thank Mengzhou Xia and Tianyu Gao for discussion on model evaluation. The assets used in
+Figure1arecourtesyofpojok d,Muhammad Ali,faisaloversfromflaticon.com.YJ
+issupportedbytheGooglePhDFellowship. AZwouldliketoacknowledgesupportfromChelsea
+Finn and the National Science Foundation (GRFP). SM acknowledges funding from NSF, ONR,
+Simons Foundation, and DARPA. We also thank the Google TPU Research Cloud for generously
+providingcomputingfortheexperimentsinthispaper.
+REPRODUCIBILITY
+Thecodeforthisworkisavailableathttps://github.com/yidingjiang/ado.
+REFERENCES
+AmroAbbas,KushalTirumala,Da´nielSimig,SuryaGanguli,andAriSMorcos. Semdedup: Data-
+efficientlearningatweb-scalethroughsemanticdeduplication. arXivpreprintarXiv:2303.09540,
+2023.
+Ryan Prescott Adams and Richard S Zemel. Ranking via sinkhorn propagation. arXiv preprint
+arXiv:1106.1925,2011.
+AlonAlbalak,LiangmingPan,ColinRaffel,andWilliamYangWang. Efficientonlinedatamixing
+forlanguage model pre-training. In R0-FoMo: Robustness ofFew-shot andZero-shot Learning
+inLargeFoundationModels,2023.
+Alon Albalak, Yanai Elazar, Sang Michael Xie, Shayne Longpre, Nathan Lambert, Xinyi Wang,
+NiklasMuennighoff,BairuHou,LiangmingPan,HaewonJeong,etal.Asurveyondataselection
+forlanguagemodels. arXivpreprintarXiv:2402.16827,2024.
+RobertABakerandStanleyWOsgood. Discriminationtransferalongapitchcontinuum. Journal
+ofExperimentalPsychology,48(4):241,1954.
+Robert Baldock, Hartmut Maennel, and Behnam Neyshabur. Deep learning through the lens of
+exampledifficulty. AdvancesinNeuralInformationProcessingSystems,34:10876–10889,2021.
+Yoshua Bengio, Je´roˆme Louradour, Ronan Collobert, and Jason Weston. Curriculum learning. In
+Proceedingsofthe26thannualinternationalconferenceonmachinelearning,pp.41–48,2009.
+StellaBiderman,HaileySchoelkopf,QuentinGregoryAnthony,HerbieBradley,KyleO’Brien,Eric
+Hallahan,MohammadAflahKhan,ShivanshuPurohit,USVSNSaiPrashanth,EdwardRaff,etal.
+Pythia: Asuiteforanalyzinglargelanguagemodelsacrosstrainingandscaling. InInternational
+ConferenceonMachineLearning,pp.2397–2430.PMLR,2023.
+YonatanBisk,RowanZellers,RonanLeBras,JianfengGao,andYejinChoi.Piqa:Reasoningabout
+physicalcommonsenseinnaturallanguage. InAAAIConferenceonArtificialIntelligence,2019.
+URLhttps://api.semanticscholar.org/CorpusID:208290939.
+SidBlack,StellaBiderman,EricHallahan,QuentinAnthony,LeoGao,LaurenceGolding,Horace
+He, ConnorLeahy, KyleMcDonell, JasonPhang, etal. Gpt-neox-20b: Anopen-sourceautore-
+gressivelanguagemodel. arXivpreprintarXiv:2204.06745,2022.
+RishiBommasani,DrewA.Hudson,EhsanAdeli,RussB.Altman,SimranArora,SydneyvonArx,
+Michael S. Bernstein, Jeannette Bohg, Antoine Bosselut, Emma Brunskill, Erik Brynjolfsson,
+Shyamal Buch, Dallas Card, Rodrigo Castellon, Niladri S. Chatterji, Annie S. Chen, Kathleen
+Creel,JaredQuincyDavis,DorottyaDemszky,ChrisDonahue,MoussaDoumbouya,EsinDur-
+mus, Stefano Ermon, John Etchemendy, Kawin Ethayarajh, Li Fei-Fei, Chelsea Finn, Trevor
+Gale,LaurenGillespie,KaranGoel,NoahD.Goodman,ShelbyGrossman,NeelGuha,Tatsunori
+Hashimoto, Peter Henderson, John Hewitt, Daniel E. Ho, Jenny Hong, Kyle Hsu, Jing Huang,
+11Preprint.
+ThomasIcard, SaahilJain, DanJurafsky, PratyushaKalluri, SiddharthKaramcheti, GeoffKeel-
+ing,FereshteKhani,OmarKhattab,PangWeiKoh,MarkS.Krass,RanjayKrishna,RohithKu-
+ditipudi,andetal. Ontheopportunitiesandrisksoffoundationmodels. CoRR,abs/2108.07258,
+2021. URLhttps://arxiv.org/abs/2108.07258.
+James Bradbury, Roy Frostig, Peter Hawkins, Matthew James Johnson, Chris Leary, Dougal
+Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, Skye Wanderman-Milne, and Qiao
+Zhang. JAX: composable transformations of Python+NumPy programs, 2018. URL http:
+//github.com/google/jax.
+MayeeChen,NicholasRoberts,KushBhatia,JueWang,CeZhang,FredericSala,andChristopher
+Re´. Skill-it! a data-driven skills framework for understanding and training language models.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick,
+and Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning
+challenge. ArXiv, abs/1803.05457, 2018. URL https://api.semanticscholar.org/
+CorpusID:3922816.
+DeepMind, Igor Babuschkin, Kate Baumli, Alison Bell, Surya Bhupatiraju, Jake Bruce, Peter
+Buchlovsky, David Budden, Trevor Cai, Aidan Clark, Ivo Danihelka, Antoine Dedieu, Clau-
+dio Fantacci, Jonathan Godwin, Chris Jones, Ross Hemsley, Tom Hennigan, Matteo Hessel,
+ShaoboHou,StevenKapturowski,ThomasKeck,IuriiKemaev,MichaelKing,MarkusKunesch,
+LenaMartens, HamzaMerzic, VladimirMikulik, TamaraNorman, GeorgePapamakarios, John
+Quan, Roman Ring, Francisco Ruiz, Alvaro Sanchez, Laurent Sartran, Rosalia Schneider, Eren
+Sezener, Stephen Spencer, Srivatsan Srinivasan, Milosˇ Stanojevic´, Wojciech Stokowiec, Luyu
+Wang, Guangyao Zhou, and Fabio Viola. The DeepMind JAX Ecosystem, 2020. URL http:
+//github.com/google-deepmind.
+AaronDefazio,HarshMehta,KonstantinMishchenko,AhmedKhaled,AshokCutkosky,etal. The
+roadlessscheduled. arXivpreprintarXiv:2405.15682,2024.
+Logan Engstrom, Axel Feldmann, and Aleksander Madry. Dsdm: Model-aware dataset selection
+withdatamodels. arXivpreprintarXiv:2401.12926,2024.
+Talfan Evans, Shreya Pathak, Hamza Merzic, Jonathan Schwarz, Ryutaro Tanno, and Olivier J
+Henaff. Bad students make great teachers: Active learning accelerates large-scale visual un-
+derstanding. arXivpreprintarXiv:2312.05328,2023.
+Simin Fan, Matteo Pagliardini, and Martin Jaggi. Doge: Domain reweighting with generalization
+estimation. ArXiv,abs/2310.15393,2023. URLhttps://api.semanticscholar.org/
+CorpusID:264439382.
+Carlos Florensa, David Held, Markus Wulfmeier, Michael Zhang, and P. Abbeel. Reverse cur-
+riculum generation for reinforcement learning. ArXiv, abs/1707.05300, 2017. URL https:
+//api.semanticscholar.org/CorpusID:19181872.
+Samir Yitzhak Gadre, Gabriel Ilharco, Alex Fang, Jonathan Hayase, Georgios Smyrnis, Thao
+Nguyen, Ryan Marten, Mitchell Wortsman, Dhruba Ghosh, Jieyu Zhang, et al. Datacomp: In
+searchofthenextgenerationofmultimodaldatasets. AdvancesinNeuralInformationProcessing
+Systems,36,2024.
+Leo Gao, Stella Biderman, Sid Black, Laurence Golding, Travis Hoppe, Charles Foster, Jason
+Phang,HoraceHe,AnishThite,NoaNabeshima,etal. Thepile:An800gbdatasetofdiversetext
+forlanguagemodeling. arXivpreprintarXiv:2101.00027,2020.
+LeoGao,JonathanTow,BaberAbbasi,StellaBiderman,SidBlack,AnthonyDiPofi,CharlesFos-
+ter,LaurenceGolding,JeffreyHsu,AlainLeNoac’h,HaonanLi,KyleMcDonell,NiklasMuen-
+nighoff, Chris Ociepa, Jason Phang, Laria Reynolds, Hailey Schoelkopf, Aviya Skowron, Lin-
+tang Sutawika, Eric Tang, Anish Thite, Ben Wang, Kevin Wang, and Andy Zou. A framework
+forfew-shotlanguagemodelevaluation,072024. URLhttps://zenodo.org/records/
+12608602.
+12Preprint.
+Ce Ge, Zhijian Ma, Daoyuan Chen, Yaliang Li, and Bolin Ding. Data mixing made efficient: A
+bivariatescalinglawforlanguagemodelpretraining. arXivpreprintarXiv:2405.14908,2024.
+CharlesAlbertEricGoodhart. Monetarycontrol—thebritishexperience. InMonetaryConditions
+forEconomicRecovery,pp.59–84.Springer,1985.
+Sachin Goyal, Pratyush Maini, Zachary C Lipton, Aditi Raghunathan, and J Zico Kolter. Scaling
+lawsfordatafiltering–datacurationcannotbecomputeagnostic.InProceedingsoftheIEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pp.22702–22711,2024.
+AlexGraves,MarcGBellemare,JacobMenick,RemiMunos,andKorayKavukcuoglu. Automated
+curriculum learning for neural networks. In international conference on machine learning, pp.
+1311–1320.Pmlr,2017.
+Yuxian Gu, Li Dong, Yaru Hao, Qingxiu Dong, Minlie Huang, and Furu Wei. Towards optimal
+learningoflanguagemodels. arXivpreprintarXiv:2402.17759,2024.
+AlexanderHa¨gele,ElieBakouch,AtliKosson,LoubnaBenAllal,LeandroVonWerra,andMartin
+Jaggi. Scalinglawsandcompute-optimaltrainingbeyondfixedtrainingdurations. arXivpreprint
+arXiv:2405.18392,2024.
+DannyHernandez,TomBrown,TomConerly,NovaDasSarma,DawnDrain,SheerEl-Showk,Nel-
+son Elhage, Zac Hatfield-Dodds, Tom Henighan, Tristan Hume, et al. Scaling laws and inter-
+pretabilityoflearningfromrepeateddata. arXivpreprintarXiv:2205.10487,2022.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza
+Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom
+Hennigan, Eric Noland, Katie Millican, George van den Driessche, Bogdan Damoc, Aure-
+lia Guy, Simon Osindero, Karen Simonyan, Erich Elsen, Jack W. Rae, Oriol Vinyals, and
+L.Sifre. Trainingcompute-optimallargelanguagemodels. ArXiv,abs/2203.15556,2022. URL
+https://api.semanticscholar.org/CorpusID:247778764.
+FengHong,YuemingLyu,JiangchaoYao,YaZhang,IvorWTsang,andYanfengWang.Diversified
+batchselectionfortrainingacceleration. arXivpreprintarXiv:2406.04872,2024.
+MarcusHutter. Learningcurvetheory. arXivpreprintarXiv:2102.04074,2021.
+Andrew Jesson, Nicolas Guizard, Sina Hamidi Ghalehjegh, Damien Goblot, Florian Soudan, and
+Nicolas Chapados. CASED: curriculum adaptive sampling for extreme data imbalance. CoRR,
+abs/1807.10819,2018. URLhttp://arxiv.org/abs/1807.10819.
+Jean Kaddour, Oscar Key, Piotr Nawrot, Pasquale Minervini, and Matt J. Kusner. No Train No
+Gain: Revisiting Efficient Training Algorithms For Transformer-based Language Models, July
+2023. URLhttp://arxiv.org/abs/2307.06440. arXiv:2307.06440[cs].
+DimitrisKalimeris,GalKaplun,PreetumNakkiran,BenjaminEdelman,TristanYang,BoazBarak,
+andHaofengZhang.Sgdonneuralnetworkslearnsfunctionsofincreasingcomplexity.Advances
+inneuralinformationprocessingsystems,32,2019.
+Feiyang Kang, Hoang Anh Just, Yifan Sun, Himanshu Jahagirdar, Yuanzhi Zhang, Rongxing Du,
+Anit Kumar Sahu, and Ruoxi Jia. Get more for less: Principled data selection for warming
+up fine-tuning in llms. In ICLR, 2024. URL https://openreview.net/forum?id=
+QmYNBVukex.
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess, Rewon Child,
+Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language
+models. arXivpreprintarXiv:2001.08361,2020.
+Patrick Kidger and Cristian Garcia. Equinox: neural networks in JAX via callable PyTrees and
+filteredtransformations.DifferentiableProgrammingworkshopatNeuralInformationProcessing
+Systems2021,2021.
+DouglasHLawrence. Thetransferofadiscriminationalongacontinuum. JournalofComparative
+andPhysiologicalPsychology,45(6):511,1952.
+13Preprint.
+Katherine Lee, Daphne Ippolito, Andrew Nystrom, Chiyuan Zhang, Douglas Eck, Chris Callison-
+Burch, and Nicholas Carlini. Deduplicating training data makes language models better. arXiv
+preprintarXiv:2107.06499,2021.
+HanmengLiu,JianLiu,LeyangCui,ZhiyangTeng,NanDuan,MingZhou,andYueZhang. Logiqa
+2.0—an improved dataset for logical reasoning in natural language understanding. IEEE/ACM
+TransactionsonAudio,Speech,andLanguageProcessing,31:2947–2962,2023. URLhttps:
+//api.semanticscholar.org/CorpusID:259515154.
+ILoshchilov. Decoupledweightdecayregularization. arXivpreprintarXiv:1711.05101,2017.
+YINGWEI Ma, Yue Liu, Yue Yu, Yuanliang Zhang, Yu Jiang, Changjian Wang, and Shanshan
+Li. AtwhichtrainingstagedoescodedatahelpLLMsreasoning? InTheTwelfthInternational
+ConferenceonLearningRepresentations,2024.URLhttps://openreview.net/forum?
+id=KIPJKST4gw.
+StefanoSaraoMannelli, YaraslauIvashinka, AndrewSaxe, andLucaSaglietti. Tiltingtheoddsat
+thelottery: theinterplayofoverparameterisationandcurriculainneuralnetworks. arXivpreprint
+arXiv:2406.01589,2024.
+GonzaloMena,DavidBelanger,ScottLinderman,andJasperSnoek. Learninglatentpermutations
+withgumbel-sinkhornnetworks. arXivpreprintarXiv:1802.08665,2018.
+So¨renMindermann,JanMBrauner,MuhammedTRazzak,MrinankSharma,AndreasKirsch,Win-
+nieXu,BenediktHo¨ltgen,AidanNGomez,AdrienMorisot,SebastianFarquhar,etal.Prioritized
+trainingonpointsthatarelearnable,worthlearning,andnotyetlearnt. InInternationalConfer-
+enceonMachineLearning,pp.15630–15649.PMLR,2022.
+Niklas Muennighoff, Alexander Rush, Boaz Barak, Teven Le Scao, Nouamane Tazi, Aleksandra
+Piktus, Sampo Pyysalo, Thomas Wolf, and Colin A Raffel. Scaling data-constrained language
+models. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Denis Paperno, Germa´n Kruszewski, Angeliki Lazaridou, Quan Ngoc Pham, Raffaella Bernardi,
+SandroPezzelle,MarcoBaroni,GemmaBoleda,andR.Ferna´ndez. Thelambadadataset: Word
+prediction requiring a broad discourse context. ArXiv, abs/1606.06031, 2016. URL https:
+//api.semanticscholar.org/CorpusID:2381275.
+Guilherme Penedo, Quentin Malartic, Daniel Hesslow, Ruxandra Cojocaru, Alessandro Cappelli,
+Hamza Alobeidli, Baptiste Pannier, Ebtesam Almazrouei, and Julien Launay. The refinedweb
+dataset for falcon llm: outperforming curated corpora with web data, and web data only. arXiv
+preprintarXiv:2306.01116,2023.
+GuilhermePenedo, HynekKydl´ıcˇek, LoubnaBenallal, AntonLozhkov, MargaretMitchell, Colin
+Raffel,LeandroVonWerra,andThomasWolf. Thefinewebdatasets: Decantingthewebforthe
+finesttextdataatscale,2024. URLhttps://arxiv.org/abs/2406.17557.
+ZihengQin,KaiWang,ZangweiZheng,JianyangGu,XiangyuPeng,xuZhaoPan,DaquanZhou,
+LeiShang,BaiguiSun,XuansongXie,andYangYou. Infobatch: Losslesstrainingspeedupby
+unbiaseddynamicdatapruning. InTheTwelfthInternationalConferenceonLearningRepresen-
+tations,2024. URLhttps://openreview.net/forum?id=C61sk5LsK6.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. An adversarial wino-
+grad schema challenge at scale. 2019. URL https://api.semanticscholar.org/
+CorpusID:199370376.
+OrSharir,BarakPeleg,andYoavShoham. ThecostoftrainingNLPmodels: Aconciseoverview.
+CoRR,abs/2004.08900,2020. URLhttps://arxiv.org/abs/2004.08900.
+NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+RichardSinkhorn. Arelationshipbetweenarbitrarypositivematricesanddoublystochasticmatri-
+ces. Theannalsofmathematicalstatistics,35(2):876–879,1964.
+BurrhusFSkinner. Reinforcementtoday. AmericanPsychologist,13(3):94,1958.
+14Preprint.
+Daria Soboleva, Faisal Al-Khateeb, Robert Myers, Jacob R Steeves, Joel
+Hestness, and Nolan Dey. SlimPajama: A 627B token cleaned and
+deduplicated version of RedPajama. https://cerebras.ai/blog/
+slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama,
+2023. URLhttps://huggingface.co/datasets/cerebras/SlimPajama-627B.
+Ben Sorscher, Robert Geirhos, Shashank Shekhar, Surya Ganguli, and Ari Morcos. Beyond neu-
+ral scaling laws: beating power law scaling via data pruning. Advances in Neural Information
+ProcessingSystems,35:19523–19536,2022.
+JianlinSu,YuLu,ShengfengPan,BoWen,andYunfengLiu.Roformer:enhancedtransformerwith
+rotarypositionembedding.corrabs/2104.09864(2021). arXivpreprintarXiv:2104.09864,2021.
+Yuxing Tang, Xiaosong Wang, Adam P. Harrison, Le Lu, Jing Xiao, and Ronald M. Summers.
+Attention-guided curriculum learning for weakly supervised classification and localization of
+thoracic diseases on chest radiographs. ArXiv, abs/1807.07532, 2018. URL https://api.
+semanticscholar.org/CorpusID:49882848.
+Howe Tissue, Venus Wang, and Lu Wang. Scaling law with learning rate annealing, 2024. URL
+https://arxiv.org/abs/2408.11029.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Niko-
+layBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfounda-
+tionandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+AshishVaswani, NoamM.Shazeer, NikiParmar, JakobUszkoreit, LlionJones, AidanN.Gomez,
+LukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. InNeuralInformationProcessing
+Systems,2017. URLhttps://api.semanticscholar.org/CorpusID:13756489.
+JiachenTWang,TianjiYang,JamesZou,YongchanKwon,andRuoxiJia. Rethinkingdatashapley
+fordataselectiontasks: Misleadsandmerits. arXivpreprintarXiv:2405.03875,2024.
+Johannes Welbl, Nelson F. Liu, and Matt Gardner. Crowdsourcing multiple choice science ques-
+tions. ArXiv, abs/1707.06209, 2017. URL https://api.semanticscholar.org/
+CorpusID:1553193.
+Xiaoxia Wu, Ethan Dyer, and Behnam Neyshabur. When do curricula work? In International
+ConferenceonLearningRepresentations,2021.URLhttps://openreview.net/forum?
+id=tW4QEInpni.
+Mengzhou Xia, Tianyu Gao, Zhiyuan Zeng, and Danqi Chen. Sheared LLaMA: Accelerat-
+ing language model pre-training via structured pruning. In The Twelfth International Confer-
+enceonLearningRepresentations,2024a. URLhttps://openreview.net/forum?id=
+09iOdaeOzp.
+Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. LESS:
+Selectinginfluentialdatafortargetedinstructiontuning.InForty-firstInternationalConferenceon
+MachineLearning,2024b. URLhttps://openreview.net/forum?id=PG5fV50maR.
+Sang Michael Xie and Stefano Ermon. Reparameterizable subset sampling via continuous relax-
+ations,2021. URLhttps://arxiv.org/abs/1901.10517.
+Sang Michael Xie, Hieu Pham, Xuanyi Dong, Nan Du, Hanxiao Liu, Yifeng Lu, Percy S Liang,
+Quoc V Le, Tengyu Ma, and Adams Wei Yu. Doremi: Optimizing data mixtures speeds up
+languagemodelpretraining. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Jiasheng Ye, Peiju Liu, Tianxiang Sun, Yunhua Zhou, Jun Zhan, and Xipeng Qiu. Data mixing
+laws: Optimizing data mixtures by predicting language modeling performance. arXiv preprint
+arXiv:2403.16952,2024.
+RowanZellers, AriHoltzman, YonatanBisk, Ali Farhadi, and YejinChoi. Hellaswag: Cana ma-
+chinereallyfinishyoursentence? InAnnualMeetingoftheAssociationforComputationalLin-
+guistics,2019. URLhttps://api.semanticscholar.org/CorpusID:159041722.
+15Preprint.
+BiaoZhangandRicoSennrich. Rootmeansquarelayernormalization. AdvancesinNeuralInfor-
+mationProcessingSystems,32,2019.
+AllanZhou,NicholasC.Landolfi,andYidingJiang. midGPT:asimpleandhackablerepositoryfor
+llmpretraining. 2023. URLhttps://github.com/AllanYangZhou/midGPT.
+16Preprint.
+A TRAINING DETAILS
+Architecture. Allexperimentsusethesamearchitecture,whichfollowstheLlama2family(Tou-
+vron et al., 2023): a Transformer-based language model with key components including SwiGLU
+MLP layers (Shazeer, 2020), RMS normalization (Zhang & Sennrich, 2019), and rotary embed-
+dings (Su et al., 2021). We use the GPT-NeoX-20B tokenizer (Black et al., 2022), and tie the
+weights in the embedding and final layers. Our experiments contain models trained at two scales:
+124Mparametersand1.3Bparameters.
+Training. Allmodelsweretrainedfor60,000stepsatbatchsize2048(1B)or256(124M),using
+AdamW(Loshchilov,2017). Weusedecoupledweightdecaywithλ = 10−4,setβ = 0.05,and
+2
+otherwiseusedefaulthyperparametersasspecifiedbyOptax(DeepMindetal.,2020).ForADO,we
+fitscalinglawsforeachdomainevery1,000trainingstepsstartingatstep5,000(werunanempirical
+samplingstrategyforthefirst5,000steps).
+Computeandtimeexpenditure. WeranourexperimentsonTPUsusingtheopen-sourcemidGPT
+library(Zhouetal.,2023),whichisbasedonJAX(Bradburyetal.,2018)andEquinox(Kidger&
+Garcia,2021). Allexperimentswere runonGoogleCloud TPUs. On aTPUv3-128, a1B model
+canbetrainedfor60,000stepsin∼ 3.5days. Fittingscalinglawsforalldomainstakeslessthan
+20 seconds–over the course of a training run, this amounts to under 19 minutes in additional time
+spentfittingscalinglaws. Thisnumbercanlikelybefurtherimprovedbyusingasmallerorsmarter
+/non-uniformgrid(wefoundtheresultstobenotsensitivetothesizeofthegridsearch)orsmarter
+optimization custom-made for power law. Although not present in our particular implementation,
+thefittingofthescalinglawscould,inprinciple,takeplaceasynchronouslyinparallelwithmodel
+trainingsinceitdoesnotrequireanyinformationfromthemodelotherthantheloss,whichcanbe
+staggeredasthescalinglawsremainaccurateforsomedurationintothefuture.
+A.1 FITTINGSCALINGLAWS
+We fit an individual loss curve scaling law to each domain where the input is the total number of
+samplesprocessedsofar,andthepredictionisthetraininglossofthatparticulardomain. Namely,
+supposethedatasetisbrokendownintoKdistinctheterogeneousdomains,wewouldlearnL(cid:98)k(n)=
+ε
+k
++β kn−αk. Toestimatetheseparametersofthescalinglaw, weusethestandardprocedurefor
+fittingapowerlaw(Hoffmannetal.,2022)whichminimizestheHuberlosswithδ =0.001between
+thepredictedloglossandobservedloglosswithL-BFGS:
+(cid:88) (cid:16) (cid:17)
+min Huber
+δ
+logL(cid:98)k(n)−logL k(n) . (6)
+εk,βk,αk
+n
+Sincelearningcurveshavealargenumberofpoints,wesubsetthelearningcurveatregularintervals
+toobtainthedataforfitting. Similartopriorworks,weusegridsearchwithdifferentinitialization,
+although we found that usually a smaller grid search suffices since the individual scaling laws do
+notneedtobeveryaccurate. Thelossesofthefirst500stepsarenotincludedastheweightshave
+notstabilizedyetandwesubsamplethetrajectoryat10-stepintervalstospeedupthetraining. This
+does not significantly impact the algorithm since scaling laws do not change drastically. We also
+applyathresholdtotheparameters’valuestomitigatepotentialinstabilityduetoonlinefitting.
+βandεarebothparameterizedintheirlogforms.Weuseagridsearchoverthefollowingparameters
+initialization:
+• α ∈{0.1,0.2,0.3,0.4,0.5,0.6,0.7}
+0
+• logβ ∈{−2,−1,0,1,2,3,4,5}
+0
+• logε ∈{−2,−1.5,−1,−0.5,1,1.5}
+0
+Further,weenforce0<α<0.8,logβ <6.5andlogε>0.5.Theseboundsarepurelypreventative
+incasesofnumericalinstabilityandarealmostneversaturated.
+A.2 ESTIMATEDEMPIRICALMIXTURE
+In Figure 5, we show various data mixtures used in this paper. For the natural distribution, we
+sampled 1000 documents from each domain, tokenized them with our chosen tokenizer, and then
+17Preprint.
+Table2: Differentmixturesusedinthispaper.
+Dataset Natural DeReMi Pile
+FreeLaw 0.0449 0.0380 0.0612
+EnronEmails 0.0010 0.0040 0.0014
+Github 0.1227 0.0325 0.0759
+OpenSubtitles 0.0158 0.0032 0.0155
+PubMedCentral 0.1215 0.0608 0.1440
+OpenWebText2 0.1096 0.1905 0.1001
+StackExchange 0.0491 0.0746 0.0513
+Pile-CC 0.1825 0.1379 0.1811
+ArXiv 0.0886 0.0535 0.0896
+USPTOBackgrounds 0.0262 0.0327 0.0365
+Books3 0.1046 0.0757 0.1207
+Wikipedia(en) 0.0402 0.1068 0.0153
+PubMedAbstracts 0.0221 0.0970 0.0307
+NIHExPorter 0.0019 0.0084 0.0030
+BookCorpus2 0.0063 0.0037 0.0075
+EuroParl 0.0081 0.0120 0.0073
+HackerNews 0.0047 0.0084 0.0062
+DMMathematics 0.0191 0.0019 0.0124
+YoutubeSubtitles 0.0040 0.0117 0.0060
+PhilPapers 0.0027 0.0093 0.0038
+UbuntuIRC 0.0049 0.0083 0.0088
+Gutenberg(PG-19) 0.0195 0.0292 0.0217
+computedtheaveragenumberoftokensperdocument.Usingtheestimatedaverage,wecanestimate
+thetotalnumberoftokenswithinadomainbymultiplyingitbythenumberofdocuments.
+Note that the DoReMi differs from the number of Xie et al. (2024) due to the use of different
+tokenizers. The numbers we use here are from Albalak et al. (2023) which uses GPT-NeoX-20B
+tokenizer (Black et al., 2022) like us. Also, note that the estimated empirical distribution differs
+fromthedefaultPileweights. Notably,GithubandWikipediaareweightedsignificantlyhigher.
+B META-LEARNING PERMUTATIONS
+SupposewehaveadatasetZ = {z ,z ,...,z }drawnfromthedistributionP andwewishto
+1 2 N z
+train a model in the one-epoch setting, that is, the model gets to see each example only once5. In
+thissetting, thespaceofcurriculaisS , allpermutationsof[N]. Notethatthesizeofthissearch
+N
+space |S | = N! is extremely large for even a small N, and would be even larger if we allowed
+N
+datarepetition. Givenacurriculumσ : [N] → [N]andthestochasticgradientdescentupdaterule
+U(θ,z)=θ−η∇ ℓ(z;θ),weinitializethemodelparametersθ anditerativelyupdatethem:θ =
+θ 0 t+1
+U(θ ,z ). Wecandenotetheentiretrainingprocessfromθ toθ byθ =SGD(θ ,σ,N).
+t σ(t) 0 N N 0
+In standard SGD, the curriculum is a randomly sampled permutation, σ ∼ Unif(S ).
+random N
+Given the size of the search space, we can instead formulate the problem of finding curricula
+as an optimization problem over S . An optimization problem needs an objective, but what
+N
+should the objective be for finding a good curriculum? The ultimate goal of this problem is to
+find a curriculum such that the final parameter θ achieves a low population loss, i.e., σ⋆ =
+N
+argmin E [ℓ(z;SGD(θ ,σ,N))]. However, we cannot in general assume access to the data
+σ z∼Pz 0
+distribution so we need a surrogate objective. In this experiment, we use the following surrogate
+metaobjectivethatdependsonlyonthetrainingdata:
+N−1 N
+1 (cid:88) (cid:88)
+σ⋆ =argmin ℓ(z ;U(θ ,z ))=argminL(σ). (7)
+N i t σ(t)
+σ σ
+t=0 i=1
+5Thisiscommonforthetrainingregimeofthemodernlanguagemodel.
+18Preprint.
+Thisobjectiveencouragesthecurriculumtominimizethetotaltraininglossaftereachupdate(i.e.,
+trainingasfastaspossible). Sinceweareintheone-epochsetting,theparametersareupdatedwith
+thegradientofeachexampleonlyoncesothereisless,ifany,riskofoverfitting.
+One obstacle to directly learning a good curriculum here is that gradient-based optimizers are not
+suitable for searching over permutations. We follow Mena et al. (2018) and parameterize the cur-
+riculumwithamatrixZ ∈RN×N. WethenusetheSinkhornoperatorS(·)toprojectZ toadoubly
+stochasticmatrixX = S(Z)(Sinkhorn,1964;Adams&Zemel,2011),whichwecanthinkofasa
+“soft” approximation to a permutation. Since X is doubly stochastic but not necessarily an actual
+permutation,weuseageneralizationofourmeta-objective:
+ 
+N−1 N N
+L˜(X)= N1 (cid:88) (cid:88) ℓz i;θ t−η N1 (cid:88) X tj∇ θℓ(z j;θ t). (8)
+t=0 i=1 j=1
+Thislossgeneralizesouractualobjectiveinthesensethat,inthespecialcasewhereX isnotonly
+doublystochasticbutalsoapermutation,thenitreducestothelossinEq.7.
+After optimizing Z against the modified objective, we can project Z to a true permutation which
+servesasourfinallearnedcurriculum:
+Z =Z −η∇ L˜(S(Z )), σ =argmax⟨Z ,P⟩. (9)
+t+1 t Z t ∞
+P∈PN
+Thisprocedurecanbefurthergeneralizedtoselectingaminibatch.Todoso,werelaxtheconstraints
+onX fromadoublystochasticmatrixtoamatrixdifferentiabletop-Krelaxationateachrow(Xie&
+Ermon,2021). WeapplythistotheMLPexperimentsinFigure3withminibatchsize10.
+C CLIPPING FUNCTION
+Belowisthepseudocodeweuseforclippingtheprobability. Itevenlydistributestheexcessproba-
+bilityamongsttheothercategories.
+Algorithm2ClipMinimumProbability
+1: Input: probs∈∆K,min prob∈[0,1]
+2: Output: clipped probs
+3: total deficit←max(min prob·n−(cid:80) probs,0) ▷Computetotaldeficit
+4: scale factor←(1−total
+deficit)/((cid:80)k
+probs) ▷Computescalefactor
+k
+5: scaled probs←probs·scale factor ▷Scaletheprobabilities
+6: clipped probs←max(scaled probs,min prob) ▷Clipprobabilities
+7: clipped probs←(clipped probs)/((cid:80) clipped probs) ▷Normalize
+k
+8: returnclipped probs
+19Preprint.
+D ADDITIONAL EMPIRICAL RESULTS
+OpenWebText2 PubMed Abstracts Github StackExchange
+4×100 f eu xl tl rapolate 4×100 f eu xl tl rapolate 2×100 f eu xl tl rapolate
+3×100
+f eu xl tl rapolate
+3×100
+3×100
+100 2×100
+2×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters) Model Size (Parameters) Model Size (Parameters)
+Enron Emails FreeLaw USPTO Backgrounds Pile-CC
+4×100 f eu xl tl
+rapolate
+34 ×× 11 00 00 f eu xl tl
+rapolate
+4×100 f eu xl tl
+rapolate 4×100
+f eu xl tl
+rapolate
+3×100 3×100
+2×100 3×100
+2×100
+2×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters) Model Size (Parameters) Model Size (Parameters)
+Wikipedia (en) Books3 PubMed Central HackerNews
+4×100 full full full full
+extrapolate 4×100 extrapolate 3×100 extrapolate 4×100 extrapolate
+3×100
+3×100 3×100
+2×100
+2×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters) Model Size (Parameters) Model Size (Parameters)
+Gutenberg (PG-19) DM Mathematics NIH ExPorter ArXiv
+full
+2×100
+full full 3×100 full
+4×100 extrapolate 1.8×100 extrapolate 4×100 extrapolate extrapolate
+1.6×100
+3×100
+1.4×100
+3×100 2×100
+1.2×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters) Model Size (Parameters) Model Size (Parameters)
+BookCorpus2 OpenSubtitles YoutubeSubtitles Ubuntu IRC
+4×100 4×100
+full full full full
+4×100 extrapolate extrapolate
+3×100
+extrapolate 3×100 extrapolate
+3×100
+3×100 2×100 2×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters) Model Size (Parameters) Model Size (Parameters)
+EuroParl PhilPapers
+5×100
+4×100 f eu xl tl
+rapolate
+f eu xl tl
+rapolate
+4×100
+3×100
+2×100
+3×100
+70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B 70M 160M 410M 1.01B.4B 2.8B 6.9B 12.0B
+Model Size (Parameters) Model Size (Parameters)
+Figure7: ExrapolatingthelossoflargermodelsoneachdomainofthePilewiththelossofmodels
+withfewerthan1Bparameters.
+20
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goL
+ssoL
+goLPreprint.
+Loss curve forecasts from scaling laws fit during training
+ArXiv BookCorpus2 Books3 DM Mathematics
+3.4×100 1.55×100
+2.2×100 3.2×100 3.2×100 1.5×100
+2.1×100 1.45×100
+2×100 3×100 3×100 1.4×100
+1.9×100 2.8×100 2.8×100 1.35×100
+1.8×100 1.3×100
+2.6×100
+1.7×100
+2.6×100
+1.25×100
+103 104 103 104 103 104 103 104
+Enron Emails EuroParl FreeLaw Github
+3×100
+3×100 2.6×100
+2.5×100
+1.5×100
+2.4×100 1.4×100
+2×100 2.3×100 1.3×100
+2.2×100 1.2×100
+2.1×100
+2×100 2×100 1.1×100
+1.9×100 100
+103 104 103 104
+1.8×100
+103 104 103 104
+Gutenberg (PG-19) HackerNews NIH ExPorter OpenSubtitles
+3.4×100 3.2×100
+3.4×100
+3×100
+3.2×100 3×100
+3.2×100 2.9×100
+3×100 2.8×100 2.8×100
+3×100
+2.7×100
+2.8×100 2.6×100
+2.8×100 2.6×100
+2.6×100
+2.6×100 2.4×100 2.5×100
+103 104 103 104 103 104
+2.4×100
+103 104
+OpenWebText2 PhilPapers Pile-CC PubMed Abstracts
+3.2×100 3.4×100
+3.4×100 2.3 9× ×1 10 00
+0
+3.2×100 3.2×100 2.8×100
+3×100 2.7×100
+3×100
+3×100 2.6×100
+2.8×100 2.8×100 2.5×100
+2.6×100 2.6×100 2.8×100 2.4×100
+2.3×100
+2.4×100
+2.4×100 2.6×100
+2.2×100
+103 104 103 104 103 104 103 104
+PubMed Central StackExchange USPTO Backgrounds Ubuntu IRC
+2.4×100 2.4×100 2.8×100 2.8×100
+2.3×100 2.3×100 22 .. 67 ×× 11 00 00 2.6×100
+2.2×100 2.2×100
+2.5×100
+2.1×100 2.1×100 2.4×100
+2.4×100
+2×100 2×100
+2.3×100 2.2×100
+1.9×100 1.9×100 2.2×100
+1.8×100 1.8×100 2.1×100 2×100
+103 104 103 104 103 104 103 104
+Wikipedia (en) YoutubeSubtitles
+3×100 3×100
+2.8×100
+Training loss Fit @ 30k
+2.6×100 Fit @ 10k Fit @ 50k
+2.4×100
+2×100
+2.2×100
+103 104 103 104
+Training steps (log scale)
+Figure 8: ADO loss forecasts produced by our scaling laws on each domain in The Pile while
+training a 1B model. Scaling laws are fit regularly throughout training, with the forecasts shown
+beingfromfitsat10,000,30,000,and50,000steps(dashedlineshowswheneachscalinglawwas
+fit).
+21
+)elacs
+gol(
+ssol
+gniniarT

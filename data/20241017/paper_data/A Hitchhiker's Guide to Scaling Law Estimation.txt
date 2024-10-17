@@ -1,0 +1,1235 @@
+arXivVersion
+A HITCHHIKER’S GUIDE TO SCALING
+LAW ESTIMATION
+LeshemChoshen YangZhang JacobAndreas
+MIT,MIT-IBMWatsonAILab IBMResearch MIT
+ABSTRACT
+Scalinglawspredictthelossofatargetmachinelearningmodelbyextrapolating
+fromeasier-to-trainmodelswithfewerparametersorsmallertrainingsets. This
+providesanefficientwayforpractitionersandresearchersaliketocomparepre-
+trainingdecisionsinvolvingoptimizers,datasets,andmodelarchitectures. Despite
+the widespread use of scaling laws to model the dynamics of language model
+training, there has been little work on understanding how to best estimate and
+interpretthem. Wecollect(andrelease)alarge-scaledatasetcontaininglossesand
+downstreamevaluationsfor485previouslypublishedpretrainedmodels. Weuse
+thesetoestimatemorethan1000scalinglaws,thenderiveasetofbestpractices
+forestimatingscalinglawsinnewmodelfamilies. Wefindthatfittingscalinglaws
+tointermediatecheckpointsoftrainingruns(andnotjusttheirfinallosses)substan-
+tiallyimprovesaccuracy,andthat—allelseequal—estimatesofperformanceare
+generallymostaccuratewhenderivedfromothermodelsofsimilarsizes. However,
+because there is a significant degree of variability across model seeds, training
+multiplesmallmodelsissometimesmoreusefulthantrainingasinglelargeone.
+Moreover,whiledifferentmodelfamiliesdifferscalingbehavior,theyareoften
+similarenoughthatatargetmodel’sbehaviorcanbepredictedfromasinglemodel
+withthesamearchitecture,alongwithscalingparameterestimatesderivedfrom
+othermodelfamilies.
+1 INTRODUCTION
+Substantialeffortandcostarerequiredtotrainevenasinglelargelanguagemodel(LLM).1Thereis
+thusanacuteneedforefficientdecision-makingaidsthatcanevaluatetheeffectivenessofproposed
+changestolanguagemodels’architectureortrainingdatawithoutfull-scaletrainingruns. While
+thereisalargebodyofworkthatmotivatesorevaluatesthesechangesusingsmallmodels(Warstadt
+etal.,2023;Hillieretal.,2024),synthetictasks(Akyüreketal.,2024;Wortsmanetal.,2023)or
+theory(Jelassietal.,2024),oneofthemostimportanttoolsforcurrentpractitionersistheestimation
+ofscalinglawsforLLMs(Ivgietal.,2022;Dubeyetal.,2024).
+Ascalinglawextrapolatestheperformanceofatargetmodelfromtheperformanceofasetofmodels
+withfewerparametersorsmallertrainingsets. Typically,thisextrapolationrequiresmodelstobelong
+to the same model family, differing only in parameter count and training set size, but using the
+samearchitectureandtrainingdistribution. Ahigh-qualityscalinglawaccuratelypredictsthetarget
+model’stestperformance(Rosenfeldetal.;Kaplanetal.,2020;Hoffmannetal.,2022).
+Most past work describing and characterizing scaling laws has begun by exhaustively training
+models in a family across a full range of dataset sizes and parameter counts. One question that
+has received comparatively little attention is how, when training a new LLM, a practitioner with
+limitedcomputationalresourcesshouldchoosewhichsmall-scalemodelstotraininordertobest
+estimateatargetmodel’sfinalperformance. Thispaperoffersapracticalguidetowhen,andhow,
+to use small models to efficiently obtain meaningful predictions about large models’ behavior—
+maximizing prediction reliability while minimizing the budget for preliminary experimentation,
+whichnecessarilyinvolvestradeoffsbetweenthenumberofpreliminarymodelstrained,thesizeof
+thelargestpreliminarymodel,andsizeofthedatasetusedtotrainit.
+1Code,dataandfullnumbersarefoundinourrepository
+1
+4202
+tcO
+51
+]GL.sc[
+1v04811.0142:viXraarXivVersion
+Webeginbycollectingdiversemodeldatatoperformalarge-scalemeta-analysisofscalinglaws(§3).
+Usually,scalinglawresearchreliesonasinglecollectionofcloselyrelatedmodels,oraltersonlya
+minimalaspectofpretraining(e.g.datasize;Muennighoffetal.,2024). Instead,wegatherdatafrom
+asdiverseasetofscaledfamiliesaspossible,toallowthisandfuturemeta-analysisofscalinglaws
+thatgeneralizeacrossarchitectures,datasetsandsettings.
+Therestofthepaperusesthisdatatoanalyzeanumberofkeyquestionsaroundscalinglawestimation:
+1. How reliably may we expect scaling laws to extrapolate? Variation between random
+parameterinitializationscanproducechangesofupto4%inloss. Mostpublishedimprove-
+mentsinpretrainingprocedures,whenperformingminimalcontrolledexperiments,report
+losschangesbetween4%and50%(§4).
+2. Howmuchdoestheshapeofscalinglawsvaryacrossmodelfamilies? Differentmodel
+families have scaling laws with a different functional dependence on model size (§5).
+However,transformerLMsaresimilarenoughthat,withasinglemodelfromatargetfamily
+and a scaling law from a different model family, it is sometimes possible to accurately
+estimatetargetmodelperformance(§5.1).
+3. Mustscalinglawsbeestimatedonlyfromfullytrainedmodels? Eventhoughoptimiza-
+tionproceduresaretypicallysensitivetothefullsizeofatrainingrun,estimatingscaling
+laws from intermediate training checkpoints greatly improves scaling law fit (§6). It is
+generallypossibletoestimateamodel’sfinallossbeginningroughly1/3ofthewaythrough
+training.
+4. Howlargemustmodelsbetoproducereliablescalingestimates? Allelseequal,experi-
+mentingwithlargemodelsistypicallymoreusefulthanwithsmallmodels(§7),butmaybe
+outweighedbythebenefitsofreducedvariancefromtrainingmore,smallermodels(§8).
+5. Takentogether,cost-effectiveestimationofascalinglawshouldconsiderthenumberof
+models, thesizeofthemodels, andthenumberoftrainingtokensforeachmodel. We
+highlightthosesize,tokensandnumberofmodelseffectsinFig.1.
+Ourexperimentsalsoprovideinsightintothefunctionalformofscalinglawsthemselves,suggesting
+that they may have fewer degrees of freedom (§9) than typically assumed. We conclude with
+discussionofotherworkonscalinglawestimationthatmaybeofinteresttopractitioners§10.
+2 DEFINING A SCALING LAW
+Ascalinglawestimatesthelossofacostlymodelbytrainingcheaperones(seeFig.2)whichshare
+apretrainingprocedureanddifferbysomehyperparameters,typicallymodelsize(#params)and
+numberoftokensseenduringtraining(#toks). Ascalinglawisafunctionthatpredictsatarget
+model’slossonheld-outdatawhensettingthevalueofonehyperparameter(Kaplanetal.,2020)or
+both(Rosenfeldetal.;Hoffmannetal.,2022).Comparinglaws’predictionsaboutdifferentpretraining
+choices(e.g. dataGeetal.,2024)allowsinformeddecisionsaboutwhichlarge-scalemodeltotrain.
+A scaling law also enables finding the optimal choice of
+hyperparameters under computational constraints on pre-
+training(Hoffmannetal.,2022)orinference(Touvronetal., M L(t) ARE
+o
+2023;Sardanaetal.). d e l
+P
+L(t)
+e
+Formally,wewillcallamodelf anysingleconcreteneu- rfo
+rallanguagemodelwithaspecificsetofparameters. Dif-
+rm
+a
+n
+ferentseeds, orevendifferentcheckpointsfromthesame c
+e
+trainingrun, correspondtodifferentmodels. Wedefinea L
+f model
+scaledmodelfamilyf asasetofmodels,witheachf ∈F M
+differing only in size #params(f) and number of tokens o d
+#toks(f).
+e #l
+to
+k
+Therearetwospecificsubsetsofscaledmodelfamiliesthat s Model #params
+willbeusefulinourexperiments. First, themaximalpa-
+rameter family max (F) contains only models in Figure2: Illustrationofascaledfam-
+#params
+F with the largest number of parameters. Formally, de- ily, an estimated scaling law, and its
+finem=max #params(f);thenmax params(F)= predictionerrorforatargetmodel.
+f∈F #
+2arXivVersion
+35 1.3B <10 <15 <10
+(X134) 30
+25
+2.7B (X64) <10 20
+15
+6.7B
+(X26)
+<5 <5 10
+13.0B 5 (X13)
+0
+0.35B 0.76B 1.3B 2.7B 6.7B 13.0B
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 (X500) (X230) (X134) (X64) (X26) (X13)
+Percentage Percentage Largest model parameters (scale up predicted)
+35 0.3B <10 <15 <5 (X34)
+30
+0.4B
+(X29)
+25
+1.0B <15 (X12) 20 1.3B <5 <10 <5
+(X9) 15 1.4B
+(X8) 10
+2.8B
+(X4) 5
+6 (. X9 1B ) 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage Largest model parameters (scale up predicted)
+(a)Scaleupvs.TrainPercentage (b)#Modelsvs.TrainPercentage (c)#Modelsvs.Scaleuppredicted
+Figure1: Theeffectsofthreevariablesonscalinglawaccuracy. Eachcellcorrespondstoasingle
+scalinglawestimatedfromasetF ofmodelcheckpoints,withthecolordenotingthatscaling
+train
+law’serrorwhenpredictingthelargestmodelinafamily. Eachcolumnshowsasubsetofthethree
+axesalongwhichthesetrainingsetsdiffer: (1)thenumberoftokensusedtotraineachLMinF
+train
+(expressedasafractionofthefulltrainingcorpus),(2)thenumberofdistinctmodelstrained;and
+(3)thesizeofthelargestmodeltrained(expressedasascale-upfactor—theratiobetweenthetarget
+modelandthelargestmodelinF ). In(a),alllawsareestimatedfromfourmodels. In(c)all
+train
+lawsusethefullcorpus. Orangelinesshowiso-FLOPcontours(setsofscalinglawswhosetraining
+setsrequirethesamecomputationalcosttoproduce). representthemostefficientwaystoobtain
+15%,10%and5%ARE.Oneofthemostimmediateconclusionsfromtheseplotsisthatscalinglaw
+estimationisquitenoisy—theinclusionofasinglebadly-behavedmodelintheestimationprocedure
+canproducelargeerrors,andinsmallmodelfamilieserrordoesnotreliablydecreasewithadditional
+computation. However—becauseofnoise—itisoftenpreferabletoextrapolatefromalargenumber
+ofsmall,partiallytrainedmodelsratherthanasmallnumberoflargemodels.
+{f ∈ F : #params(f) = m}. This family will generally contain the target model(s) whose
+behavior we wish to predict t ∈ F . Second, the q-maximal token family max (F,q)
+target #toks
+containsallmodelsinf trainedonatleastaq-sizedfractionofthetrainingset. Formally,define
+t = q·(max #toks(f));thenmax (F,q) = {f ∈ F : #toks(f) ≥ t}. Notethatthis
+f∈F #toks
+definitiondoesnotdistinguishbetweenpartiallytrainedmodelsononehand,andmodelstrainedto
+convergenceonasubsetofthelargesttrainingsetusedinafamilyontheother. Throughoutthis
+paper,wewillnotingeneraldistinguishbetweenthesetwotypesofmodels,adecisionevaluated
+inSection6. Indeed,exceptwherenoted,max (F,q)shouldbethoughtofascontainingthe
+#toks
+checkpointsfromthelastq%ofatrainingrun.
+AscalinglawLˆ(f |F)estimatestheperformanceofanewmodelf givenamodelfamilyF. (We
+willsimplywriteLˆ(f)whenthefamilyisclearfromthecontext.) Allexperimentsinthispaperuse
+thecommonfunctionalformfromtheliterature(Hoffmannetal.,2022):
+A B
+Lˆ(f):=E+ + . (1)
+#params(f)α #toks(f)β
+Here E is a baseline capturing the scaled family’s general performance; A,α and B,β describe
+the scaling effect of #params and #toks respectively.2 These parameters are estimated by first
+2Webelievemanyofthefindingsinthispaperapplytootherfunctionalformsthathavebeenproposedfor
+scalinglaws(Caballeroetal.),andevensuggestnewparameterizationsasdescribedin§9.
+3
+3TPG
+aihtyP
+)detciderp
+pu
+elacs( sretemarap
+ledom
+tsegraL
+)detciderp
+pu
+elacs( sretemarap
+ledom
+tsegraL
+)detciderp
+pu elacs(
+sledom
+niart#
+)detciderp
+pu elacs(
+sledom
+niart#
+2
+3
+4
+5
+6
+7
+2
+3
+4 5
+6
+7
++8
+)005X(
+)032X(
+)431X(
+)46X(
+)62X(
+)31X(
+)171X()57X(
+)43X( )92X(
+)21X(
+)9X(
+)8X<(
+sledom
+niart#
+sledom niart#
+2
+3
+4
+5
+6
+7
+2
+3
+4 5
+6
+7
++8
+B70.0 )171X( B61.0 )57X( B53.0 )43X( B14.0 )92X( B0.1 )21X( B3.1 )9X( B4.1 )8X( B8.2 )4X( B9.6 )1X(arXivVersion
+collectingasetoftrainingmodelsF ,thenminimizingthereconstructionerror
+train
+argmin (cid:88) (Lˆ(f)−L(f))2
+E,A,α,B,β
+f∈Ftrain
+whereL(f)denotestheempiricalnegativelog-likelihoodofsomeheld-outdataunderthemodelf.
+Inthissense,ascalinglawisanordinaryparametricmachinelearningmodel,andwemayaskmany
+ofthesamequestionsaboutLˆthatweordinarilyaskaboutLLMs—whattrainingdata(F )should
+train
+wecollect? Howdoweestimateaccuracy? Weseektoprovideempiricalanswerstothesequestions,
+forwhichwefirstrequiredata.
+3 DATA FOR 1000+ SCALING LAWS AND MORE
+Aspartofthiswork,wehavecollectedandreleasedthelargest-scalepublicdatasetdescribingscaling
+behavioracrossmodelfamilies. ThisdatasetaggregatesinformationfromalargenumberofLLM
+trainingeffortsthathavereleasedinformationaboutthebehaviorofmultiplemodelsofdifferent
+sizesorscales. Whileexperimentsinthispaperfocusonscalinglawsthatmeasureloss,thedataset
+alsoincludesinformationaboutmodelperformanceondownstreamevaluationbenchmarkswhere
+available. Wehavefocusedonlanguagemodelswherethelargestoneismorethan3Bparameters
+andwheredatawassharedpubliclyorinprivatecorrespondence. Ourrepositoryacceptsfurther
+contributionsandrequestsforadditions. Inadditiontothose,wehavemanuallyextractedsomedata
+frompapersthatdidnotreleasemodelsbutreportedlossesinfigures.
+3.1 DATASOURCES
+Foreachmodelinthisdataset,wereportanydownstreamevaluationandlossthatwasmeasured
+duringtraining,aswellascalculated#toksforeach,linkstomatchingcheckpointswhenavailable,
+linkstodatasources,andinformationaboutcomputationalcost(inFLOPs)andnumberoftraining
+epochs(i.e.passesoverthetrainingset). Eachmodelisidentifiedbyauniquename, atype(e.g.
+llama),#toks,#params,architecturetype(e.g. encoder-decoder),andseed.
+Models in this dataset include Pythia (Biderman et al., 2023, which provides the largest set of
+modelsandvariationsinafamily),OPT(Zhangetal.,2022,collectedthankstoXiaetal.,2023;
+Biderman et al., 2023), OLMO (Groeneveld et al., 2024), Amber (Liu et al., 2023), K2 (Team,
+2024),Mamba(Liuetal.,2023)RedPajamas3ModuleFormermixtureofexperts(Shenetal.,2023),
+overtrained models (Gadre et al., 2024), Mamba, Llama and hybrid architecture variations from
+Polietal.(2024), transformerarchitectures(Alabdulmohsinetal.,2022), Bloom(LeScaoetal.,
+2023),T5-Pile(Sutawikaetal.,2024),Pandey(2024)models,GPT-familymodelswithdifferentdata
+regimes(Muennighoffetal.,2024),Gopher(Hoffmannetal.,2022)andGPT3(Brownetal.,2020).
+Thedataconsistsof1.9Mstepsoftrainingevaluatedonlossorperplexity,usuallyonmultipledata
+sourcesbelongingto485uniquepretrainedmodels,andmorethan40scaledfamilies.
+Wehopethiswillprovideausefulresourceforthecommunityandplantoextenditfurtherasmodels
+getreleasedandtheirtrainingdynamicsareshared. Weseesucharesourceasafacilitatortomore
+researchonmodeldevelopment(e.g. A/Btesting),scalinglaws,downstreamscalinglaws(Gadre
+etal.,2024;Ruanetal.,2024;Owen,2024;Isiketal.,2024), trainingdynamics(Choshenetal.,
+2022)andmore.
+3.2 SCALINGLAWESTIMATION
+Intherestofthepaper,wepresentfindingsfromestimatinghundredsofscalinglawsasfollows:
+Fitting For each model family F, we identify the maximal parameter family F =
+max
+max (F), and estimate a scaling law Lˆ using the remaining models F = F \ F .
+#params train max
+Estimation of scaling law parameters uses the curve_fit function in scikit-learn (Pedregosa
+etal.,2011). WeadditionallyexperimentedwithanL-BFGS-basedsolverbutfoundittobeless
+stable. Weonlyestimatescalinglawsformodelfamiliesthatcontainatleastthreemodels.
+3https://www.together.ai/blog/redpajama-models-v1
+4arXivVersion
+GPT2
+1.0 4 0 GPT3
+Gopher
+Decoder OPT
+T5-pile
+Encoder- 2 10 llama 0.5 Decoder overtrain
+pythia
+pythia-baseline
+0 10 20 0 10 20 20 p p sty y rt t ih h pi i ea a d- - i v hn 0 yte er nv ae n 1t -i 1o 1n
+A B Scaled model family (discreet)
+(a)Sizeparameters (b)Tokenparameters (c)Intercept
+Figure 3: Parameters differ between scaled model families. Surprisingly, however, the pairs of
+parameterscontrollingtheinfluenceofmodelandtrainingsetsizehavesimilarratios. Thelegend
+showsmodelarchitecture(left),scalingfamilies(center)andper-familyintercept(right).
+Evaluation Toevaluateestimatedscalinglawsreliably,weneedtoaccountforlossfluctuations
+duringlarge-scalemodeltraining. Thus,wetestagainstafewcheckpointsneartheendoftraining:
+we choose as target models F the 30%-maximal token family from the set F defined in
+target max
+thepreviousparagraph—thatis,wetakeF =max (F ,0.3). Wethenreportthemean
+target #toks max
+absoluterelativeerror(ARE)E |L(f)−Lˆ(f |F )|/L(f)betweentheempiricallossL
+f∈Ftarget train
+andthelossLˆ predictedbythescalinglaw.
+4 HOW WELL CAN I EXPECT A SCALING LAW TO PREDICT?
+4%isthebestAREtypicallyobtained;AREupto20%canstilldistinguishbetweenmanymodelingchoices.
+Toestablishhowaccurateascalinglawmustbetobeusefultopractitioners,wefirstassesswhat
+changes in model accuracy have been considered meaningful in past work. We have surveyed
+experimentsintheliteraturewhereanA/Btestwasperformed,i.e.,twomodelsweretrainedsimilarly,
+manipulatingoneattributetoseehowitaffectsscores. Empirically,wefoundnowidelyadopted
+modeling changes that were motivated with less than a 4% relative difference between models.
+Additionally,reportedvarianceacrossrandomrestartsofthesamemodelarchitecturereachesupto
+3.5%(c.f.,§8;Sellametal.,2021). Wetakethistomeanthatthisisapproximatelytheminimaleffect-
+sizeexperimenterscareaboutandpossiblytheminimaleffectonecanreliablymeasure. Accordingly,
+thisboundsthebestgoodnessoffitweshouldexpectorrequireofscalinglaws.
+Toofferseveralconcretepointsofcomparison:Pythia6.9Bmodelsfixedinconsistenciesintheircode
+andhencehavetwoversions(c.f. App.B;Bidermanetal.,2023)whichdifferinlossby40%. They
+alsoprovidedatadeduplicationA/Btestthathadaminoreffectonthelossofabout5%. Gadreetal.
+(2024)testedtheeffectoftraining400Mparametermodelsfordifferent#toks. Themostsimilar
+(doublethetrainingtokens)hasapproximately4%changeandcanreacha50%lossdifferencewith
+30timesmoretraining. Trainingonaconstant#toksbutrepeatingthesamedataresultedinalmost
+nochangesforupto4repetitions(epochs),andlaterinabout8%,50%on14.44repetitionsofthe
+data(Muennighoffetal.,2024). Insteadofvaryingtheamountofdataorepochs,Geetal.(2024)
+foundthattrainingonadifferentkindofdataincurredAREofapproximately10%anddifferentdata
+mixesledto6%changesorless.
+5 WHEN I TRAIN A NEW MODEL, DO I EVEN NEED A NEW SCALING LAW?
+Differentmodelfamiliesexhibitdifferentscalingbehavior,butperformancecansometimesbeestimated
+usingasinglemodelinanewfamily.
+Scalinglawsrelateperformancetoscalartrainingparameterslikemodelordatasetsize. Fordiscrete
+decisions(whetherthechoiceofnonlinearityordatapreprocessingscheme),itisnotimmediately
+obvioushowtopoolinformationacrossmodelsthatdifferinthesetraits(seeRuanetal.,2024,for
+concurrentworkthatperformsthispoolingbasedondownstreamtaskbehavior). Clearly,different
+pretrainedmodelswiththesame#paramsand#toksstillshowdifferentloss,sothesedifferences
+5
+EarXivVersion
+canbeconsequential. Buthowdodiscretechoicesofarchitecture,trainingprocedure,ordataset,
+affecttheformofscalinglaws?
+OnewaytoanswerthisquestionistolookattheparameterestimatesforscalinglawparametersE,
+α,A,β andBdifferacrossmodelfamilies. TheseresultsareshowninFig.3,whereitcanbeseen
+thatthereareoftendramaticdifferencesinallfiveparametersacrossfamilies. Inthissense,even
+therateatwhichadditionaldataorparametersimprovemodelperformancedependonunderlying
+architecturaldetails,suggestingthatunderstandingthebehaviorofanewmodelfamilymayrequirea
+newscalinglaw.
+Butanotherwaytoanswerthisquestionistoaskhowreliablywecanpredictfinalmodelaccuracy
+when borrowing (or pooling) some parameters of scaling laws between families—even if these
+resultinpoorparameterestimates,theymaypredictlarge-scalemodelbehaviorwithintherangeof
+meaningfuldifferencesidentifiedinSection4. Todoso,wesetthe#paramsscalingparameters
+(A,α)tofixedvaluesreportedinpastwork,andestimateremainingparametersforindividualmodel
+families. WetakethevariablevaluesfoundbyMuennighoffetal.(2024)(seeBesirogluetal.,2024;
+Porianetal.,2024foradiscussionofestimatesfromearlierworkincludingHoffmannetal.,2022).
+Wefind(seeFig.6inApp.A)thatinsomecasesonlyasingletrainingruninanewmodelfamilyis
+necessarytoobtainaccuratescalinglawpredictions. IntheOLMOfamily,forexample,weobtain
+lessthan1%errorestimatingtheaccuracyofa7Bmodelfromacollectionof1Bmodelcheckpoints.
+Wefindthatpredictionsgeneralize,andaconstant#paramsscalingfactorisenoughformostmodels
+(excepttheencoder-decoderT5-Pile). However,errorratesarelargerthaninthesourcefamily,and
+predictionsforlargermodelsareworse(mostconspicuousinOPT’serrorof37%,25%and15%
+whenextrapolatingfrom8.7B,13Band30Bto175B).
+5.1 CANIJUSTTRAINTHETARGETMODELABITINSTEADOFMANYSMALLMODELS?
+Yes,butobtainingreliableestimatesinthiswayrequiresupto30%ofthefulltrainingrun.
+The above results (last row of Fig. 6 in App. A) also suggest the possibility of predicting losses
+notwithjustsmallermodels, butwithpartiallytrainedversionsofthetargetmodelitself. When
+predictinginsidethesame#paramsfamily—thatis,estimatingLˆ(f |F \{f})—the#params
+target
+terminEq.(1)isconstant,andextrapolationisonlyrequiredfor#toks. Asseeninthefigures,this
+formofestimationisinformativeifpermittedbycomputationalconstraints. Beyondtheimmediate
+usefulnessofthisapproach,itisapromisingavenueforfutureresearch. Betteradjustingthescaling
+lawsforpredictingthroughtrainingmightimprovethisefficiency.
+5.2 AREEVENSIMPLERBASELINESENOUGH?
+Someextrapolationisnecessary:scalinglawscanproduceaccurateestimatesevenwhenthetargetmodel
+vastlyoutperformsanytrainingmodel.
+Toprovideanotherformofcomparisonforthepredictedscalinglaws,wecomputetwobaselines.
+Bothbaselinesadoptapessimisticevaluationassumingthatthetargetmodelisnobetterthanthebest
+modelinthesmallmodelfamilyusedtoestimateascalinglaw. Specifically,thebaselinesarethe
+bestperformanceLˆ(·|F )=min L(f)andtheperformanceofthemost-trainedmodel,
+train f∈Ftrain
+consuming the most compute for training, i.e. Lˆ(· | F ) = argmax #params(f)×
+train f∈Ftrain
+#toks(f). Thosebaselinesmightbethebestonecanexpectwithoutfittingalawtoscaling.
+Wefind(SeeApp.5.2)thatoutofthetwo, thebestperformancebaselineisclosertoL(F ),
+target
+whichistobeexpected,asthetargetmodelperformanceisbetterthananyothermodelinF andthis
+isthebetterofthetwo. Inbothcases,evenwiththefullF,thebaselinessuffermorethan15%error,
+mostlyabove10%,almostnevergetbelow5%,and18%AREonaverageacrossallscaledfamilies
+westudy.
+6arXivVersion
+35
+30
+25
+20
+15
+10
+5
+0
+0.990.95 0.9 0.7 0.5 0.3 0.2 0.1 0.990.95 0.9 0.7 0.5 0.3 0.2 0.1 0.990.95 0.9 0.7 0.5 0.3 0.2 0.1
+Min. percentage Min. percentage Min. percentage
+(a)OPT (b)GPT3 (c)Pythia
+Figure4: Theeffectoffittingonmoreofthetrainingtrajectory. Eachcellrepresentstheabsolute
+relativeerrorestimatingscalinglawsfromagivennumberofmodels(verticalaxis)trainedonagiven
+subsetofthefinalcheckpointsfromatrainingrun(soscalinglawsontheleftareestimatedusingall
+checkpoint,andlawsontherightareestimatedusingonlythefinal10%ofcheckpoints). Whitecells
+failedtofit. Aslongasthefirst≈10%ofcheckpointsarediscarded,finallosscanoftenbepredicted
+accurately.
+6 I HAVE SOME DATA, WHAT PORTIONS SHOULD I USE?
+Estimatescalinglawsfromintermediatecheckpoints,notjustfullytrainedmodels!
+Mostpastworkonscalingbehavioroflanguagemodels(e.g.,Gadreetal.,2024;Muennighoffetal.,
+2024)hastrainedaseparatemodelforeachvalueof#toksstudied. Thisisbasedontheassumption
+thatchangesinthelearningrateschedule,whichdependonthesizeofthefulldatasetthatwillbe
+usedfortraining,renderlossesfromintermediatecheckpointsuninformative.
+However,somerecentworkhasdemonstratedtheeffectivenessoflearningschedulesthatdonot
+requireprioraccesstothesizeofthetrainingset(Huetal.,2024),andsomeworkhasquestioned
+whethercarefulchoiceofthelearningratedecayisnecessaryforreliablescalinglaws(Porianetal.,
+2024). Together,thesefindingsmotivaterevisitingtheassumptionthatonlyasingleusefuldatapoint
+may be obtained from each training run. In the final portion of §5.1, we observed the value of
+intermediatecheckpointswhenonlyasingle#paramsfamilyisusedtofitascalinglaw. Wenow
+testwhetherthisfindingextendstolargerfamilies—i.e.whetherincludingintermediatecheckpoints
+fromallmodelsinamodelfamilyreducesARE.
+ResultsareshowninFig.4,whichplotsAREforscalinglawsestimatedfromdatasubsetsoftheform
+max (F,q)forvaryingq. Wefindthatincludingfulltrainingcurvesinscalinglawestimation
+#toks
+canpredictlosseswell. Infact,relyingmerelyontheendoftrainingproducessignificantlyworse
+performance across the board. Our remaining experiments thus fit scaling laws using all these
+intermediatecheckpoints,andnotfinalperformancealone.
+6.1 SHOULDIUSEALLINTERMEDIATECHECKPOINTS?
+Almostall,butdropcheckpointsfromthebeginningoftraining.
+InFig.4,weplottheAREfordifferentq-maximaltokenfamiliesservingasF,i.e.,whenfitting
+onlywiththeendoftrainingruns. Thereisnotacleartrendindicatingwhetherweshoulduseall
+data(asmightbesuggestedbyGPT-3resultsalone)oronlysomeofit. Butitisrarelythecasethat
+bestestimatesareobtainedfromtheendoftrainingalone.
+Thereis,however,adistinctlyuninformativephaseatthebeginningoftraining,ascanbeseenin
+thelosscurves(App.B)andnotedintheliterature(e.g.,Chenetal.). Weobservethatthisperiodis
+morelikelytocontainsignificantspikesoranincreaseinloss(worseperformance)despiteadditional
+training. Wehencehypothesizethispartshouldalwaysberemovedfromthescalinglaw.
+7
+sledom
+niarT#
+3
+4
+5
+6
+sledom
+niarT#
+3
+4
+5
+6
+7
+8
+sledom
+niarT#
+3
+4
+5
+6
+7
+8
+9
+01
+11arXivVersion
+35 35
+30 30
+25 25
+20 20
+15 15
+10 10
+5 5
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0 0.10.20.30.40.50.60.70.80.91.0 0
+Percentage percentage
+35 35
+30 30
+25 25
+20 20
+15 15
+10 10
+5 5
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0 0.10.20.30.40.50.60.70.80.91.0 0
+Percentage percentage
+(a)Cut10Bfirsttokens (b)Fitalldata
+Figure5: Theeffectoffittingwithallthetraininglossesandwithoutthebeginning10Btokensseen.
+Eachcellrepresentstheabsoluterelativeerrorwhenestimatingascalinglawfromagivennumber
+ofmodels(verticalaxis)trainedonagivensubsetofcheckpointsfromthebeginningoftraining
+(horizontalaxis).
+Indeed,ourexperimentsdepictedinFig.5comparescalinglawAREswithandwithoutincluding
+modelstrainedonlessthan10BtokensinF. Evidently,theverybeginningoftraining(oftennot
+evenreportedinlogsandgraphs)issometimesharmfultothepredictionandisperhapsmorenoisy.
+Specifically,werunthesameexperimentswithandwithoutignoringthefirst10Btokensseen. We
+findthatforsomemodels(e.g.,OPTandPythia)theAREexceeds15%evenwhenusingthewhole
+data,butdropsto4-10%whenignoringthosetokens. Inpreliminaryexperiments,wefoundthat
+cuttingfewertokensgavenoisierresults,andcuttingmorehadanegligibleeffect.
+7 HOW BIG A MODEL SHOULD I TRAIN?
+Largermodelsarebetter,butnotnecessary.Mainly,bewareofspecificmodelsthatmightgivenoisyresults.
+InFig.1wecomparescalinglawswhencontrollingtheamount,percentage,orsizeofthemodels(2
+atatime). Wefindthatchoosingmodelscloserin#paramstothetargetmodelisgenerallyeffective
+(e.g.,Fig.1a,1c),buttheeffectisneitherstrongnormonotonic. Forexample,inallcasesfitting
+onallF providesonofthelowestARE.However,inGPT,GopherandOPT,predictingwiththe
+smallest4modelsavailableisalreadyenoughtoachievelessthan10%error. InPythia,thesmallest
+modelsarenotpredictivebuttherestofthemodelsprovideasimilarfit. Whilerelyingonalarger
+modelisbeneficial,predictingmanyscalesup(e.g.,thebehaviorofa34×largermodelinPythia)is
+stillreliable,especiallyifaccountingforotherfactorswediscussnext.
+In fact, training additional, larger models before fitting a scaling law may sometimes decrease
+accuracyduetoincreasedvarianceinlargemodelperformance—see,forexample,Pythia2.8Bin
+Fig.1. Unfortunately,itisdifficulttoidentifywhetheraseedisexceptionallyhighorlow-performing
+withoutadditionalinformation. Forexample,cross-validationonF failstodetectit(seeApp.D).
+Instead,thisinstabilitycanbeaddressedbyaccountingforseedvariability. Awastefulwaytodo
+sowouldbetotraineverymodelseveraltimes. Abetteralternativeistodiversifyandtraineach
+modelonasdifferinghyperparameters(here,seed,#params,#toks)aspossibleandtomaximize
+theinformationgained(acommonpracticeinefficiency-coveragescenarios,e.g.,Perlitzetal.,2024).
+8
+TPO
+aihtyP
+sledom
+niarT#
+sledom
+niarT#
+2
+3
+4
+5
+2
+3
+4
+5
+6 7
+8
+9
+01
+sledom
+niarT#
+sledom
+niarT#
+2
+3
+4
+5
+2
+3
+4
+5
+6 7
+8
+9
+01arXivVersion
+Hence,wesuggesttrainingmoremodelsofdifferingsizeseachaccountingforbothsizeandseed
+changes,ratherthantrainingmultipleseeds. Wefurtherdiscusstheeffectsofnumberofmodels(|F|)
+in§8.
+Selectionof#paramsvaluestooptimizestatisticalandcomputationalefficiencyisaproblemwe
+leaveforfutureworkfuturework. Giventhechoiceofthelargestmodelandthenumberofmodels,it
+isunclearhowtospacethemodelsizes,whetherlinearly,log-scale,orotherwise.
+8 HOW MANY MODELS ARE NEEDED FOR RELIABLE PREDICTIONS?
+5modelsisasafebet,morewouldimprovetheresults’robustness.Thesemodelscanbesmall.
+Wehaveseenthatpredictingwithlargermodelsandhenceextrapolatinglessyieldsbetterresults.
+However,givencomputeconstraints(andadditionalhardwareconstraintslikememory),practitioners
+maygenerallywishtousesmallermodelswhenpossible. ConsiderforexampleFig.1bwherewe
+comparefittingon4modelsbutvarytheirsize. WefindthatmoremodelsreduceAREevenwithout
+beingbiggermodels. Asdiscussedin§7,addingalargermodeltoacurrentscaledfamilyservestwo
+goals,itincreasestheproximitytothepredictedmodel,aswellasincreasesthenumberofmodels
+seen.
+Weseparatethecontributionofsizeandnumberofmodelseffect. InFig.1c,wepredictwiththe
+largestmodelbeingheldconstantandadd(atminimalcost)smallermodels. Weseeagainthatlarger
+modelsdobenefitpredictions. Forexample,thesmallmodelspart(left)ofthegraphindicateslarge
+errors(bright). However,wealsoseeagaintheunwantedeffectsasinglemodelmayhaveonthe
+overallprediction. Considerforexamplethefigure’sdiagonalinPythia. Cellsinadiagonalshare
+agroupofmodelsandeachrowaddsanotheronetoF. Evidentlythisspecificgrouphurtsresults,
+evenwhenlargermodelsareaddedtoF. Withenoughmodels(bottomofdiagonal),thenegative
+decreases. Switchingthemodel(nextcolumn)alsoremovesthenegativeeffect. Moreover,acrossall
+rowsthetendencyisnevermonotonic,implyinglargermodelsdonotnotensurebetterpredictions.
+Butingeneral,weseethatincreasingthenumberofmodelstendstoimproveprediction.Forexample,
+inGPT3thebestpredictionsarewithmanymodels. Perhapsintuitively,addingalargermodeland
+improvingboth#paramsandnumberofmodelsaspectsimprovesquiteconsistently(Fig.1band
+diagonalsofFig.1c).
+9 WHAT PARAMETERS DO I ACTUALLY NEED TO ESTIMATE?
+Scalinglawsmighthavefewerdegreesoffreedomthandescribedintheliterature.
+Assumingwedonottrytoaccountforaspectsotherthan#toksand#params(see§10),onemight
+wonderifsomeoftheobservederrorscomefrommodelmisspecification—anincorrectfunctional
+form for Lˆ, which (with a small number of exceptions including Caballero et al.) has generally
+gone uncontested since it was first proposed (Rosenfeld et al.; Hoffmann et al., 2022). Here we
+specificallyevaluatewhetherscalinglawsempiricallyexhibitfewerdegreesoffreedomthanhasbeen
+proposed. First,wecomputetheprincipalcomponentsofthe5learnedparametersandfindthat3
+componentsexplain99.49%ofthevariancebetweenthe5parameters. Inspectionrevealsthattwoof
+thesecomponentstightlycouplethepairsofparametersdealingwiththesametrainingparameter
+(#paramsand#toks). PlottingvaluesofAagainstαandofB againstβ (Fig.3),weseeaclear
+linearrelationshipbetweenthesevariablesdespitethernon-linearinteractioninEq.1. Therearea
+fewexceptions: theEncoder-DecodermodelT5-Pileshowsadifferentbehaviorfromtherestofthe
+scaledfamilies,andfouradditionalscaledfamiliesshowadifferentrelationshipbetweenBandβ. In
+fact,allthesefamiliessharethecommonfeaturethattheyweretrainedusingmultiplepassesover
+asingletrainingsetGadreetal.(2024). Theoutlierpointwithβ > 4isa70mbaselineofPythia
+foracontinualtraininginterventionexperiment(Bidermanetal.,2023). Futureworkmayconsider
+differentfunctionformstyingsomeoftheparametersorintroducingotheronesinstead.
+Anotherchangeforthefunctionformthatfutureworkshouldconsiderisaccountingforthelearning
+rateschedule,asourexperimentsassumeditwasnegligible. Amismatchbetweentheformandthe
+9arXivVersion
+realdependencemightexplaintheinconsistenciesinusingthebeginningoftraining.Asnotedin§6.1,
+thebeginningisnotfittingaswellaslateron,whichwealsoseetosomeextentinthepercentages
+axisofFig.4. Thismightalsobeexpectedaspreviousworksdidnottakethetrainingtrajectory(and
+lossschedule)intoaccountandignoredthisdata.
+10 RELATED WORK
+Thisworkbuildsonalargenumberofrecentstudiesrelatingscalinglawestimationanddecision-
+makingaboutmodeltraining. Amongtheaspectsstudiedaretotaltrainingcostsincludinginference
+(Sardanaetal.),effectsofsophisticateddataselection(Sorscheretal.,2022;Geetal.,2024),training
+time(Inbar&Sernau,2024),transferoflearnedskills(Hernandezetal.,2021),behaviorofmodelsin
+othermodalities(Mikamietal.,2022;Abnaretal.;Alabdulmohsinetal.,2024;Hesslowetal.,2022)
+mixturesofexperts(Ludziejewskietal.),datamixing(Geetal.,2024),downstreamperformance
+(Muennighoffetal.,2024),vocabularysize(Taoetal.,2024),andarchitecturecomparisons(Tay
+etal.,2023;Polietal.,2024)includingsmallmodels(Muckatiraetal.,2024)orotherphenomena
+likefinetuning(Zhangetal.) andthelossindifferentpositionsinthetrainingsequences(Xiong
+etal.,2024). EspeciallyrelevanttoourcontextisRuanetal.(2024)thatrelyonmultiplepretraining
+settingsforcreatingscalinglawsthatgeneralizeacrossmodelsorkindsoflosses.
+Anotherlineofworksthatcanbeseenasascalinglawdiscussestherelationbetweenmodelwidth
+andhyperparameterchoices(ratherthanloss)(Yangetal.,2022;2021;Blakeetal.,2024;Lingle,
+2024).
+11 LIMITATIONS
+Our use of ARE as a primary evaluation metric does not distinguish between over-estimation or
+under-estimationofperformance. Whenusingscalinglawstochoosebetweencandidatemodelsto
+train,theseerrorestimatesmaybeunnecessarilyconservative(e.g.ifbothfamilies’lawsarebiased
+inthesamedirection).
+Another major limitation in this study is the difficulty of aggregating information across model
+families.Asmostpublishedfamiliesevaluatemodelsofincomparablescales,oftenoverincomparable
+ranges,wewereunabletoproduceaninformativeversionofFig.1thataggregatedinformationacross
+allmodelsavailable,andwasthusabletogivegeneralrecommendationsaboutcompute-optimal
+choiceofpreliminaryexperiments.
+12 DISCUSSION
+Thispaperprovidesafirststudyofopenquestionsintheestimationofscalinglawsandtheirrelation
+tolarge-scalepretrainingdecisions. Weexpectthatmanyoftheseconclusionscouldbesharpened
+or extended with the availability of additional information about model training, and we call on
+other leaders of large-scale training efforts to share training losses and evaluation results from
+multiplecheckpoitnsduringpretraining—evenincaseswheremodelparametersthemselvescannot
+bereleased.
+Ourfindingsleaveopenmanyimportantquestions,fromperformingefficientpredictionsbyfitting
+onmanymodelfamiliestoscalinglawsofthedeltasbetweena/btestforachangeinattribute(e.g.
+optimizer)orgeneralizefromonea/btesttoanother,andtoothermethodsofefficientlycompare
+architecturesthatdonotrelyonmultiplemodels(e.g. continuallearning). Inaddition,ourresultsin
+§9suggestotherscalinglawparameterizationsmightbetterfitdata.
+REFERENCES
+SamiraAbnar,MostafaDehghani,BehnamNeyshabur,andHanieSedghi. Exploringthelimitsof
+largescalepre-training. InInternationalConferenceonLearningRepresentations.
+EkinAkyürek,BailinWang,YoonKim,andJacobAndreas. In-contextlanguagelearning: Arhitec-
+turesandalgorithms. arXivpreprintarXiv:2401.12973,2024.
+10arXivVersion
+IbrahimMAlabdulmohsin,BehnamNeyshabur,andXiaohuaZhai. Revisitingneuralscalinglawsin
+languageandvision. AdvancesinNeuralInformationProcessingSystems,35:22300–22312,2022.
+Ibrahim M Alabdulmohsin, Xiaohua Zhai, Alexander Kolesnikov, and Lucas Beyer. Getting vit
+in shape: Scaling laws for compute-optimal model design. Advances in Neural Information
+ProcessingSystems,36,2024.
+Tamay Besiroglu, Ege Erdil, Matthew Barnett, and Josh You. Chinchilla scaling: A replication
+attempt,2024. URLhttps://arxiv.org/abs/2404.10102.
+Stella Biderman, Hailey Schoelkopf, Quentin Gregory Anthony, Herbie Bradley, Kyle O’Brien,
+EricHallahan,MohammadAflahKhan,ShivanshuPurohit,UsvsnSaiPrashanth,EdwardRaff,
+AviyaSkowron,LintangSutawika,andOskarVanDerWal. Pythia: Asuiteforanalyzinglarge
+languagemodelsacrosstrainingandscaling. InAndreasKrause,EmmaBrunskill,Kyunghyun
+Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett (eds.), Proceedings of the 40th
+InternationalConferenceonMachineLearning,volume202ofProceedingsofMachineLearning
+Research, pp. 2397–2430. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/
+v202/biderman23a.html.
+CharlieBlake,ConstantinEichenberg,JosefDean,LukasBalles,LukeYPrince,BjörnDeiseroth,
+Andres Felipe Cruz-Salinas, Carlo Luschi, Samuel Weinbach, and Douglas Orr. u-mu p: The
+unit-scaledmaximalupdateparametrization. arXivpreprintarXiv:2407.17465,2024.
+TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel
+Herbert-Voss,GretchenKrueger,TomHenighan,RewonChild,AdityaRamesh,DanielM.Ziegler,
+JeffreyWu,ClemensWinter,ChristopherHesse,MarkChen,EricSigler,MateuszLitwin,Scott
+Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford, Ilya
+Sutskever,andDarioAmodei. Languagemodelsarefew-shotlearners,2020.
+EthanCaballero,KshitijGupta,IrinaRish,andDavidKrueger. Brokenneuralscalinglaws. InThe
+EleventhInternationalConferenceonLearningRepresentations.
+AngelicaChen,RavidShwartz-Ziv,KyunghyunCho,MatthewLLeavitt,andNaomiSaphra. Sudden
+dropsintheloss: Syntaxacquisition,phasetransitions,andsimplicitybiasinmlms. InTheTwelfth
+InternationalConferenceonLearningRepresentations.
+Leshem Choshen, Guy Hacohen, Daphna Weinshall, and Omri Abend. The grammar-learning
+trajectories of neural language models. In Smaranda Muresan, Preslav Nakov, and Aline
+Villavicencio (eds.), Proceedings of the 60th Annual Meeting of the Association for Compu-
+tationalLinguistics(Volume1: LongPapers),pp.8281–8297,Dublin,Ireland,May2022.As-
+sociation for Computational Linguistics. doi: 10.18653/v1/2022.acl-long.568. URL https:
+//aclanthology.org/2022.acl-long.568.
+AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,AnirudhGoyal,AnthonyHartshorn,
+AoboYang,ArchiMitra,ArchieSravankumar,ArtemKorenev,ArthurHinsvark,ArunRao,Aston
+Zhang,AurelienRodriguez,AustenGregerson,AvaSpataru,BaptisteRoziere,BethanyBiron,
+BinhTang, BobbieChern, CharlotteCaucheteux, ChayaNayak, ChloeBi, ChrisMarra, Chris
+McConnell,ChristianKeller,ChristopheTouret,ChunyangWu,CorinneWong,CristianCanton
+Ferrer,CyrusNikolaidis,DamienAllonsius,DanielSong,DaniellePintz,DannyLivshits,David
+Esiobu,DhruvChoudhary,DhruvMahajan,DiegoGarcia-Olano,DiegoPerino,DieuwkeHupkes,
+Egor Lakomkin, Ehab AlBadawy, Elina Lobanova, Emily Dinan, Eric Michael Smith, Filip
+Radenovic,FrankZhang,GabrielSynnaeve,GabrielleLee,GeorgiaLewisAnderson,Graeme
+Nail,GregoireMialon,GuanPang,GuillemCucurell,HaileyNguyen,HannahKorevaar,HuXu,
+HugoTouvron,IliyanZarov,ImanolArrietaIbarra,IsabelKloumann,IshanMisra,IvanEvtimov,
+Jade Copet, Jaewon Lee, Jan Geffert, Jana Vranes, Jason Park, Jay Mahadeokar, Jeet Shah,
+JelmervanderLinde,JenniferBillock,JennyHong,JenyaLee,JeremyFu,JianfengChi,Jianyu
+Huang, Jiawen Liu, Jie Wang, Jiecao Yu, Joanna Bitton, Joe Spisak, Jongsoo Park, Joseph
+Rocca,JoshuaJohnstun,JoshuaSaxe,JuntengJia,KalyanVasudenAlwala,KartikeyaUpasani,
+Kate Plawiak, Ke Li, Kenneth Heafield, Kevin Stone, Khalid El-Arini, Krithika Iyer, Kshitiz
+Malik,KuenleyChiu,KunalBhalla,LaurenRantala-Yeary,LaurensvanderMaaten,Lawrence
+11arXivVersion
+Chen,LiangTan,LizJenkins,LouisMartin,LovishMadaan,LuboMalo,LukasBlecher,Lukas
+Landzaat,LukedeOliveira,MadelineMuzzi,MaheshPasupuleti,MannatSingh,ManoharPaluri,
+MarcinKardas,MathewOldham,MathieuRita,MayaPavlova,MelanieKambadur,MikeLewis,
+MinSi,MiteshKumarSingh,MonaHassan,NamanGoyal,NarjesTorabi,NikolayBashlykov,
+NikolayBogoychev,NiladriChatterji,OlivierDuchenne,OnurÇelebi,PatrickAlrassy,Pengchuan
+Zhang,PengweiLi,PetarVasic,PeterWeng,PrajjwalBhargava,PratikDubal,PraveenKrishnan,
+Punit Singh Koura, Puxin Xu, Qing He, Qingxiao Dong, Ragavan Srinivasan, Raj Ganapathy,
+RamonCalderer,RicardoSilveiraCabral,RobertStojnic,RobertaRaileanu,RohitGirdhar,Rohit
+Patel,RomainSauvestre,RonniePolidoro,RoshanSumbaly,RossTaylor,RuanSilva,RuiHou,
+RuiWang,SagharHosseini,SahanaChennabasappa,SanjaySingh,SeanBell,SeohyunSonia
+Kim,SergeyEdunov,ShaoliangNie,SharanNarang,SharathRaparthy,ShengShen,ShengyeWan,
+ShrutiBhosale,ShunZhang,SimonVandenhende,SoumyaBatra,SpencerWhitman,StenSootla,
+StephaneCollot, SuchinGururangan, SydneyBorodinsky, TamarHerman, TaraFowler, Tarek
+Sheasha,ThomasGeorgiou,ThomasScialom,TobiasSpeckbacher,TodorMihaylov,TongXiao,
+UjjwalKarn, VedanujGoswami, VibhorGupta, VigneshRamanathan, ViktorKerkez, Vincent
+Gonguet,VirginieDo,VishVogeti,VladanPetrovic,WeiweiChu,WenhanXiong,WenyinFu,
+WhitneyMeers,XavierMartinet,XiaodongWang,XiaoqingEllenTan,XinfengXie,XuchaoJia,
+XueweiWang,YaelleGoldschlag,YasheshGaur,YasmineBabaei,YiWen,YiwenSong,Yuchen
+Zhang, Yue Li, Yuning Mao, Zacharie Delpierre Coudert, Zheng Yan, Zhengxing Chen, Zoe
+Papakipos,AadityaSingh,AaronGrattafiori,AbhaJain,AdamKelsey,AdamShajnfeld,Adithya
+Gangidi,AdolfoVictoria,AhuvaGoldstand,AjayMenon,AjaySharma,AlexBoesenberg,Alex
+Vaughan,AlexeiBaevski,AllieFeinstein,AmandaKallet,AmitSangani,AnamYunus,Andrei
+Lupu, Andres Alvarado, Andrew Caples, Andrew Gu, Andrew Ho, Andrew Poulton, Andrew
+Ryan, Ankit Ramchandani, Annie Franco, Aparajita Saraf, Arkabandhu Chowdhury, Ashley
+Gabriel,AshwinBharambe,AssafEisenman,AzadehYazdan,BeauJames,BenMaurer,Benjamin
+Leonhardi, Bernie Huang, Beth Loyd, Beto De Paola, Bhargavi Paranjape, Bing Liu, Bo Wu,
+BoyuNi,BradenHancock,BramWasti,BrandonSpence,BraniStojkovic,BrianGamido,Britt
+Montalvo, Carl Parker, Carly Burton, Catalina Mejia, Changhan Wang, Changkyu Kim, Chao
+Zhou,ChesterHu,Ching-HsiangChu,ChrisCai,ChrisTindal,ChristophFeichtenhofer,Damon
+Civin,DanaBeaty,DanielKreymer,DanielLi,DannyWyatt,DavidAdkins,DavidXu,Davide
+Testuggine,DeliaDavid,DeviParikh,DianaLiskovich,DidemFoss,DingkangWang,DucLe,
+Dustin Holland, Edward Dowling, Eissa Jamil, Elaine Montgomery, Eleonora Presani, Emily
+Hahn,EmilyWood,ErikBrinkman,EstebanArcaute,EvanDunbar,EvanSmothers,FeiSun,Felix
+Kreuk,FengTian,FiratOzgenel,FrancescoCaggioni,FranciscoGuzmán,FrankKanayet,Frank
+Seide, Gabriela Medina Florez, Gabriella Schwarz, Gada Badeer, Georgia Swee, Gil Halpern,
+GovindThattai,GrantHerman,GrigorySizov,Guangyi,Zhang,GunaLakshminarayanan,Hamid
+Shojanazeri,HanZou,HannahWang,HanwenZha,HarounHabeeb,HarrisonRudolph,Helen
+Suk,HenryAspegren,HunterGoldman,IgorMolybog,IgorTufanov,Irina-ElenaVeliche,ItaiGat,
+JakeWeissman,JamesGeboski,JamesKohli,JaphetAsher,Jean-BaptisteGaya,JeffMarcus,Jeff
+Tang,JenniferChan,JennyZhen,JeremyReizenstein,JeremyTeboul,JessicaZhong,JianJin,
+JingyiYang,JoeCummings,JonCarvill,JonShepard,JonathanMcPhie,JonathanTorres,Josh
+Ginsburg,JunjieWang,KaiWu,KamHouU,KaranSaxena,KarthikPrasad,KartikayKhandelwal,
+Katayoun Zand, Kathy Matosich, Kaushik Veeraraghavan, Kelly Michelena, Keqian Li, Kun
+Huang, Kunal Chawla, Kushal Lakhotia, Kyle Huang, Lailin Chen, Lakshya Garg, Lavender
+A,LeandroSilva,LeeBell,LeiZhang,LiangpengGuo,LichengYu,LironMoshkovich,Luca
+Wehrstedt,MadianKhabsa,ManavAvalani,ManishBhatt,MariaTsimpoukelli,MartynasMankus,
+MatanHasson,MatthewLennie,MatthiasReso,MaximGroshev,MaximNaumov,MayaLathi,
+MeghanKeneally,MichaelL.Seltzer,MichalValko,MichelleRestrepo,MihirPatel,MikVyatskov,
+MikayelSamvelyan,MikeClark,MikeMacey,MikeWang,MiquelJubertHermoso,MoMetanat,
+Mohammad Rastegari, Munish Bansal, Nandhini Santhanam, Natascha Parks, Natasha White,
+NavyataBawa,NayanSinghal,NickEgebo,NicolasUsunier,NikolayPavlovichLaptev,Ning
+Dong,NingZhang,NormanCheng,OlegChernoguz,OliviaHart,OmkarSalpekar,OzlemKalinli,
+ParkinKent,ParthParekh,PaulSaab,PavanBalaji,PedroRittner,PhilipBontrager,PierreRoux,
+PiotrDollar,PolinaZvyagina,PrashantRatanchandani,PritishYuvraj,QianLiang,RachadAlao,
+Rachel Rodriguez, Rafi Ayub, Raghotham Murthy, Raghu Nayani, Rahul Mitra, Raymond Li,
+Rebekkah Hogan, Robin Battey, Rocky Wang, Rohan Maheswari, Russ Howes, Ruty Rinott,
+SaiJayeshBondu,SamyakDatta,SaraChugh,SaraHunt,SargunDhillon,SashaSidorov,Satadru
+Pan,SaurabhVerma,SeijiYamamoto,SharadhRamaswamy,ShaunLindsay,ShaunLindsay,Sheng
+Feng, Shenghao Lin, Shengxin Cindy Zha, Shiva Shankar, Shuqiang Zhang, Shuqiang Zhang,
+12arXivVersion
+SinongWang,SnehaAgarwal,SojiSajuyigbe,SoumithChintala,StephanieMax,StephenChen,
+SteveKehoe,SteveSatterfield,SudarshanGovindaprasad,SumitGupta,SungminCho,Sunny
+Virk,SurajSubramanian,SyChoudhury,SydneyGoldman,TalRemez,TamarGlaser,Tamara
+Best,ThiloKohler,ThomasRobinson,TianheLi,TianjunZhang,TimMatthews,TimothyChou,
+TzookShaked,VarunVontimitta,VictoriaAjayi,VictoriaMontanez,VijaiMohan,VinaySatish
+Kumar,VishalMangla,VladIonescu,VladPoenaru,VladTiberiuMihailescu,VladimirIvanov,
+WeiLi,WenchenWang,WenwenJiang,WesBouaziz,WillConstable,XiaochengTang,Xiaofang
+Wang,XiaojianWu,XiaolanWang,XideXia,XilunWu,XinboGao,YanjunChen,YeHu,YeJia,
+YeQi,YendaLi,YilinZhang,YingZhang,YossiAdi,YoungjinNam,Yu,Wang,YuchenHao,
+YundiQian,YuziHe,ZachRait,ZacharyDeVito,ZefRosnbrick,ZhaoduoWen,ZhenyuYang,and
+ZhiweiZhao. Thellama3herdofmodels,2024. URLhttps://arxiv.org/abs/2407.21783.
+SamirYitzhakGadre,GeorgiosSmyrnis,VaishaalShankar,SuchinGururangan,MitchellWortsman,
+RulinShao,JeanMercat,AlexFang,JeffreyLi,SedrickKeh,etal. Languagemodelsscalereliably
+withover-trainingandondownstreamtasks. arXivpreprintarXiv:2403.08540,2024.
+CeGe, ZhijianMa, DaoyuanChen, YaliangLi, andBolinDing. Datamixingmadeefficient: A
+bivariatescalinglawforlanguagemodelpretraining,2024. URLhttps://arxiv.org/abs/2405.
+14908.
+Dirk Groeneveld, Iz Beltagy, Pete Walsh, Akshita Bhagia, Rodney Kinney, Oyvind Tafjord,
+AnanyaHarshJha,HamishIvison,IanMagnusson,YizhongWang,ShaneArora,DavidAtkinson,
+RussellAuthur,KhyathiRaghaviChandu,ArmanCohan,JenniferDumas,YanaiElazar,YulingGu,
+JackHessel,TusharKhot,WilliamMerrill,JacobMorrison,NiklasMuennighoff,AakankshaNaik,
+CrystalNam, MatthewE.Peters, ValentinaPyatkin, AbhilashaRavichander, DustinSchwenk,
+Saurabh Shah, Will Smith, Emma Strubell, Nishant Subramani, Mitchell Wortsman, Pradeep
+Dasigi,NathanLambert,KyleRichardson,LukeZettlemoyer,JesseDodge,KyleLo,LucaSol-
+daini, Noah A. Smith, and Hannaneh Hajishirzi. Olmo: Accelerating the science of language
+models,2024. URLhttps://arxiv.org/abs/2402.00838.
+DannyHernandez,JaredKaplan,TomHenighan,andSamMcCandlish. Scalinglawsfortransfer.
+arXivpreprintarXiv:2102.01293,2021.
+DanielHesslow,NiccolóZanichelli,PascalNotin,IacopoPoli,andDeboraMarks. Rita: astudyon
+scalingupgenerativeproteinsequencemodels. arXivpreprintarXiv:2205.05789,2022.
+DylanHillier,LeonGuertler,ChestonTan,PalaashAgrawal,RuiruiChen,andBobbyCheng. Super
+tiny language models. ArXiv, abs/2405.14159, 2024. URL https://api.semanticscholar.
+org/CorpusID:269982112.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza
+Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, et al.
+Trainingcompute-optimallargelanguagemodels. arXivpreprintarXiv:2203.15556,2022.
+ShengdingHu,YugeTu,XuHan,ChaoqunHe,GanquCui,XiangLong,ZhiZheng,YeweiFang,
+YuxiangHuang,WeilinZhao,etal. Minicpm: Unveilingthepotentialofsmalllanguagemodels
+withscalabletrainingstrategies. arXivpreprintarXiv:2404.06395,2024.
+Itay Inbar and Luke Sernau. Time matters: Scaling laws for any budget. arXiv preprint
+arXiv:2406.18922,2024.
+Berivan Isik, Natalia Ponomareva, Hussein Hazimeh, Dimitris Paparas, Sergei Vassilvitskii, and
+SanmiKoyejo. Scalinglawsfordownstreamtaskperformanceoflargelanguagemodels. arXiv
+preprintarXiv:2402.04177,2024.
+Maor Ivgi, Yair Carmon, and Jonathan Berant. Scaling laws under the microscope: Predicting
+transformerperformancefromsmallscaleexperiments. arXivpreprintarXiv:2202.06387,2022.
+SamyJelassi,DavidBrandfonbrener,ShamMKakade,andEranMalach. Repeatafterme: Trans-
+formersarebetterthanstatespacemodelsatcopying. arXivpreprintarXiv:2402.01032,2024.
+JaredKaplan,SamMcCandlish,TomHenighan,TomBBrown,BenjaminChess,RewonChild,Scott
+Gray,AlecRadford,JeffreyWu,andDarioAmodei. Scalinglawsforneurallanguagemodels.
+arXivpreprintarXiv:2001.08361,2020.
+13arXivVersion
+TevenLeScao,AngelaFan,ChristopherAkiki,ElliePavlick,SuzanaIlic´,DanielHesslow,Roman
+Castagné, Alexandra Sasha Luccioni, François Yvon, Matthias Gallé, et al. Bloom: A 176b-
+parameteropen-accessmultilinguallanguagemodel. 2023.
+LucasLingle. Alarge-scaleexplorationofmu-transfer. arXivpreprintarXiv:2404.05728,2024.
+ZhengzhongLiu,AurickQiao,WillieNeiswanger,HongyiWang,BowenTan,TianhuaTao,Junbo
+Li,YuqiWang,SuqiSun,OmkarPangarkar,RichardFan,YiGu,VictorMiller,YonghaoZhuang,
+GuoweiHe,HaonanLi,FajriKoto,LipingTang,NikhilRanjan,ZhiqiangShen,XuguangRen,
+RobertoIriondo,CunMu,ZhitingHu,MarkSchulze,PreslavNakov,TimBaldwin,andEricP.
+Xing. Llm360: Towardsfullytransparentopen-sourcellms,2023.
+JanLudziejewski,JakubKrajewski,KamilAdamczewski,MaciejPióro,MichałKrutul,Szymon
+Antoniak,KamilCiebiera,KrystianKról,TomaszOdrzygóz´dz´,PiotrSankowski,etal. Scaling
+laws for fine-grained mixture of experts. In Forty-first International Conference on Machine
+Learning.
+HiroakiMikami,KenjiFukumizu,ShogoMurai,ShujiSuzuki,YutaKikuchi,TaijiSuzuki,Shin-ichi
+Maeda,andKoheiHayashi. Ascalinglawforsyn2realtransfer: Howmuchisyourpre-training
+effective? In Joint European Conference on Machine Learning and Knowledge Discovery in
+Databases,pp.477–492.Springer,2022.
+SherinMuckatira,VijetaDeshpande,VladislavLialin,andAnnaRumshisky. Emergentabilitiesin
+reduced-scalegenerativelanguagemodels. InKevinDuh,HelenaGomez,andStevenBethard
+(eds.),FindingsoftheAssociationforComputationalLinguistics: NAACL2024,pp.1242–1257,
+MexicoCity,Mexico,June2024.AssociationforComputationalLinguistics. doi: 10.18653/v1/
+2024.findings-naacl.79. URLhttps://aclanthology.org/2024.findings-naacl.79.
+NiklasMuennighoff, AlexanderRush, BoazBarak, TevenLeScao, NouamaneTazi, Aleksandra
+Piktus,SampoPyysalo,ThomasWolf,andColinARaffel. Scalingdata-constrainedlanguage
+models. AdvancesinNeuralInformationProcessingSystems,36,2024.
+David Owen. How predictable is language model benchmark performance? arXiv preprint
+arXiv:2401.04757,2024.
+RohanPandey. gzippredictsdata-dependentscalinglaws. arXivpreprintarXiv:2405.16684,2024.
+FabianPedregosa,GaëlVaroquaux,AlexandreGramfort,VincentMichel,BertrandThirion,Olivier
+Grisel, Mathieu Blondel, Peter Prettenhofer, Ron Weiss, Vincent Dubourg, et al. Scikit-learn:
+Machinelearninginpython. theJournalofmachineLearningresearch,12:2825–2830,2011.
+Yotam Perlitz, Elron Bandel, ArielGera, OfirArviv, LiatEin-Dor, EyalShnarch, Noam Slonim,
+MichalShmueli-Scheuer,andLeshemChoshen. Efficientbenchmarking(oflanguagemodels).
+In Kevin Duh, Helena Gomez, and Steven Bethard (eds.), Proceedings of the 2024 Confer-
+enceoftheNorthAmericanChapteroftheAssociationforComputationalLinguistics: Human
+LanguageTechnologies(Volume1: LongPapers),pp.2519–2536,MexicoCity,Mexico,June
+2024.AssociationforComputationalLinguistics. doi: 10.18653/v1/2024.naacl-long.139. URL
+https://aclanthology.org/2024.naacl-long.139.
+Michael Poli, Armin W Thomas, Eric Nguyen, Pragaash Ponnusamy, Björn Deiseroth, Kristian
+Kersting,TaijiSuzuki,BrianHie,StefanoErmon,ChristopherRé,CeZhang,andStefanoMassaroli.
+Mechanisticdesignandscalingofhybridarchitectures,2024. URLhttps://arxiv.org/abs/
+2403.17844.
+Tomer Porian, Mitchell Wortsman, Jenia Jitsev, Ludwig Schmidt, and Yair Carmon. Resolving
+discrepanciesincompute-optimalscalingoflanguagemodels. arXivpreprintarXiv:2406.19146,
+2024.
+JonathanSRosenfeld,AmirRosenfeld,YonatanBelinkov,andNirShavit. Aconstructiveprediction
+ofthegeneralizationerroracrossscales. InInternationalConferenceonLearningRepresentations.
+YangjunRuan,ChrisJ.Maddison,andTatsunoriHashimoto. Observationalscalinglawsandthe
+predictabilityoflanguagemodelperformance,2024.
+14arXivVersion
+Nikhil Sardana, Jacob Portes, Sasha Doubov, and Jonathan Frankle. Beyond chinchilla-optimal:
+Accountingforinferenceinlanguagemodelscalinglaws. InForty-firstInternationalConference
+onMachineLearning.
+Thibault Sellam, Steve Yadlowsky, Ian Tenney, Jason Wei, Naomi Saphra, Alexander D’Amour,
+Tal Linzen, Jasmijn Bastings, Iulia Raluca Turc, Jacob Eisenstein, et al. The multiberts: Bert
+reproductionsforrobustnessanalysis. InInternationalConferenceonLearningRepresentations,
+2021.
+Yikang Shen, Zheyu Zhang, Tianyou Cao, Shawn Tan, Zhenfang Chen, and Chuang Gan. Mod-
+uleformer: Learning modular large language models from uncurated data. arXiv preprint
+arXiv:2306.04640,2023.
+BenSorscher,RobertGeirhos,ShashankShekhar,SuryaGanguli,andAriMorcos. Beyondneural
+scaling laws: beating power law scaling via data pruning. Advances in Neural Information
+ProcessingSystems,35:19523–19536,2022.
+Lintang Sutawika, Aran Komatsuzaki, and Colin Raffel. Pile-t5, 2024. URL https://blog.
+eleuther.ai/pile-t5/. Blogpost.
+ChaofanTao,QianLiu,LongxuDou,NiklasMuennighoff,ZhongweiWan,PingLuo,MinLin,and
+NgaiWong. Scalinglawswithvocabulary: Largermodelsdeservelargervocabularies. arXiv
+preprintarXiv:2407.13623,2024.
+Yi Tay, Mostafa Dehghani, Samira Abnar, Hyung Chung, William Fedus, Jinfeng Rao, Sharan
+Narang,VinhTran,DaniYogatama,andDonaldMetzler. Scalinglawsvsmodelarchitectures:
+How does inductive bias influence scaling? In Houda Bouamor, Juan Pino, and Kalika Bali
+(eds.),FindingsoftheAssociationforComputationalLinguistics:EMNLP2023,pp.12342–12364,
+Singapore,December2023.AssociationforComputationalLinguistics. doi: 10.18653/v1/2023.
+findings-emnlp.825. URLhttps://aclanthology.org/2023.findings-emnlp.825.
+TheLLM360Team. Llm360k2-65b: Scalingupfullytransparentopen-sourcellms. 2024.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfoundation
+andfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+Alex Warstadt, Aaron Mueller, Leshem Choshen, Ethan Wilcox, Chengxu Zhuang, Juan Ciro,
+RafaelMosquera,BhargaviParanjabe,AdinaWilliams,TalLinzen,etal. Findingsofthebabylm
+challenge: Sample-efficientpretrainingondevelopmentallyplausiblecorpora. InProceedingsof
+theBabyLMChallengeatthe27thConferenceonComputationalNaturalLanguageLearning,pp.
+1–34,2023. URLhttps://aclanthology.org/2023.conll-babylm.1/.
+MitchellWortsman,PeterJLiu,LechaoXiao,KatieEEverett,AlexanderAAlemi,BenAdlam,
+JohnDCo-Reyes,IzzeddinGur,AbhishekKumar,RomanNovak,etal. Small-scaleproxiesfor
+large-scaletransformertraininginstabilities. InTheTwelfthInternationalConferenceonLearning
+Representations,2023.
+Mengzhou Xia, Mikel Artetxe, Chunting Zhou, Xi Victoria Lin, Ramakanth Pasunuru, Danqi
+Chen,LukeZettlemoyer,andVeselinStoyanov. Trainingtrajectoriesoflanguagemodelsacross
+scales. In Anna Rogers, Jordan Boyd-Graber, and Naoaki Okazaki (eds.), Proceedings of the
+61stAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: LongPapers),
+pp.13711–13738,Toronto,Canada,July2023.AssociationforComputationalLinguistics. doi:
+10.18653/v1/2023.acl-long.767. URLhttps://aclanthology.org/2023.acl-long.767.
+Yizhe Xiong, Xiansheng Chen, Xin Ye, Hui Chen, Zijia Lin, Haoran Lian, Jianwei Niu, and
+Guiguang Ding. Temporal scaling law for large language models. 2024. URL https:
+//api.semanticscholar.org/CorpusID:269449894.
+GeYang, EdwardHu, IgorBabuschkin, SzymonSidor, XiaodongLiu, DavidFarhi, NickRyder,
+JakubPachocki, WeizhuChen, andJianfengGao. Tuninglargeneuralnetworksviazero-shot
+hyperparametertransfer. AdvancesinNeuralInformationProcessingSystems,34:17084–17097,
+2021.
+15arXivVersion
+GregYang,EdwardJHu,IgorBabuschkin,SzymonSidor,XiaodongLiu,DavidFarhi,NickRyder,
+JakubPachocki,WeizhuChen,andJianfengGao.Tensorprogramsv:Tuninglargeneuralnetworks
+viazero-shothyperparametertransfer. arXivpreprintarXiv:2203.03466,2022.
+BiaoZhang,ZhongtaoLiu,ColinCherry,andOrhanFirat. Whenscalingmeetsllmfinetuning: The
+effectofdata,modelandfinetuningmethod. InTheTwelfthInternationalConferenceonLearning
+Representations.
+SusanZhang,StephenRoller,NamanGoyal,MikelArtetxe,MoyaChen,ShuohuiChen,Christopher
+Dewan, Mona Diab, Xian Li, Xi Victoria Lin, Todor Mihaylov, Myle Ott, Sam Shleifer, Kurt
+Shuster,DanielSimig,PunitSinghKoura,AnjaliSridhar,TianluWang,andLukeZettlemoyer.
+Opt: Openpre-trainedtransformerlanguagemodels,2022. URLhttps://arxiv.org/abs/2205.
+01068.
+A SCALE UP WITH 1 MODEL
+Webringerrorsofdatafromfittingfromasinglemodelonagivenpercentageoftrainingtothe
+largestmodelwithfulltraining. Scalingisconstantandfollowstheliterature(Muennighoffetal.,
+2024) and the largest model stands as target model (so the bottom line in each figure represents
+predictingfromthebeginningoftraining).
+B LOSS CURVES AND PREDICTIONS
+WeprovideinFig.7graphsofthelossduringtrainingofthetargetmodelsperoriginatingsource
+(e.g.,apaper)togetherwiththepredictionsbyusingdifferentpercentageofthetraining.
+C IS SCALING WORKING ONLY UPWARDS?
+No.Smallmodelsusuallyshowconsistentandpredicatableperformance.
+Usually,onedoesnotuseascalinglawtoextrapolatetoasmallermodelasonecanjusttrainthe
+smallmodel. However,underobservationalscalinglaws,whereonewantstoresearchaphenomenon
+withoutscalingatall(Ruanetal.,2024),orwhenmanymodelsweretrainedandonewishestocreate
+smallermodelsforvariousreasons(Hillieretal.,2024;Warstadtetal.,2023),scalingdownmight
+proveuseful. Moreover,inthecontextoftraditionalscalinglawsthismayactasabaseline. Suchan
+experimentmayshedanotherlightonthenumberofmodels|F|versustheirsize#params. Iflarge
+modelsarebetterbecausetheyaremorestableorotherwisefitlawsmorerobustly,fewmodelswill
+beenough,ifthenumberofmodelsorscaledowndifferencefromtheprediction,itwillshowsimilar
+behaviourtoscalingup. Seemorein§8.
+Totestthiswereversetheorderofmodelsandpredictwiththelargestmodelsthelossonthesmallest
+models. Thismeansthatforexampleinthecaseof3models,wepredictthesmallestmodel’slossand
+fitthescalinglawrelyingonthe3largestmodels. Asbefore,webreaktheresultsbythepercentage
+oftrainingdoneanddonotreverseit.
+AsshowninFig.8,thenumberofmodelsplaysanimportantroleinfittingwellandaminimumof
+30-40%ofthetrainingisnecessaryforgoodfit,morethanthatoftenimprovesfurther.
+D CAN WE DETECT BAD MODELS TO FIT ON?
+Ifso,notthroughcrossvalidataion.
+In§7,weraisetheissueofinstabilityofscalinglawpredictions,withasinglemodelvastlychanging
+theresults. Wetriedtoseeif,withoutknowingtheARE,wecouldremovebadmodelsfromthe
+prediction. Wehypothesizedthatmodelsthatwecan’tpredictwouldmeanmodelsthatwouldskew
+ourpredictionswhenfittedupon. Weperformedacross-validationonthe#paramsfamiliesinF
+16arXivVersion
+Gpt2-c4-1.0
+Opt 100
+100
+0.1252.5e+20.23e+20.23e+20.22e+20.22e+20.22e+20.22e+20.21e+20.21e+20.21e+02
+2.8 15 2.3 0.350.51 1.4 2 1.8 1.3 0.53
+80
+80
+1.3 89 63 82 80 79 78 76 75 74 74
+6.7 2.4 36 37 37 37 35 35 34 33 32 60 60
+4.2 8.6 0.540.62 1.6 1.8 2.2 2.6 2.6 2.3
+13.0 36 5.9 23 27 27 27 26 25 25 25 40 40
+30.0 23 4.1 18 15 12 14 15 15 15
+20 8.7 25 12 0.53 6.7 6.5 4.6 2.8 1.9 1.2 0.73 20
+175.0 22 12 1.6 6.3 4.3 2.5 1.8 1.5 1.1 0.73
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage
+(a)OPT (b)GPT2(trainedonC4)
+Olmo 100 Pythia-deduped-v0 100
+0.07 651.1e+0291 941.1e+10.21e+10.21e+10.21e+10.21e+10.21e+02
+80 0.16 32 25 70 51 58 56 54 54 54 53 80
+1.0 1.1 1.5 1.7 1.7 1.6 1.5 1.3 1.2 1 0.94
+0.41 42 6.2 46 44 44 39 36 34 32 33
+60 60
+1.0 23 23 10 4.7 5.3 3.7 1.6 1.1 1.8 1.6
+1.4 26 4.3 38 16 17 12 12 11 11 12
+40 40
+2.8 1.8 29 29 16 16 17 18 20 20 20
+7.0 1.5 1.4 1.4 1.5 1.6 1.7 1.8 1.7 1.4 1.2
+20 6.9 25 4.5 3.5 4 4.4 3.5 3 2.8 2.8 3 20
+12.0 23 5.3 10 4 2.3 0.7 0.490.450.450.45
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage
+(c)OLMO (d)PythiadedupedV0
+Pythia-v0 100 Pythia-deduped 100
+0.07 731.2e+10.21e+10.21e+10.21e+10.21e+10.21e+10.21e+10.21e+10.21e+02 0.0191.2e+10.26e+10.24e+10.25e+10.26e+10.27e+10.27e+10.27e+10.27e+10.27e+02
+0.071.3e+10.26e+022e+022e+022e+022e+022e+022.1e+20.21e+20.21e+02
+0.16 48 41 62 64 62 56 54 51 49 50 80 0.161e+02181.2e+10.22e+10.22e+10.22e+10.22e+10.22e+10.22e+10.22e+02 80
+0.41 42 25 43 27 27 27 28 26 27 28 0.35 90 29 82 80 81 75 70 66 62 56
+1.0 21 6.6 1.4 2.1 5.1 3.9 1.7 1.5 1.1 0.94 60 0.41 90 33 82 54 61 59 54 56 57 56 60
+1.0 75 6.3 61 50 50 49 45 41 40 40
+1.4 26 9.4 31 8.5 7.7 9.9 11 9.8 11 11
+40 1.3 68 6.8 66 31 38 21 22 21 21 21 40
+2.8 15 30 10 12 13 17 18 19 19 19 1.4 68 9.1 8.4 37 33 29 29 25 25 25
+6.9 25 2 12 7.1 7.4 5.3 4.6 4.1 3.9 3.8 20 2.8 63 6.7 29 23 19 14 15 14 14 14 20
+6.9 66 4.3 21 3.1 6.4 4.9 3.7 3.7 3.4 3.9
+12.0 23 3.2 12 6.4 3.5 0.330.310.340.350.33 12.0 37 11 7 2.1 3.2 1.3 1.2 1 1.4 1.2
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage
+(e)PythiaV0 (f)Pythiadeduped
+Pythia
+100
+0.071.3e+10.29e+20.21e+10.28e+10.28e+022e+022e+022.1e+20.21e+20.21e+02 T5-pile
+100
+0.16 97 861.3e+10.22e+02991.1e+10.21e+10.22e+10.22e+10.22e+02 80 0.2475863042.1e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+02
+80
+0.41 82 58 75 74 58 57 56 57 57 57
+60
+1.4 66 18 26 31 27 23 24 24 24 24 0.7831736322.1e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+02 60
+40
+2.8 36 4.6 26 21 17 12 12 11 11 12 2.8498042882.1e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+02 40
+6.9 36 2 1.3 17 15 9.3 8.1 7.1 7.4 6.9 20
+20
+12.0 33 15 28 11 11 1.2 0.770.750.740.79 11.135426562.1e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+20.21e+02
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0
+Percentage Percentage
+(g)Pythia (h)T5-Pile
+Figure6: Fittingscalinglawsundertheassumptionthatallmodelsscalesimilarly. Thus,asingle
+modelisneededtopredict. ThelastrowineachFigurerepresentspredictingamodelatthebeginning
+ofitstraining. 17
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarT
+ezis_ledom_niarTarXivVersion
+33 .. 01 00000001 ....... 3456789 oveo rr ti rg ai in
+n
+a cl 4_ _p oa rp ige ir n:o alv -oe prt er na _i 4n
+l.m0_1b-1.0
+o d da ari t tg a ab bin l la aa t tl i i_ o op n ns sa p G Ge P Pr: T Td 2 2a - -t 8 8a . .b 7 7l 0 0a B Bti - -o c cn 4 4- -s 1 1. 40
+.0
+2.9 0000....8912 o ov ve er rt tr ra ai in n r rp wj _-o op rie gn i_ nl am l-_ o1 pb en-1 _3. l0 .m5_1b-1.0 0 0 0. . .1 2 3 d da at ta ab bl la at ti io on ns s G GP PT T2 2- -8 8. .7 70 0B B- -c c4 4- -2 3. .0 0 22 .. 78 000000 00000...... .....123456 56789 3.0 00000000000000000000000000 000000000000000000000000000000 00000000000000000.......................... .............................. .................12345678912345678912345678 123456781234567812345678456789 12345678123456789 d d da a at t ta a ab b bl l la a at t ti i io o on n ns s
+s
+G G GP P PT T T2 2 2- - -8 8 8. . .7 7 70 0 0B B B- - -c c c4 4 4- - -4 4 5. 4 .0 0.0
+datablations GPT2-8.70B-c4-7.0
+2.6 0 000. ...7 123 2.5 0 00000000000000000 0000000000 00000000000000000000000000000000000 . ................. .......... ................................... 1 23456789123456789 1234567891 23456789123456789123456789123456789 d da at ta ab bl la at ti io on ns
+s
+G GP PT T2 2- -8 8. .7 70 0B B- -o os sc ca ar r- -1 1. 40
+.0
+2.5 1010 1011 datablations GPT2-8.70B-oscar-2.0
+2.4 0.4 Tokens seen d da at ta ab bl la at ti io on ns s G GP PT T2 2- -8 8. .7 70 0B B- -o os sc ca ar r- -3 4. .0 0
+datablations GPT2-8.70B-oscar-44.0
+1010 2×1010 3×1010 datablations GPT2-8.70B-oscar-5.0
+Tokens seen datablations GPT2-8.70B-oscar-7.0
+(a)Overtrain (b)Datablations
+3.50 original_paper:gpt3 - arxiv.org-abs-2005.14165 original_paper:pythia
+3.25
+gpt3 - arxiv.org-abs-2005. 44 1 .. 4 05 165 GPT-3 175B or GPT-3 0000000001 0000000001 ......... ......... 123456789 123456789 p py yt th hi ia
+a
+b ol po to -6m 6- b7b1
+3.00 pythia pythia-12b-deduped
+2.75 3.5 pythia pythia-12b
+22 .. 25 50 23 .. 50
+1
+1000000000 00 01 00000000 01 ......... .. .........
+.
+126123456 78 912345678
+9
+p p py y yt t th h hi i ia a
+a
+p p py y yt t th h hi i ia a a- - -b i 1na .4ts e be r -l vi 5n e sne h- t oi6 o t. -n9 v-b 06- .d 9e bd -u dp ee dd uped
+12 .. 70 50 0000000001 .........123456789 12 .. 50
+000000000000000000 00 0000 .................. .. .... 123456789123456789 31 2345 p
+p
+py
+y
+yt
+t
+th
+h
+hi
+i
+ia
+a
+a
+p
+p
+py
+y
+yt
+t
+th
+h
+hi
+i
+ia
+a
+a-
+-
+-1
+1
+1.
+2
+24
+b
+bb
+-
+--
+d
+vd
+e
+0e dd uu pp ee dd -- v5 0shot-v0
+1010 1011 1011
+Tokens seen Tokens seen
+(c)GPT-3 (d)Pythia
+original_paper:t5-pile original_paper:training_trajectories
+0.09 t5-pile pile-t5-xxl 18 training_trajectories OPT-0.17T
+16
+0.08
+14
+0.07
+0.06
+12 00000000 ........ 12356789
+10
+0.4
+0.05 000000000.........123456789 8
+1 1
+1010 1011 1012 1011
+Tokens seen Tokens seen
+(e)T5-Pile (f)TrainingTrajectories
+Figure7: Ineachfigurealllossesfromaspecificsourceandpredictionsofthescalinglosswith
+differentpercentageofthe#toksandallmodels.
+eachtimesettingthemodelswithmost#toksastargetansexclusingthe#paramsfamilyfrom
+F. Ourhypothesiswasfoundtobeincorrect. Suchcasesofhard-to-predictmodelswerefoundto
+indicatethatthemodelsleftinF arebadpredictorsandnotthatthetargetisverydissimilar(a"bad"
+training). In58%ofthecasesremovingthatmodelfromthescalinglawcreatedtheworstARE
+possibleontheactualtarget,morethanremovinganyothermodel.
+18
+ssoL
+ssoL
+ssoL
+ssoL
+ssoL
+ssoLarXivVersion
+35 35
+30 30
+25 25
+20 20
+15 15
+10 10
+5 5
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+percentage Percentage
+(a)OPT (b)PythiadedupedV0
+35 35
+30 30
+25 25
+20 20
+15 15
+10 10
+5 5
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage
+(c)PythiaV0 (d)Pythiadeduped
+35 35
+30 30
+25 25
+20 20
+15 15
+10 10
+5 5
+0 0
+0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+Percentage Percentage
+(e)Pythia (f)T5-Pile
+Figure8: Fittingscalinglawstryingtopredictthesmallestmodel,withthelargest(Y-axis)models
+trainedonapercentageofthedata(X-axis).
+19
+sledom
+niarT#
+2
+3
+4
+5
+sledom
+niarT#
+sledom
+niarT#
+2
+3
+4
+5
+6
+7
+2
+3
+4
+5
+6
+sledom
+niarT#
+sledom
+niarT#
+sledom
+niarT#
+2
+3
+4
+5
+6
+7
+2
+3
+4
+5
+6
+7
+8
+9
+01
+2
+3
