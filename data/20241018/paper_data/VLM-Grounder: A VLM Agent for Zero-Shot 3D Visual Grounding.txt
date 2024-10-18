@@ -1,0 +1,1012 @@
+VLM-Grounder: A VLM Agent for Zero-Shot 3D
+Visual Grounding
+RunsenXu1,3 ZhiweiHuang2 TaiWang3 YilunChen3 JiangmiaoPang3(cid:66) DahuaLin1,3,4
+1TheChineseUniversityofHongKong 2ZhejiangUniversity 3ShanghaiAILaboratory
+4CentreforPerceptualandInteractiveIntelligence
+Abstract: 3Dvisualgroundingiscrucialforrobots,requiringintegrationofnat-
+ural language and 3D scene understanding. Traditional methods depending on
+supervisedlearningwith3Dpointcloudsarelimitedbyscarcedatasets. Recently
+zero-shotmethodsleveragingLLMshavebeenproposedtoaddressthedataissue.
+Whileeffective,thesemethodsonlyuseobject-centricinformation,limitingtheir
+ability to handle complex queries. In this work, we present VLM-Grounder, a
+novel framework using vision-language models (VLMs) for zero-shot 3D visual
+groundingbasedsolelyon2Dimages. VLM-Grounderdynamicallystitchesim-
+agesequences,employsagroundingandfeedbackschemetofindthetargetobject,
+and uses a multi-view ensemble projection to accurately estimate 3D bounding
+boxes. ExperimentsonScanReferandNr3DdatasetsshowVLM-Grounderout-
+performspreviouszero-shotmethods,achieving51.6%Acc@0.25onScanRefer
+and48.0%AcconNr3D,withoutrelyingon3Dgeometryorobjectpriors. Codes
+areavailableathttps://github.com/OpenRobotLab/VLM-Grounder.
+Keywords: 3DVisualGrounding,VLMAgent,Zero-ShotSceneUnderstanding
+1 Introduction
+3Dvisualgroundingfocusesonfindingthe3Dlocationofatargetobjectinascenebasedonuser
+queries, whichisafundamentalrequirementforrobots. Thistaskrequiresintegratingnaturallan-
+guage understanding with 3D scene comprehension. Previous methods mainly rely on supervised
+learningusingpaired3Dpointcloudsandlanguagedatatotrainend-to-endmodels. However,ex-
+istingvisualgroundingdatasets[1,2]arescarceandlimitedtoapre-definedvocabulary,challenging
+thedevelopmentofgeneralmodelsforopen-worldapplications.
+To address this issue, recent approaches [3, 4] have utilized large language models (LLMs) [5, 6,
+7, 8, 9] in a zero-shot manner for 3D visual grounding. Since LLMs cannot directly process 3D
+environments,thesemethodsemployapointcloud-based3Dlocalizationmodule[10,11]todetect
+objectsandconverttheirattributesintotexts. TheLLMthenselectsthetargetobjectbasedonthese
+texts,asillustratedinFig.1.Whilethesemethodsachievestrongperformance,theyuseonlyobject-
+centricinformationandoftenmissdetailedscenecontext, makingitchallengingtohandlequeries
+like“findtheroomwiththemostabundantnaturallight.”
+Inspired by the recent advancements in vision-language models (VLMs) [12, 13, 14, 15, 16] that
+excel in directly associating language with visual information, we introduce VLM-Grounder, an
+agentframeworkbasedonVLMsforzero-shot3Dvisualgrounding. OurapproachinvolvesaVLM
+that analyzes userqueries and sequences ofimages capturing the scene tolocate the target object,
+whose2Dmaskisprojectedtodeterminethe3Dboundingbox.
+InputtingimagesequencestotheVLMcanexceedtheVLM’smaximumimagelimit, overlycon-
+sumetheVLM’scontextlength,andleadtodegradedperformanceandincreasedinferencelatency.
+Stitchingmultipleimagesisaneffectivesolution,butitmayresultininformationloss. Wedesigna
+novelVisual-Retrievalbenchmarktoquantitativelyevaluatehowdifferentstitchinglayoutsaffectthe
+8thConferenceonRobotLearning(CoRL2024),Munich,Germany.
+4202
+tcO
+71
+]VC.sc[
+1v06831.0142:viXraLLM-BasedMethods Query: Find the cabinet next to a white one. VLM-Grounder (ours)
+3D Localization Object 1is a black Projection
+cabinet at(x1, y1, z1).
+Object1
+Object 2 is a white
+cabinet at (x2, y2, z2).
+PointCloud Text LLM Target ID Image Sequence VLM Target Mask 3D Object
+Figure1: ComparisonbetweenLLM-basedmethodsandVLM-Grounder.
+VLM’s visual processing. Further, we propose a dynamic stitching strategy that dynamically uses
+theoptimallayoutsidentifiedbythebenchmarktostitchimages,enhancingVLM’sperformance.
+Given user queries and stitched images, the VLM is responsible for finding the target object. To
+fully utilize the VLM’s reasoning capabilities, we develop a grounding and feedback scheme. In
+thisscheme,theVLMexplainsitsreasoningprocessacrossimagesequences.Automaticfeedbackis
+providedtoforretryingwhentheVLMgivesaninvalidresponse,ensuringmoreaccurateoutcomes.
+Afterthetargetobjectisfound,weextractthefine-grained2Dmaskandgetthe3Dboundingboxby
+projection. However,estimatinga3Dboundingboxfromasingleimagecanbeproblematicdueto
+limitedfield-of-viewandinaccuratedepthinformation.Wedesignamulti-viewensembleprojection
+modulethatusesimagematchingtofindadditionalviewsofthesametargetobject. Theseviewsare
+thenusedtogethertojointlyestimatethe3Dboundingbox.Additionally,weemploymorphological
+operationstobetterhandleissuesrelatedtoinaccuratedepth.
+WeconductedextensiveexperimentsonthewidelyusedScanRefer[1]andNr3D[2]datasets. Our
+VLM-Grounderoutperformspreviouszero-shotmethodsandisevencomparablewithsomesuper-
+vised learning methods, without relying on 3D geometry, such as point clouds or provided object
+priors. Specifically, VLM-Grounder achieves an overall Acc@0.25 of 51.6% on the ScanRefer
+benchmark and 48.0% overall accuracy on the Nr3D benchmark, surpassing the previous SOTA
+methods’performancesof36.4%and39.0%,respectively.
+2 RelatedWork
+3Dvisualgrounding. 3DvisualgroundingwasfirstbenchmarkedbyScanRefer[1]andReferIt3D
+[2]basedonScanNet[17]staticpointclouds,requiringtheoutputofthetargetobject’s3Dbounding
+boxspecifiedbyalanguagedescription. Previoussupervised-learningmethodsprimarilyfollowa
+two-stageparadigm: a3Ddetectionmodel[1,18,19,20,21,22,23]ora3Dinstancesegmentation
+model [24, 25, 26] generates object proposals, and a language branch encodes the user query for
+feature fusion with object features to predict target objects. There are one-stage methods[27, 28]
+directly decoding the target object bounding box by an encoder-decoder architecture. Recently,
+large language models (LLMs)[9, 7, 8, 29, 30, 31, 5, 32] have been employed as backbones for
+selectingordecodingtargetobjects[33,34,35,36]. Unlikeend-to-endmodels,zero-shotmethods
+leverageLLMsinanagent-basedframework. LLM-Grounder[4]parsesuserqueriestoidentifythe
+targetobjecttypeandreferencedobjecttype,thenusesanopen-vocabularysemanticsegmentation
+model[10,11]tolocatetheseobjecttypes.AnLLMisthenusedtoreasonwhichobjectsatisfiesthe
+groundingrelationship. ZS3DVG[3]followsasimilarpipelinebutrequirestheLLMtowritecodes
+todeterminethetargetobject. Despitetheirgreatperformance,thesemethodsrelyonreconstructed
+pointcloudsandarebottleneckedby3Dlocalizationmodules. Additionally,theyonlyprocesstext-
+basedinformationwiththeLLMandprimarilyaddressuserqueriesinvolvingspatialrelationships.
+Zero-shotLLM/VLMagentsfor3Dsceneunderstanding.LLMs/VLMsdemonstrateexceptional
+abilitiesintaskreasoning,planning,tooluse,andcodewriting,enablinganewtypeofAIsystem(AI
+agent)thatusesLLMs/VLMstointegratevariousoff-the-shelfmodulesfor3Dsceneunderstanding.
+InadditiontoLLM-Grounder[4]andZS3DVG[3]leveragingLLMsfor3Dvisualgrounding,scene
+graph-basedmethodssuchasOSVG[37]andConceptGraph[38]focusonbuildingscenegraphsto
+model the relations between objects and search the target object by LLM-parsed query. Recently,
+2Feedback
+Query: Find the cabinet
+next to a white one.
+Reasoning: After examining the
+images, I identified images Valid?
+Query Analysis Class: cabinet Grounding 00002, 00003, 00029, …, and
+Conditions: next to 00032 show a dark rectangular
+a while one cabinet next to a white cabinet.
+Image 00003 clearly shows the OV-Detection
+target object. &
+Target Image ID: 00003 Visual Prompt
+Reference Image IDs: [00002,
+View Pre-Selection 00003, …, 00032]
+Reasoning: Object 0 is next
+Dynamic Stitching to the white cabinet (ID: 1), ID: 0
+it matches the conditions. ID: 1
+Object ID: 0
+Image Sequence Stitched Images Annotated Target Image
+Multi-ViewEnsemble Projection
+Morphological
+Operations Noise Filtering
+SAM
+Ensemble Projection Get 3D BBox
+Multi-ViewMatching
+Figure2: AnoverviewofVLM-Grounder. VLM-Grounderanalyzestheuserqueryanddynami-
+callystitchesimagesequencesforefficientVLMprocessingtolocatethetargetimageandobject.
+A 2D open-vocabulary detection model and the Segment Anything Model generate a fine-grained
+mask,whichisthenprojectedusingamulti-viewensemblestrategytoobtainthe3Dboundingbox.
+Agent3D-Zero [39] employs VLMs to understand the bird’s-eye view of a 3D scene, retrieving
+differentobservationalviewsfortaskslikequestionansweringandscenecaptioning.OpenEQA[40]
+proposed new question-and-answer datasets to benchmark agents’ scene understanding abilities.
+Differentfrompreviousworks,ourVLM-Grounderfocusesonobjectlocalizationwith3Dbounding
+boxes and directly uses 2D images without requiring a reconstructed 3D scene or 3D localization
+models.Inthevideoprocessingdomain,VideoAgent[41,42]andTraveLER[43]alsouseLLMsfor
+processing2Dimages. However,theyfocusonvideoeventunderstandingandquestionanswering,
+ratherthansceneunderstanding,andcannotperform3Dlocalization.
+3 Methodology
+Inthissection,wepresenttheoverallframeworkofVLM-Grounder(Sec.3.1),anddetailthemo-
+tivationsandspecificsofthreekeymodules: dynamicstitching(Sec.3.2),groundingandfeedback
+(Sec.3.3),andmulti-viewensembleprojection(Sec.3.4).
+3.1 VLM-Grounder
+VLM-Grounderprocessesimagesequencesofthescannedscenealongwithauserquerytopredict
+the 3D bounding box of the target object. For each scene, we assume access to the intrinsic and
+extrinsic camera parameters and the depth image for each image. These can be obtained online
+via RGB-D sensors with (visual-inertial) odometry [44, 45, 46, 47], or RGB-based dense SLAM
+[48,49],orofflinewithSfM[50]andMVS[51]. VLM-Grounderdoesnotdependonreconstructed
+pointcloudsorobjectpriors,offeringabroaderapplicationcomparedtopreviousmethods.
+VLM-GrounderisanagentframeworkwheretheVLMisequippedwithvarioustoolsandmodules
+toenableitsgroundingcapability. Inthiswork, weuseGPT-4VastheVLM.Givenauserquery,
+eachstepofVLM-Grounder’sprocessisillustratedinFig.2anddescribedsequentiallybelow.
+Queryanalysis.VLManalyzesthequerytoidentifythetargetclasslabelandgroundingconditions.
+Viewpre-selectionanddynamicstitching. Imagesequencesscanningthescenearepre-selected
+usinga2Dopen-vocabularydetectortoretainonlythosewiththetargetclass.Theseimagesarethen
+annotatedwithIDs,stitched,andresizedintofewerimagesusingourdynamicstitchingstrategy.
+3Groundingandfeedback. VLMreceivestheanalyzedandoriginalquery,andthestitchedimages
+tolocatethetargetimageandobject. IfVLMpredictsaninvalidtarget,feedbacksareaddedtothe
+messagehistory,andVLMretriesuntilfindingavalidtargetorreachingtheretrylimitM.
+Open-vocabulary detection and visual prompt. After the VLM predicts the target image, a 2D
+open-vocabularydetectordetectstheimagewiththetargetclass. Ifthetargetimagecontainsmul-
+tiple instances of the same class, unique IDs are annotated at the center of the detected bounding
+boxesasvisualprompts. VLMthenusestheseIDstodetermineandselectthecorrecttargetobject.
+Multi-viewensembleprojection. ThetargetimageandboundingboxareinputintotheSegment
+Anything Model (SAM) [52] to obtain a fine-grained mask. Other images of the same object are
+foundviaimagematching,andtheirmasksarealsoextracted.Allmasksarepost-processedbymor-
+phologicaloperationsandprojectedusingcameraparameterswiththedepthmaptocreateprojected
+pointclouds. Thesepointcloudsarefilteredfornoisetodeterminethefinal3Dboundingbox.
+3.2 DynamicStitching
+Using VLM to process image sequences presents several problems: 1) VLMs have a maximum
+imagelimit(e.g.,GPT-4Vallowsonly10imagesforTier-1users).2)Inputtingmanyimagesquickly
+consumestheVLM’scontextlength,limitingoutputcontentandpotentiallyaffectingperformance.
+3)Moreimagesincreaseinferencecosts,includingtokenusage,latency,andtimeoutrisk.
+Toaddresstheseissues,weconductviewpre-selectiontofilterimages,butthisstillleavestoomany
+images. Therefore, we stitch multiple images into a single image with a grid layout and resize it
+according to the VLM’s settings. Stitching may lead to information loss, and the chosen layout
+affects the total number of images sent to the VLM, influencing its understanding of the image
+sequences. To study the effects of stitching, we designed a novel benchmark called the Visual-
+RetrievalBenchmark,detailedinSec.4.3.
+Fromthebenchmarkresults,weidentifiedthetopthreelayoutsforGPT-4Vwithminimalinforma-
+tion loss: (4, 1), (2, 4), and (8, 2), where (4, 1) means 4 rows and 1 column per stitched image.
+One straightforward approach is to use the best layout (4, 1) as a fixed layout. However, it only
+accommodates4images,whichisinsufficientforsequencescontainingmanyimages. Tomaximize
+performance,weproposeadynamicstitchingstrategythatdynamicallyutilizesthetopthreelayouts.
+Specifically,wesetasoftlimitofthemaximumnumberofstitchedimagesLallowedfortheVLM.
+Given an image sequence with n images, we first attempt to use the (4, 1) layout while keeping
+thenumberofstitchedimageswithinL. Ifthisisnotfeasible,westitchsomeimagesusinglarger
+layoutslike(2,4)and(8,2). Forexample,withn=40andL=6,sixstitchedimagesusingthe(4,
+1)layoutareinsufficient,soweusetwo(4,1)andfour(2,4)stitchedimages. Ifthetotalnumberof
+imagesexceeds(8×2)L,weexceedthesoftlimitandusealargerandalsoeffectivelayoutof(9,
+3). Pseudo-codeforthedynamicstitchingstrategyisprovidedinthesupplementarymaterial.
+3.3 GroundingandFeedback
+VLM receives the analyzed and original query along with stitched images to identify the image
+containing the target object. Since determining whether the grounding conditions are met may
+requireconsideringmultipleviews,weprompttheVLMtoexplainitsreasoningprocessandprovide
+thereferencedimagesused.
+After the VLM predicts a target image, we check its validity. If the target image does not exist,
+we append “image-invalid” feedback to the message history and prompt the VLM to reselect. If
+thetargetimageexistsbutthe2Dopen-vocabularydetectionmodeldoesnotdetectanyobjectsof
+thetargetclass,weappend“object-not-existing”feedbackandprompttheVLMtoreselect. When
+the image and candidate objects are valid, we annotate the target image with different object IDs
+and prompt the VLM to select the target object ID. If the VLM predicts an invalid object ID, we
+append “object-ID-invalid” feedback and the VLM should reselect. If the VLM cannot predict a
+4valid image with a valid object ID after M retries, the process is considered a failure. Details of
+differentfeedbacksareprovidedinthesupplementarymaterial.
+3.4 Multi-ViewEnsembleProjection
+Usingasingleimagefor3DprojectionmayresultinincompletepointcloudsandlowIoUwiththe
+groundtruthboundingboxduetothelimitedfieldofview. Toaddressthis,weemploymulti-view
+images showing the same target object for joint estimation. We use the image matching method
+PATS[53]tomatchthetargetobjectmask(anchor)withotherimagestoobtainmatchedpixelpairs,
+indicating the same spatial points between images. Using the matching results, these images are
+processed by a 2D open-vocabulary detector and SAM to get the matched masks. Each mask is
+projectedtoobtainitscorrespondingpointclouds. Intotal,weuseN imagestogether.
+In scenes with many objects of identical appearance, the image-matching module may produce
+mismatched results. To filter these mismatched pairs, we calculate the L2 Chamfer Distance of
+thesepointcloudswiththeanchorpointcloudsandfilteroutthosehavingadistancelargerthan0.1.
+Thefinalpointcloudsaretheunionofthesevalidpointclouds,whicharethenfilteredfornoise,and
+anaxis-aligned3Dboundingboxiscalculatedasthefinalprediction.
+ItisworthnotingthatSAMmayproducenoisymasks,anddepthmapsmaynotbeaccurate,espe-
+ciallyatobjectborders. Theseissuesresultinnoisypointcloudsthatcannotbefiltered. Toaddress
+this, each mask undergoes two morphological operations: 1) Erosion to remove noise and shrink
+the mask border to avoid inaccurate depth at the border. 2) Component selection to retain the top
+2largestconnectedcomponentsofthepredictedmask,removingincorrectmaskswhilepreserving
+mostofthecorrectmask. Theseoperationsmitigatetheeffectsofover-segmentationandinaccurate
+depth,improvingoverall3Dlocalizationaccuracy.
+4 ExperimentalResults
+4.1 ExperimentalSettings
+Datasets. Following[3],weexperimentontheScanRefer[1]andNr3D[2]datasets. ScanReferan-
+notatesScanNet[17]with51,583human-writtenquery-targetobjectpairs. Queriesarecategorized
+as“Unique”,withonlyoneobjectofthetargetclassinthescene,or“Multiple”,withotherobjects
+of the same class (distractors) present. The Nr3D dataset, part of ReferIt3D [2], contains 41,503
+queriesforScanNetscenes. AlltargetobjectsinNr3Dhaveatleastonedistractor;“Easy”samples
+haveone,while“Hard”sampleshavetwoormore. Queriesarealsoclassifiedas“View-Dependent”
+or“View-Independent”basedonthepresenceofview-dependentrelationslike“left”or“right”. To
+reducecosts,werandomlyselect250validationsamplesfromeachdatasetfortesting.Wereportthe
+performanceofthebaselinesfromtheiroriginalpapers,andtheresultsonthesame250validation
+samplesareprovidedinthesupplementarymaterial.
+Evaluation metrics. The ScanRefer benchmark requires predicting the 3D bounding box of the
+targetobjectfromscenepointcloudsandqueries. MetricsareAcc@0.25andAcc@0.5,indicating
+thepercentageofsampleswherethepredictedboundingboxhasanIoUgreaterthan0.25or0.5with
+thegroundtruth. Incontrast,theNr3Dbenchmarkprovidesgroundtruthboundingboxes(without
+classlabels)forallobjects,focusingontop-1accuracyinselection. VLM-Grounderdoesnotneed
+suchpriorsforinput,sowematchourpredictedboxtothegroundtruthboxwiththeclosestcenter
+andusethismatchedboxasourmodel’sprediction.
+Implementation details. For our experiments, we sample one frame from every 20 frames of
+the original ScanNet image sequences. We use GPT-4o-2024-05-13 [54] as the VLM, setting the
+temperatureto0.1andtop pto0.3tobalancerandomnessandcreativity. TheretrylimitisM =3,
+theimagecountlimitisL=6,andtheensembleimagenumberisN =7. WeemploySAM-Huge
+[52]andGroundingDINO-1.5[55]asthe2Dopen-vocabularydetectors. Theerosionkernelsizeis
+5Table 1: 3D visual grounding results on ScanRefer. Without using geometric information from
+point clouds, VLM-Grounder outperforms previous zero-shot methods and achieves performance
+comparabletosupervisedlearningbaselines. *indicatesthattheevaluationisbasedon2Dmasks.
+Overall Unique Multiple
+Methods Zero-Shot w/o.PC Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5
+ScanRefer[1] Ø Ø 37.3 24.3 65.0 43.3 30.6 19.8
+TGNN[57] Ø Ø 34.3 29.7 64.5 53.0 27.0 21.9
+InstanceRefer[24] Ø Ø 40.2 32.9 77.5 66.8 31.3 24.8
+3DVG-Transformer[18] Ø Ø 47.6 34.7 81.9 60.6 39.3 28.4
+BUTD-DETR[28] Ø Ø 52.2 39.8 84.2 66.3 46.6 35.1
+OpenScene[10] ¸ Ø 13.2 6.5 20.1 13.1 11.1 4.4
+LLM-Grounder[4] ¸ Ø 17.1 5.3 - - - -
+ZS3DVG[3] ¸ Ø 36.4 32.7 63.8 58.4 27.7 24.6
+VLM-Grounder(ours) ¸ ¸ 51.6 32.8 66.0 29.8 48.3 33.5
+VLM-Grounder*(ours) ¸ ¸ 62.4 53.2 87.2 76.6 56.7 47.8
+15, andweuseOpen3D’s[56]statisticaloutlierremovalwithnb = 5andstd = 1forpointcloud
+filtering. AllpromptsandcompletedemosforVLM-Grounderareinthesupplementarymaterial.
+4.2 3DVisualGroundingResults
+ScanRefer. OurVLM-Groundersignificantlyoutperformsallpreviouszero-shotapproachesonthe
+ScanRefer benchmark as shown in Tab. 1. Specifically, it surpasses the previous SOTA method,
+ZS3DVG[3],byalargemargin. ForoverallAcc@0.25,VLM-Grounderachieves51.6%,compared
+toZS3DVG’s36.4%,reflectingasubstantialimprovementof15.2.Evenwithoutusingpointclouds,
+VLM-Grounderdemonstratessuperiorperformance. Incontrast,usinganopen-vocabularyinstance
+segmentationmodelalone,suchasOpenScene[10],resultsinpoorperformance(13.2%Acc@0.25),
+likelybecauseitfailstounderstandobjectrelationshipsandreliesonabag-of-wordsapproachfor
+visualgrounding[4]. WhileVLM-GrounderstilllagsbehindoneoftheSOTAsupervised-learning
+modelsBUTD-DETR(52.2%Acc@0.25),itachievescomparableperformancetoearlierbaselines
+likeInstanceRefer(40.2%)and3DVG-Transformer(47.6%)withoutanytraining.
+OurmethodshowsanotablegapbetweenAcc@0.25andAcc@0.5.Thisdiscrepancyarisesbecause
+VLM-Grounder operates directly on 2D images and projects the 2D masks into 3D using camera
+intrinsicandextrinsicparametersalongwithdepthvalues.Theseestimatedparametersoftencontain
+noise, causing inaccuracies in the predicted 3D bounding boxes, e.g., a single outlier can result in
+anoverlylargeboundingbox. Althoughourmulti-viewensembleprojectionmodulehelpsmitigate
+thisissue, itcannotentirelyeliminateit. Previousmethodsrelyonreconstructedpointcloudsand
+point cloud-based localization models to provide precise object locations, which offer geometric
+information and bring advantages for evaluation based on 3D bounding box. Nevertheless, VLM-
+GrounderstilloutperformsZS3DVGontheMultiplesplitforbothAcc@0.25andAcc@0.5.
+Tofurtherisolatetheeffectsofimperfectprojectionandbetterevaluategroundingaccuracy,wealso
+assessVLM-Grounder’sperformancebycomparingtheIoUofthepredicted2Dmasksagainstthe
+groundtruth2Dmasks. ResultsshowthatVLM-Grounder’sgroundingcapabilitysurpassesthatof
+previouszero-shotmethodsandevenoutperformsthesupervisedmethodBUTD-DETRfroma2D
+perspective.Additionally,VLM-Grounderexhibitssignificantimprovementinthemorechallenging
+Multiplesplits,highlightingitssuperiorgroundingabilityacrossvariousscenarios.
+Nr3D.FortheNr3Dbenchmark,previousmethodsuseGT3Dboundingboxesasinput. Thispro-
+vides an important advantage as it serves as a strong prior. In contrast, VLM-Grounder operates
+withoutrelyingonanyobjectpriorsorpointcloudinformation,yetstilloutperformspreviouszero-
+shot methods and even some supervised learning approaches. VLM-Grounder achieves an over-
+all accuracy of 48.0%, surpassing the previous zero-shot SOTA, ZS3DVG, which reaches 39.0%.
+6Table2:3DvisualgroundingresultsonNr3D.VLM-GroundersurpassesthepreviousSOTAzero-
+shotmethodwithoutrequiringaccesstopointcloudsorground-truthboundingboxpriors.
+Methods Zero-Shot w/o.PC w/o.GTBBox Overall Easy Hard VD VID
+ReferIt3D[2] Ø Ø Ø 35.6 43.6 27.9 32.5 37.1
+TGNN[57] Ø Ø Ø 37.3 44.2 30.6 35.8 38
+InstanceRefer[24] Ø Ø Ø 38.8 46.0 31.8 34.5 41.9
+3DVG-Transformer[18] Ø Ø Ø 40.8 48.5 34.8 34.8 43.7
+BUTD-DETR[28] Ø Ø Ø 54.6 60.7 48.4 46.0 58.0
+ZS3DVG[3] ¸ Ø Ø 39.0 46.5 31.7 36.8 40.0
+VLM-Grounder(ours) ¸ ¸ ¸ 48.0 55.2 39.5 45.8 49.4
+The improvement is reflected consistently across various query categories. Without model train-
+ing, VLM-Grounder’s overall performance also competes with supervised learning methods like
+InstanceRefer(38.8%)and3DVG-Transformer(40.8%).
+4.3 Visual-RetrievalBenchmark
+StitchingmultipleimagesintoonecanreducethenumberofimagesinputtoaVLM,butitsimpact
+ontheVLM’svisualunderstandingandtheexistenceofoptimallayoutsareunclear.Toexplorethis,
+weproposeaVisual-RetrievalBenchmark. WhileourfindingsarespecifictoGPT-4VandScanNet
+images,thebenchmarkisgeneralandcanbeappliedtoothersettingstodrawrelevantconclusions.
+4.3.1 BenchmarkSettings
+Werandomlyselect1,000imagesfromtheScanNet
+dataset,eachannotatedwithauniqueID.Addition-
+ally,ablockofrandomcolorisgeneratedandplaced Retrievethe IDandthe
+correspondingblock
+at a random position within each image. These color from each image.
+images are then stitched using various layouts and
+fed into the VLM, which retrieves all image IDs
+andthecorrespondingblockcolors,asillustratedin Annotate&Stitch
+Fig.3.Thisbenchmarkallowsustoassesstheextent
+of information loss caused by the stitching strategy
+through retrieval accuracy. We focus primarily on IDs: [00000, 00001, 00002, 00003]
+Colors: [yellow, white, green, yellow]
+twofactors: stitchinglayoutsandthenumberofim- Accuracy: 0.75
+ages.Additionally,wemeasuretheretrievaltimefor GT IDs: [00000, 00001, 00002, 00003]
+GT Colors: [yellow, white, green, blue]
+differentnumbersofinputimages. Moredetailsare
+providedinthesupplementarymaterial. Figure3: Visual-Retrievalbenchmark.
+4.3.2 Observations
+Stitching layouts. As shown in Fig. 4(a), we could identify the top three layouts used by VLM-
+Grounder: (4, 1), (2, 4), and (8, 2), with (4, 1) achieving perfect retrieval. Accuracy significantly
+declines for layouts denser than (5, 5), suggesting a “resolution” upper bound for effective image
+stitching.ThisdeclineislikelyduetoGPT-4V’spre-processingstep,whichresizesimagestoensure
+the long side is less than 2048 pixels and the short side is less than 768 pixels, resulting in lower
+resolutionforeachimageindenserlayouts.
+Numberofimages.Weusethetopfivelayoutsandobservehowaccuracyvarieswiththenumberof
+imagessenttoGPT-4Vinonerequest.FromFig.4(b),increasingthenumberofimagesonlyslightly
+reducesretrievalaccuracy.AsshowninFig.4(c),therequesttimeincreaseslinearlywiththenumber
+of images, which is favorable. However, adding more images is not always beneficial because
+sendingtoomanyimages (e.g., more than20)canleadtotimeoutsand unsuccessfulexperiments,
+asindicatedbytheincompleteresultsforlayouts(3,3)and(8,2)andthespikesinFig.4(c).
+7I 10 1.00
+亡一－－的I；血勹匾96009511
+400
+c、l
+`0 寸 . 旨“ 厦贮 “E 'I. '. ■. ，.. 配”“ 切．一 谭． 心．比 1戎＂ ·一 ”· “黯 '勺 .置 r星 l一 l· 0屙 啊已 9』 4” 8·U U,O .O 8 26 U U O 93 29J ｀ I斗 ,丘 !且 垦矗 岛诅 斗U U. 8O (~ 8L U U 0 81乙 UU 0.99 、 \/ TimeoI ut ~ ~_U , ) 300
+。 0 902 0 882 0.933 0 853 0 905 0 851 0 797
+5
+巴
+F。E
+O 0.994 0 994 0.991 0.909 0 872 0 825 0 828 0 819 0 851 0.804 厂勹 龙:::J 0.98 ..~... . 200
+二c｝r
+卜． 1，配｝北冒，配切，星r，配Jl:IO8 92 0 782 0.754 lW1劝卫画H颐I，片H＇4,
+07
+— —Layout 足
+CO I，配LEI谭“'1:1;11谒宝0.9120 780 l!J也正，1t•;tl;t1f.. ,;If■f .. 'T...匾...下句 .| 0.97 —4x1 100
+O') I，配r＂噩，配r丘噩讥出切0891 0 801 ~屯泣,,.｀肥”｀■＂屯忙噩I贰出9■，配比Ill •• 05 — —2 8x x4 1
+3x3
+己 ，，配I芯噩I配”“四0877 0.766 0 609 0 392 0 341 0 315 0 333 8x2
+1 2 3 4 Co5
+l
+um6
+n s
+7 8 9 10 03 0.96 N1 u0
+mber of
+Ima2 g0
+es
+30 。 1 N10
+u mber of
+Ima2 g0
+es
+30
+(a) Accuracy with stitchinglayouts. (b) Accuracy with imagecounts. (c) Request time with image counts.
+Figure4: Benchmarkaccuracyandrequesttimefordifferentstitchinglayoutsandimagecounts.
+Table3: Stitchingstrategies. Table4: Numberofimages. Table5: Projectionoperations.
+Strategy Acc@0.25 Images Acc@0.25 Operations Acc@0.25
+Fix(1,1) N.A. 6 51.6 Baseline 40.8
+Fix(8,2) 48.4 8 50.8 +Morpho.Ops 45.2
+Square 49.2 10 51.2 +PointFiltering 48.4
+DynamicStitching 51.6 12 48.4 +Multi-View 51.6
+4.4 AblationStudies
+Stitchingstrategies. Tovalidatetheeffectivenessofourdynamicstitchingstrategy,wecompared
+itwithvariousstitchingapproaches: nostitching(1,1),afixedlayout(8,2),andasquarestrategy.
+The square strategy calculates a stitching layout that approximates a square shape while staying
+within the image limit. As shown in our results, the proposed dynamic stitching outperforms the
+others,demonstratingitsefficacy. Withoutstitching,thesystemoftenencounterstimeoutsandfails
+tocompletethetask,underscoringthenecessityofaneffectivestitchingstrategy.
+Imagelimits. WeexperimentedwithdifferentvaluesforthesoftimagelimitLasshowninTab.4.
+Results indicate that performance remains similar for limits below 10. However, as discussed in
+Sec.4.3,increasingthenumberofimagesleadstohigherinferencecostsandagreaterriskoftime-
+outs. Consequently,wesetL=6inourmainexperimentstobalanceperformanceandefficiency.
+Projectionoperations. Toassesstheimpactofdifferentoperationswithinthemulti-viewensem-
+bleprojectionmodule, weincrementallyaddedoperationstoabaselineandmeasuredtheireffect.
+These operations include morphological processing, point cloud filtering, and multi-view ensem-
+ble estimation. Tab. 5 shows a clear performance improvement with each additional component,
+confirmingtheimportanceandeffectivenessoftheseoperations.
+Additionalablations,suchasusingYOLOv8-World[58]insteadofGroundingDINO-1.5[55]asthe
+open-vocabularydetector,areprovidedinthesupplementarymaterial.
+5 ConclusionandLimitations
+Inthispaper,wepresentedVLM-Grounder,aVLMagentthatexcelsinzero-shot3Dvisualground-
+ing.WeintroducedanovelVisual-Retrievalbenchmarktoevaluatetheimpactofstitchingoperations
+onVLM’svisualunderstanding.VLM-Grounderhasseveralappealingproperties:itleveragesfoun-
+dation models from the language and 2D domains without training, and offers a more transparent
+andexplainablegroundingprocessthanend-to-endmodels. However,ithaslimitations. Theaccu-
+racyof3Dgroundingisaffectedbyimprecisecameraparametersanddepthmaps,andtargetscan
+bemissediftheopen-vocabularydetectorfailstoidentifythem. Furtherdiscussionsonlimitations,
+erroranalysis,inferencingtime,andqualitativeresultsareprovidedinthesupplementarymaterial.
+8Acknowledgements. WesincerelythankTianheRenandLeiZhangfromTheInternationalDigital
+EconomyAcademy(IDEA)forprovidingaccesstotheGroundingDINO-1.5model. Thisresearch
+waspartiallysupportedbytheCentreforPerceptualandInteractiveIntelligence(CPII)Ltd. under
+theInnovationandTechnologyCommission(ITC)’sInnoHKandShanghaiAILaboratory.
+References
+[1] D. Z. Chen, A. X. Chang, and M. Nießner. Scanrefer: 3d object localization in rgb-d scans
+usingnaturallanguage. InECCV,2020.
+[2] P.Achlioptas,A.Abdelreheem,F.Xia,M.Elhoseiny,andL.Guibas. Referit3d: Neurallisten-
+ersforfine-grained3dobjectidentificationinreal-worldscenes. InECCV,2020.
+[3] Z. Yuan, J. Ren, C.-M. Feng, H. Zhao, S. Cui, and Z. Li. Visual programming for zero-shot
+open-vocabulary3dvisualgrounding. InCVPR,2024.
+[4] J.Yang,X.Chen,S.Qian,N.Madaan,M.Iyengar,D.F.Fouhey,andJ.Chai. Llm-grounder:
+Open-vocabulary3dvisualgroundingwithlargelanguagemodelasanagent. InICRA,2024.
+[5] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux, T. Lacroix, B. Rozie`re,
+N.Goyal,E.Hambro,F.Azhar,etal. Llama: Openandefficientfoundationlanguagemodels.
+arXivpreprintarXiv:2302.13971,2023.
+[6] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova. Bert: Pre-training of deep bidirectional
+transformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,2018.
+[7] T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal, A. Neelakantan,
+P. Shyam, G. Sastry, A. Askell, et al. Language models are few-shot learners. In NeurIPS,
+2020.
+[8] OpenAI. Gpt-4technicalreport. arXiv:2303.08774,2023.
+[9] OpenAI. Chatgpt. https://openai.com/blog/chatgpt,2022.
+[10] S.Peng,K.Genova,C.Jiang,A.Tagliasacchi,M.Pollefeys,T.Funkhouser,etal. Openscene:
+3dsceneunderstandingwithopenvocabularies. InCVPR.
+[11] J. Kerr, C. M. Kim, K. Goldberg, A. Kanazawa, and M. Tancik. Lerf: Language embedded
+radiancefields. InICCV,2023.
+[12] OpenAI. Gpt-4v. https://openai.com/index/gpt-4v-system-card/,2023.
+[13] Z.Chen,J.Wu,W.Wang,W.Su,G.Chen,S.Xing,M.Zhong,Q.Zhang,X.Zhu,L.Lu,B.Li,
+P.Luo,T.Lu,Y.Qiao,andJ.Dai. Internvl: Scalingupvisionfoundationmodelsandaligning
+forgenericvisual-linguistictasks. InCVPR,2024.
+[14] H.Liu,C.Li,Q.Wu,andY.J.Lee. Visualinstructiontuning. InNeurIPS,2023.
+[15] W.Dai,J.Li,D.Li,A.M.H.Tiong,J.Zhao,W.Wang,B.Li,P.N.Fung,andS.Hoi. Instruct-
+blip: Towards general-purpose vision-language models with instruction tuning. In NeurIPS,
+2023.
+[16] R.Xu,X.Wang,T.Wang,Y.Chen,J.Pang,andD.Lin.Pointllm:Empoweringlargelanguage
+modelstounderstandpointclouds. InECCV,2024.
+[17] A.Dai,A.X.Chang,M.Savva,M.Halber,T.Funkhouser,andM.Nießner. Scannet: Richly-
+annotated3dreconstructionsofindoorscenes. InCVPR,2017.
+[18] L.Zhao,D.Cai,L.Sheng,andD.Xu.3dvg-transformer:Relationmodelingforvisualground-
+ingonpointclouds. InICCV,2021.
+9[19] D.Z.Chen,Q.Wu,M.Nießner,andA.X.Chang. D3net: Aunifiedspeaker-listenerarchitec-
+turefor3ddensecaptioningandvisualgrounding. InECCV,2022.
+[20] Z. Yang, S. Zhang, L. Wang, and J. Luo. Sat: 2d semantics assisted training for 3d visual
+grounding. InICCV,2021.
+[21] J. Roh, K. Desingh, A. Farhadi, and D. Fox. Languagerefer: Spatial-language model for 3d
+visualgrounding. InCoRL,2022.
+[22] S.Huang, Y.Chen, J.Jia, andL.Wang. Multi-viewtransformerfor3dvisualgrounding. In
+CVPR,2022.
+[23] S. Chen, P.-L. Guhur, M. Tapaswi, C. Schmid, and I. Laptev. Language conditioned spatial
+relationreasoningfor3dobjectgrounding. NeurIPS,2022.
+[24] Z. Yuan, X. Yan, Y. Liao, R. Zhang, S. Wang, Z. Li, and S. Cui. Instancerefer: Coopera-
+tive holistic understanding for visual grounding on point clouds through instance multi-level
+contextualreferring. InICCV,2021.
+[25] Z.Zhu,X.Ma,Y.Chen,Z.Deng,S.Huang,andQ.Li. 3d-vista: Pre-trainedtransformerfor
+3dvisionandtextalignment. InICCV,2023.
+[26] B.Jia,Y.Chen,H.Yu,Y.Wang,X.Niu,T.Liu,Q.Li,andS.Huang. Sceneverse: Scaling3d
+vision-languagelearningforgroundedsceneunderstanding. InECCV,2024.
+[27] T. Wang, X. Mao, C. Zhu, R. Xu, R. Lyu, P. Li, X. Chen, W. Zhang, K. Chen, T. Xue, et al.
+Embodiedscan: A holistic multi-modal 3d perception suite towards embodied ai. In CVPR,
+2024.
+[28] A.Jain,N.Gkanatsios,I.Mediratta,andK.Fragkiadaki. Bottomuptopdowndetectiontrans-
+formersforlanguagegroundinginimagesandpointclouds. InECCV,2022.
+[29] L. Ouyang, J. Wu, X. Jiang, D. Almeida, C. Wainwright, P. Mishkin, C. Zhang, S. Agarwal,
+K.Slama,A.Ray,etal.Traininglanguagemodelstofollowinstructionswithhumanfeedback.
+InNeurIPS,2022.
+[30] I. Team. Internlm: A multilingual language model with progressively enhanced capabilities.
+https://github.com/InternLM/InternLM,2023.
+[31] A. Chowdhery, S. Narang, J. Devlin, M. Bosma, G. Mishra, A. Roberts, P. Barham, H. W.
+Chung, C. Sutton, S. Gehrmann, et al. Palm: Scaling language modeling with pathways. In
+JMLR,2023.
+[32] C. Raffel, N. Shazeer, A. Roberts, K. Lee, S. Narang, M. Matena, Y. Zhou, W. Li, and P. J.
+Liu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-texttransformer. InJMLR,
+2020.
+[33] Z. Yin, J. Wang, J. Cao, Z. Shi, D. Liu, M. Li, X. Huang, Z. Wang, L. Sheng, L. Bai, et al.
+Lamm: Language-assisted multi-modal instruction-tuning dataset, framework, and bench-
+mark. InNeurIPS,2023.
+[34] Y.Hong, H.Zhen, P.Chen, S.Zheng, Y.Du, Z.Chen, andC.Gan. 3d-llm: Injectingthe3d
+worldintolargelanguagemodels. InNeurIPS,2023.
+[35] H.Huang,Y.Chen,Z.Wang,R.Huang,R.Xu,T.Wang,L.Liu,X.Cheng,Y.Zhao,J.Pang,
+et al. Chat-scene: Bridging 3d scene and large language models with object identifiers. In
+NeurIPS,2024.
+[36] Y.Chen,S.Yang,H.Huang,T.Wang,R.Lyu,R.Xu,D.Lin,andJ.Pang. Grounded3d-llm
+withreferenttokens. arXivpreprintarXiv:2405.10370,2024.
+10[37] H. Chang, K. Boyalakuntla, S. Lu, S. Cai, E. Jing, S. Keskar, S. Geng, A. Abbas, L. Zhou,
+K. Bekris, et al. Context-aware entity grounding with open-vocabulary 3d scene graphs. In
+CoRL,2023.
+[38] Q. Gu, A. Kuwajerwala, S. Morin, K. M. Jatavallabhula, B. Sen, A. Agarwal, C. Rivera,
+W. Paul, K. Ellis, R. Chellappa, C. Gan, C. M. de Melo, J. B. Tenenbaum, A. Torralba,
+F. Shkurti, and L. Paull. Conceptgraphs: Open-vocabulary 3d scene graphs for perception
+andplanning. InICRA,2024.
+[39] S.Zhang, D.Huang, J.Deng, S.Tang, W.Ouyang, T.He, andY.Zhang. Agent3d-zero: An
+agentforzero-shot3dunderstanding. arXivpreprintarXiv:2403.11835,2024.
+[40] A. Majumdar, A. Ajay, X. Zhang, P. Putta, S. Yenamandra, M. Henaff, S. Silwal, P. Mcvay,
+O.Maksymets,S.Arnaud,etal. Openeqa: Embodiedquestionansweringintheeraoffoun-
+dationmodels. InCVPR,2024.
+[41] Y. Fan, X. Ma, R. Wu, Y. Du, J. Li, Z. Gao, and Q. Li. Videoagent: A memory-augmented
+multimodalagentforvideounderstanding. arXivpreprintarXiv:2403.11481,2024.
+[42] X.Wang,Y.Zhang,O.Zohar,andS.Yeung-Levy. Videoagent: Long-formvideounderstand-
+ingwithlargelanguagemodelasagent. arXivpreprintarXiv:2403.10517,2024.
+[43] C. Shang, A. You, S. Subramanian, T. Darrell, and R. Herzig. Traveler: A multi-lmm agent
+frameworkforvideoquestion-answering. arXivpreprintarXiv:2404.01476,2024.
+[44] A.Dai,M.Nießner,M.Zollho¨fer,S.Izadi,andC.Theobalt. Bundlefusion:Real-timeglobally
+consistent 3d reconstruction using on-the-fly surface reintegration. In ACM Transactions on
+Graphics,2017.
+[45] D. Chen, N. Wang, R. Xu, W. Xie, H. Bao, and G. Zhang. Rnin-vio: Robust neural inertial
+navigationaidedvisual-inertialodometryinchallengingscenes. InISMAR,2021.
+[46] R.Mur-ArtalandJ.D.Tardo´s. ORB-SLAM2: anopen-sourceSLAMsystemformonocular,
+stereoandRGB-Dcameras. IEEETransactionsonRobotics,2017.
+[47] X.Liu,Y.Li,Y.Teng,H.Bao,G.Zhang,Y.Zhang,andZ.Cui. Multi-modalneuralradiance
+fieldformonoculardenseslamwithalight-weighttofsensor. InICCV,2023.
+[48] Z.Zhu,S.Peng,V.Larsson,Z.Cui,M.R.Oswald,A.Geiger,andM.Pollefeys. Nicer-slam:
+Neuralimplicitsceneencodingforrgbslam. In3DV,2024.
+[49] H. Li, X. Gu, W. Yuan, L. Yang, Z. Dong, and P. Tan. Dense rgb slam with neural implicit
+maps. InICLR,2023.
+[50] J.L.Scho¨nbergerandJ.-M.Frahm. Structure-from-motionrevisited. InCVPR,2016.
+[51] J. L. Scho¨nberger, E. Zheng, M. Pollefeys, and J.-M. Frahm. Pixelwise view selection for
+unstructuredmulti-viewstereo. InECCV,2016.
+[52] A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson, T. Xiao, S. Whitehead,
+A.C.Berg,W.-Y.Lo,etal. Segmentanything. InICCV,2023.
+[53] J. Ni, Y. Li, Z. Huang, H. Li, H. Bao, Z. Cui, and G. Zhang. Pats: Patch area transportation
+withsubdivisionforlocalfeaturematching. InCVPR,2023.
+[54] OpenAI. Gpt-4o. https://openai.com/index/hello-gpt-4o/,2024.
+[55] T.Ren,Q.Jiang,S.Liu,Z.Zeng,W.Liu,H.Gao,H.Huang,Z.Ma,X.Jiang,Y.Chen,etal.
+Groundingdino1.5: Advancethe”edge”ofopen-setobjectdetection,2024.
+11[56] Q.-Y.Zhou,J.Park,andV.Koltun. Open3d: Amodernlibraryfor3ddataprocessing. arXiv
+preprintarXiv:1801.09847,2018.
+[57] P.-H. Huang, H.-H. Lee, H.-T. Chen, and T.-L. Liu. Text-guided graph neural networks for
+referring3dinstancesegmentation. InAAAI,2021.
+[58] T. Cheng, L. Song, Y. Ge, W. Liu, X. Wang, and Y. Shan. Yolo-world: Real-time open-
+vocabularyobjectdetection. arXivpreprintarXiv:2401.17270,2024.
+[59] G.Jocher,A.Chaurasia,andJ.Qiu. UltralyticsYOLO,Jan.2023. URLhttps://github.
+com/ultralytics/ultralytics.
+12VLM-Grounder: A VLM Agent for Zero-Shot 3D Visual
+Grounding
+Supplementary Material
+A DynamicStitching 13
+B Visual-RetrievalBenchmarkSettings 13
+C VLM-GrounderPrompts 15
+D MoreResultsandAnalyses 17
+D.1 Ablationon2DDetectors . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+D.2 ResultsonSelected250Samples . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+D.3 InferenceTime . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+D.4 SuccessRatesandErrorAnalysis. . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+D.5 SummaryofLimitations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+D.6 FullDemos . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+A DynamicStitching
+We employ a dynamic stitching algorithm to organize images into various layouts, with the pseu-
+docodeprovidedinAlgorithm1. Theprocessbeginsbycalculatingthelargestlayoutthatshouldbe
+used. Givenanimagesequencewithnimages, andamaximumnumberofstitchedimagesL, we
+firstcomputethequantityofeachlayout. Weusethevariablesn ,n ,n ,andn torepresentthe
+4 8 16 27
+numberof(4,1),(2,4),(8,2),and(9,3)layouts,respectively.
+Forexample, assuming n = 84 and L = 6, weknow n ≤ 16L. First, we calculate theminimum
+number of (8, 2) layouts required. Each (8, 2) layout accommodates 8 more images than a (2, 4)
+layout,sowedividethenumberofimagesexceedingwhatsix(2,4)layoutscanstoreby8tofind
+theminimumnumberof(8,2)layoutsneeded. Inthisexample,itis5. Next,wecomputethelayout
+neededfortheremainingimages. Weupdatetheremainingimagecountto84−5∗8∗2 = 4and
+thestitchedimagecountto6−5=1. Similarly,wedeterminethatweneedzero(2,4)layoutsand
+one (4, 1) layout for the remaining images. Thus, we have determined the number of each layout
+required. Wethengeneratethestitchedimagesinascendingorderoflayoutsizetoensurethatonly
+thelargestlayoutmayhaveunusedspace,therebyminimizingresolutionwaste.
+It is important to note that if the number of images is too large to be accommodated by L images
+of the largest layout, we select the largest layout to minimize the total number of stitched images.
+For any excess images, we maximize utilization efficiency by invoking the dynamic stitching
+functionagaintofindtheappropriatelayout,settingthefixednumberto1tominimizethecountof
+stitchedimages. Inthiscase,wefirstgenerate(9,3)layoutsandthenrecursivelycallthefunctionto
+generatetheremaininglayouts,whichmayresultinsomeunusedspaceinsmallerlayouts.
+B Visual-RetrievalBenchmarkSettings
+Werandomlyselected1,000imagesfromtheScanNetdataset,assigningeachauniqueIDranging
+from 00000 to 00999. Each image ID was annotated in red at the top-left corner. Additionally, a
+color block was generated at a random position within each image, using one of six colors: red,
+13Algorithm1:DynamicStitchingAlgorithm
+1 Functiondynamic stitching(imgs,L):
+// candidate layouts: (4, 1), (2, 4), (8, 2), (9, 3)
+Input: imagesequenceimgs,themaximumnumberofstitchedimagesL
+Output: stitchedimagesequenceres
+2 n←len(imgs);
+3 res←[];
+4 ifn≤4Lthen // (4, 1) layout is enough
+5 res←stitch image(imgs,(4,1));
+6 elseifn≤8Lthen // at least one (2, 4) layout is used
+7 n 8 ←⌈(n−4L)/4⌉;
+8 n 4 ←L−n 8;
+9 res←res+stitch image(imgs[0... 4n 4−1],(4,1));
+10 res←res+stitch image(imgs[4n 4... ],(2,4));
+11 elseifn≤16Lthen // at least one (8, 2) layout is used
+12 n 16 ←⌈(n−8L)/8⌉;
+13 n←max(n−16n 16,0); // number of images remaining
+14 n 4,8 ←L−n 16; // number of (4, 1), (2, 4) layouts
+15 n 8 ←⌈(n−4n 4,8)/4⌉;
+16 n 4 ←n 4,8−n 8;
+17 res←res+stitch image(imgs[0... 4n 4−1],(4,1));
+18 res←res+stitch image(imgs[4n 4... 4n 4+8n 8−1],(2,4));
+19 res←res+stitch image(imgs[4n 4+8n 8... ],(8,2));
+20 elseifn≤27Lthen // at least one (9, 3) layout is used
+21 n 27 ←⌈(n−16L)/11⌉;
+22 n 4,8,16 ←L−n 27; // number of (4, 1), (2, 4), (8, 2) layouts
+23 n←max(n−27n 27,0); // number of images remaining
+24 n 16 ←⌈(n−8n 4,8,16)/8⌉;
+25 n 4,8 ←n 4,8,16−n 16; // number of (4, 1), (2, 4) layouts
+26 n←max(n−16n 16,0);
+27 n 8 ←⌈(n−4n 4,8)/4⌉;
+28 n 4 ←n 4,8−n 8;
+29 res←res+stitch image(imgs[0... 4n 4−1],(4,1));
+30 res←res+stitch image(imgs[4n 4... 4n 4+8n 8−1],(2,4));
+31 res←res+stitch image(imgs[4n 4+8n 8... 4n 4+8n 8+16n 16−1],(8,2));
+32 res←res+stitch image(imgs[4n 4+8n 8+16n 16... ],(9,3));
+33 else // use more than L stitched images
+34 n 27 ←⌊n/27⌋;
+35 res←res+stitch image(imgs[0... 27n 27−1],(9,3));
+36 res←res+dynamic stitching(imgs[27n 27... ],1);
+37 returnres;
+14green,blue,yellow,white,orblack. Theimageswerethenstitchedusingspecificlayouts,forming
+the basic image sets sent to the VLM. The VLM’s task was to identify all images, retrieve their
+IDs, and determine the color of the blocks. The VLM was required to return two lists—IDs and
+correspondingcolors—asdemonstratedinFig.3. ofthemainpaper.
+Occasionally,theVLMmightretrievethesameIDfromdifferentimages,leadingtoconflictswhere
+multipleID-colorpairsexistforthesameID.Insuchcases,ifatleastoneretrievedIDmatchesthe
+ground truth, it is considered correct. In other words, we calculated the Recall as the accuracy in
+thisbenchmark. Forinstance,inFig.3. ofthemainpaper,iffourimageswereinputandtheVLM
+retrieved four pairs, but the pair 00003-yellow was incorrect (the ground truth being 00003-blue),
+theaccuracyforthisbenchmarkwouldbe0.75.
+Thebenchmarkinvestigatedtwoprimaryvariables:
+Stitchinglayout. Thestitchinglayoutdefinestherowsandcolumnsinwhichimagesarestitched,
+whichcanberegardedas“visualresolution”.
+Visual length. The number of stitched images included in a single conversation, which can be
+regardedas“visualcontextlength”.
+Wealsomeasuredtherequesttimecost.Byduplicatinganimagefrom1to30timeswithinarequest,
+weconducted10trialsforeachduplicationcountandcalculatedtheaveragerequesttimecost.
+C VLM-GrounderPrompts
+We used several prompts in our work, as shown in the Tab. 6, including query analysis prompt,
+grounding system prompt, input prompt, bbox select prompt, image ID invalid prompt, and de-
+tection not exist prompt.
+Foreachquery, weutilizethequery analysis prompttoextractthecategoryandassociatedcondi-
+tionsofthetargetobject,suchasposition,shape,color,orrelativerelationshipswithotherobjects.
+In the grounding and feedback process, we first employed the grounding system prompt to guide
+VLM in performing visual grounding tasks. Then, we utilize the input prompt to provide infor-
+mationsuchasourimage, querystatement, targetobjectcategory, andgroundingconditions, with
+stitchedimagesappended. VLMwouldreturnthequeryresultsinthespecifiedJSONformat.
+If the target image ID in the returned results does not contain any target object, we use the detec-
+tion not exist prompttoinformVLMandrequestittomakeanewselection. IncasetheimageID
+provided cannot find the corresponding image, we employ the image ID invalid prompt to notify
+VLMforafreshselection. Furthermore,iftherearemultipletargetobjectsinthechosenimage,we
+usethebbox select prompttoinstructVLMinselectingthecorrectboundingboxID.
+Table6: PromptsofVLM-Grounder. Theplaceholdersinthetablerepresentdifferentvariables. {query}
+denotes the user query, while {pred target class} and {conditions} represent the target object’s category
+and grounding conditions, respectively. {num view selections} refers to the total number of images, and
+{num candidate bboxes}indicatesthenumberofcandidateboundingboxes. Intheimage ID invalid prompt
+anddetection not exist prompt,{image id}referstotheimageIDselectedbytheVLM.
+query analysis prompt
+15Youareworkingona3Dvisualgroundingtask, whichinvolvesreceivingaquerythatspecifiesaparticular
+object by describing its attributes and grounding conditions to uniquely identify the object. Here, attributes
+refer to the inherent properties of the object, such as category, color, appearance, function, etc. Grounding
+conditionsrefertoconsiderationsofotherobjectsorotherconditionsinthescene, suchaslocation, relative
+positiontootherobjects,etc. Now,Ineedyoutofirstparsethisquery,returnthecategoryoftheobjecttobe
+found, andlisteachoftheobject’sattributesandgroundingconditions. Eachattributeandconditionshould
+bereturnedindividually. Sometimestheobject’scategoryisnotexplicitlyspecified,andyouneedtodeduce
+it through reasoning. If you cannot deduce after reasoning, you can use ‘unknown’ for the category. Your
+responseshouldbeformattedasaJSONobject.Herearesomeexamples:
+Input:
+Query:thisisabrowncabinet.itistotherightofapicture.
+Output:
+{
+“target class”:“cabinet”,
+“attributes”:[“it’sbrown”],
+“conditions”:[“it’stotherightofapicture”]
+}
+...(twomoreexamples)
+EnsureyourresponseadheresstrictlytothisJSONformat,asitwillbedirectlyparsedandused.
+Query:{query}
+grounding system prompt
+Youaregoodatfindingobjectsspecifiedbyuserqueriesinindoorroomsbywatchingthevideosscanningthe
+rooms.
+bbox select prompt
+Great! Here is the detailed version of your selected image. There are {num candidate bboxes} candidate
+objectsshownintheimage. IhaveannotatedeachobjectatthecenterwithanobjectIDinwhitecolortext
+andblackbackground. DonotmixtheannotatedIDswiththeactualappearanceoftheobjects. Pleasegive
+metheIDofthecorrecttargetobjectforthequery. ReplyusingJSONformatwithtwokeys“reasoning”and
+“object id”likethis:
+{
+“reasoning”:“yourreasons”,//ExplainthejustificationwhyyouselecttheobjectID.
+“object id”: 0//TheobjectIDyouselected. AlwaysgiveoneobjectIDfromtheimage, whichyouarethe
+mostconfidentof,evenyouthinktheimagedoesnotcontainthecorrectobject.
+}
+image ID invalid prompt
+Theimage{image id}youselecteddoesnotexist.Didyouperhapsseeitincorrectly?Pleasereconsiderandse-
+lectanotherimage.RemembertoreplyusingJSONformatwiththethreekeys“reasoning”,“target image id”,
+and“reference image ids”asrequiredbefore.
+detection not exist prompt
+The image {image id} you selected does not seem to include any objects that fall into the category of
+{pred target class}. Pleasereconsiderandselectanotherimage. RemembertoreplyusingJSONformatwith
+thethreekeys“reasoning”,“target image id”,and“reference image ids”asrequiredbefore.
+16input prompt
+Imagineyouareinaroomandareaskedtofindoneobject.Givenaseriesofimagesfromavideoscanningan
+indoorroomandaquerydescribingaspecificobjectintheroom,youneedtoanalyzetheimagestolocatethe
+objectmentionedinthequerywithintheimages. Youwillbeprovidedwithmultipleimages,andthetop-left
+cornerofeachimagewillhaveanIDindicatingtheorderinwhichitappearsinthevideo. Adjacentimages
+haveadjacentIDs. Pleasenotethattosavespace,multipleimageshavebeencombinedintooneimagewith
+dynamiclayouts.Youwillalsobeprovidedwithaquerysentencedescribingtheobjectthatneedstobefound,
+aswellasaparsedversionofthisquerydescribingthetargetclassoftheobjecttobefoundandtheconditions
+thatthisobjectmustsatisfy. PleasefindtheIDoftheimagecontainingthisobjectbasedontheseconditions.
+NotethatIhavefilteredthevideotoremovesomeimagesthatdonotcontainobjectsofthetargetclass. To
+locatethetargetobject,youneedtoconsidermultipleimagesfromdifferentperspectivesanddeterminewhich
+imagecontainstheobjectthatmeetstheconditions.Note,thateachconditionmightnotbejudgedbasedonjust
+oneimagealone.Also,theconditionsmaynotbeaccurate,soit’sreasonableforthecorrectobjectnottomeet
+alltheconditions. Youneedtofindthemostpossibleobjectbasedonthequery. Ifyouthinkmultipleobjects
+arecorrect,simplyreturntheoneyouaremostconfidentof.Ifyouthinknoobjectsaremeetingtheconditions,
+make a guess to avoid returning nothing. Usually the correct object is visible in multiple images, and you
+shouldreturntheimageinwhichtheobjectismostclearlyobserved. Yourresponseshouldbeformattedasa
+JSONobjectwiththreekeys“reasoning”,“target image id”,and“reference image ids”likethis:
+{
+“reasoning”:“yourreasoningprocess”//Explaintheprocessofhowyouidentifiedandlocatedthetargetobject.
+Ifreasoningacrossdifferentimagesisneeded, explainwhichimageswereusedandhowyoureasonedwith
+them.
+“target image id”: “00001”, //ReplacewiththeactualimageID(onlyoneID)annotatedontheimagethat
+containsthetargetobject.
+“reference image ids”:[“00001”,“00002”,...] //AlistofIDsofimagesthatareusedtodeterminewetherthe
+conditionsaremetornot.
+}
+Hereisagoodexample:
+query:Findtheblacktablethatissurroundedbyfourchairs.
+{
+“reasoning”: “Aftercarefullyexaminingalltheinputimages,Ifoundimage00003,00005,and00021contain
+differenttables,butonlythetablesinimage00003and00021areblack. Further,Ifoundimage00001,image
+00002, image00003, andimage00004showfourchairsandthesechairssurroundtheblacktableinimage
+00003. The chair in image 00005 does not meet this condition. So the correct object is the table in image
+00003”,
+“target image id”:“00003”,
+“reference image ids”:[“00001”,“00002”,“00003”,“00004”]
+}
+Nowstartthetask:
+Query:“{query}”
+TargetClass:{pred target class}
+Conditions:{conditions}
+Herearethe{num view selections}imagesforyourreference.
+D MoreResultsandAnalyses
+D.1 Ablationon2DDetectors
+AsGroundingDINO-1.5[55]isaclosed-sourcemodel,wecanonlyrequestdetectionsthroughits
+API.Foropen-sourceresearch,wealsoemploythewidely-usedopen-sourcealternativeYOLOv8-
+World[58,59]forourexperiments. ResultsontheScanRefer[1]datasetarepresentedinTab.7.
+D.2 ResultsonSelected250Samples
+Wereproducedpreviouszero-shotmethodsandthesupervised-learningmethodBUTD-DETR[28],
+evaluatingtheirperformancesusingthesame250validationsamplesfromScanRefer[1]asVLM-
+Grounder, with their official codebases. The results are shown in Tab. 8. We use ground-truth
+boundingboxesforZS3DVG[3],whichproducestheupperboundresults.Usingthesameevaluation
+17Table7: 3DvisualgroundingresultswithYOLOv8-WorldandGroundingDINO1.5. *indi-
+catesthattheevaluationisbasedon2Dmasks.
+Overall Unique Multiple
+Methods Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5
+VLM-Grounder(YOLOv8-World) 44.8 28.4 57.5 31.9 41.9 27.6
+VLM-Grounder(GDINO-1.5) 51.6 32.8 66.0 29.8 48.3 33.5
+VLM-Grounder*(YOLOv8-World) 53.2 45.2 74.5 63.8 48.3 40.9
+VLM-Grounder*(GDINO-1.5) 62.4 53.2 87.2 76.6 56.7 47.8
+Table8: Baselineresultsontheselected250samples.
+Overall Unique Multiple
+Methods Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5 Acc@0.25 Acc@0.5
+BUTD-DETR[28] 54.0 38.4 80.9 61.7 47.8 33.0
+OpenScene[10] 18.8 5.2 27.2 7.5 0.0 0.0
+LLM-Grouner[4] 12.0 4.4 12.1 4.0 11.7 5.2
+ZS3DVG[3] 31.2 31.2 55.3 55.3 25.6 25.6
+VLM-Grounder(ours) 51.6 32.8 66.0 29.8 48.3 33.5
+data,wecanverifythatourVLM-Grounderoutperformspreviouszero-shotmethodsandachieves
+comparableperformancetooneoftheSOTAsupervised-learningmethods.
+D.3 InferenceTime
+We calculated the average processing time of each modules, detailed in Tab. 9. The average pro-
+cessingtimepersampleis38.3secondsor50.3seconds, dependingonwhetherVLMneedstobe
+queriedagaintoselectthetargetinstance,i.e.,whentheselectedimagecontainsmultipleinstances
+ofthesamecategories.
+It’sworthnotingthatourworkfocusesonbuildingaresearchprototypeandverifyingitseffective-
+nessinsolvingthezero-shot3Dvisualgroundingproblem. Theprocessingtimehasthepotentialto
+besignificantlyimprovedforthefollowingreasons:
+Implementationimprovements. Aswefocusonbuildingaresearchprototype,weprioritizeeasy-
+to-understand implementation over cost-optimized implementation. For example, the dynamic-
+stitchingcostsabout33%ofthetotalprocessingtimebecauseweusethematplotliblibrary,which
+requiresinitializingaplottingcanvasandplottingandannotatingtheimagesonebyone. Avoiding
+theuseofmatplotlibcouldreducethistime.
+LocaldeploymentofVLMs. Currently,weuseOpenAI’sAPIsforqueryanalysis,imageselection,
+andinstanceselection,whichinvolvessendingtextsandimagesovertheinternet,resultingindelays
+due to network speed. However, deploying VLMs locally on edge devices or robots is an active
+researchdirectionwithpromisingresultsfromindustryefforts. Weexpectthatinfuturedeployment
+ofVLM-Grounder,localVLMscanbeusedtosignificantlyreduceprocessingtime.
+Efficient2Dfoundationmodels. Althoughweuse2Dfoundationmodels,theydonotnecessarily
+introduce processing time bottlenecks, as there are capable models optimized for efficiency. For
+example,theopen-vocabulary2DdetectionmodelYolov8-worldcanruninrealtime. Inthiswork,
+we use SAM-Huge for image segmentation for better performance, which takes 0.6 seconds to
+process one image. However, we have tried using SAM-Base, which takes only 0.2 seconds per
+imagewithminimalperformancesacrifice(31.6vs. 32.8overallacc@0.5onScanRefer).
+18Table9: Inferencetimeofdifferentmodules(unit: seconds).
+QueryAnalysis View-Preselection DynamicStitching Img.SelectionbyVLM
+1.1 1.1 12.8 16
+OVDetection Ins.SelectionbyVLM(optional) Img.Seg. ImageMatching
+0.1 12 0.6 0.4
+Ens.Ims.Seg.(7imgs) Projection OutlierRemoval Overall
+5 0.4 0.8 38.3or50.3
+Table10: Successratesofdifferentmodules.
+QueryAnalysis ViewPre-Selection ImageSelectionbyVLM OV-Detection
+100% 96% 77% 92%
+InstanceSelectionbyVLM ImageSegmentation Multi-ViewEnsembleProjection OverallAcc@0.5
+100% 82% 61% 34%
+D.4 SuccessRatesandErrorAnalysis
+Werandomlysampled50samplesfromtheScanReferevaluationdataandmanuallyinspectedthe
+resultsofeachstepacrosstheframework. ThesuccessratesareshowninTab.10. Thestandardsfor
+eachsteptoberegardedassuccessfulareillustratedasfollows:
+• Queryanalysis.Theanalyzedquerycorrectlyidentifiesthetargetcategoryandconditions.
+• Viewpre-selection. Thepre-selectedviewscontainthetargetobject.
+• ImageselectionbyVLM.Theselectedviewcontainsthetargetobject.
+• OV-detection. Thedetectionresultscontainthecorrectdetectionsofthetargetcategory.
+• InstanceselectionbyVLM.Thetargetobjectisselected.
+• Imagesegmentation: TheinstancemaskofthetargetobjectpredictedbySAMisneither
+over-segmentednorunder-segmented.
+• Multi-viewensembleprojection: TheIoU3DofthepredictedboundingboxandtheGT
+boundingboxisgreaterthanorequalto0.5.
+We found that the main errors occur in the grounding (image selection by VLM), OV-detection,
+imagesegmentation,andprojectionmodules. Weprovidemoredetailederroranalysesandvisual-
+izationsoftheseerrors.
+VLM grounding module. Typical failure cases of the VLM grounding module are listed below,
+andthecorrespondingillustrationsareinFig.5.
+• Incorrect condition analysis. In Fig. 5(1), the VLM is tasked with finding the table be-
+tweentherugandthecarpet. However,itfailstoconsiderallconditionsandfindsthetable
+onthecarpet.
+• Misidentificationofthetarget.InFig.5(2),theVLMisaskedtoidentifyablackkeyboard
+in front of a monitor. It mistakenly identifies the box in image 00017 as a keyboard and
+overlooksthepositionalcontext.
+• Ambiguous query descriptions. There are queries in the ScanRefer dataset that specify
+objectsusingview-dependentrelationssuchasleftorright,butthesequeriesdonotspecify
+the view direction. In such cases, it’s difficult for the VLM to correctly find the target
+object. InFig.5(3),thequerystatesthatthechairisontherightsideofthetable,whichis
+insufficienttolocatethetargetduetoitsambiguityfromdifferentviewpoints.
+19Open-vocabulary detection module. The open-vocabulary detection module may fail due to in-
+correct semantic analysis, as shown in Fig. 6. It’s possible that the training data in such detection
+modelslackcorrespondingsamples. Forexample,therearemoresampleswithtoiletsbutveryfew
+withtoiletflushbuttons.
+Image segmentation module. Fig. 7 illustrates the failure cases of the SAM (Segment Anything
+Model)module.SAMoccasionallyover-segmentsinstancesduetosimilartextures.Forexample,in
+Fig.7(1),SAMover-segmentstheshadowofthepillow,andinFig.7(3),itover-segmentsthetable
+nearthetargetchair. Additionally, inFig.7(3), SAMunder-segmentsthetargetchair, missingthe
+chairlegsunderthetable—againduetosimilartextures. Suddenchangesincolorcanalsoleadto
+under-segmentation,asdemonstratedinFig.7(2),wherethepartofthecurtainwithbrightlighting
+ismissed.
+Projectionmodule. InFig.8,wepresentatypicalfailurecaseoftheprojectionmodule,whichis
+causedbyaninaccuratedepthmap. AsshowninFig.8(1),thedepthofthechairedgeisincorrectly
+estimated, leading to the projection of the pixels at the edge turning into a long “tail” (as shown
+in Fig. 8(2)) in the point cloud. This results in the predicted 3D bounding box (red bounding box
+inthe figure)being largerthan theground-truth boundingbox(green boundingbox inthe figure).
+Such outliers are difficult to remove using outlier removal algorithms because they are numerous.
+We also attempted to use clustering methods like DBSCAN to filter these outliers, but since they
+are connected with inliers, the clustering algorithm may either produce clusters that are too large
+(as shown in Fig. 8(3)) or too small (as shown in Fig. 8(4)). We adopted image morphological
+operations to shrink the instance mask, which significantly alleviated the problem but could not
+completelyeliminateit. Suchnoisypointcloudsmayalsocomefrominaccuratecameraposes.
+Query:This table is to the left of the couch. It's positioned on the floor between
+the rug and the carpet.
+VLM Response:
+Reasoning: After examining the images, I identified that the table in images
+(1) 00000, 00001, and 00002 is positioned to the left of the couch and is on the floor
+between the rug and the carpet. The table is clearly visible in these images, and it
+meets the conditions described in the query.
+Target Image ID: 00000
+Reference Image IDs: [00000, 00001, 00002]
+Query: This is a black keyboard. It is in front of a monitor.
+VLM Response:
+Reasoning: After examining the images, I found that images 00016, 00017, 00018,
+(2) and 00019 show a black keyboard in front of a monitor. The keyboard is most
+clearly visible in image 00017, where it is directly in front of the monitor and
+meets the conditions specified in the query.
+Target Image ID: 00017
+Reference Image IDs: [00016, 00017, 00018, 00019]
+Query: It is a wooden desk chair. It is the chair that is second to last on the right
+side of the table.
+VLM Response:
+Reasoning: To identify the wooden desk chair that is second to last on the right
+side of the table, I first examined the images to locate the table and the chairs
+around it. The images 00000 to 00007 show a table with multiple chairs. The
+(3) images 00008 to 00015 provide a clearer view of the right side of the table. The
+images 00016 to 00032 show the left side of the table. The images 00033 to
+00079 show the entire room from different angles. The chair that is second to last
+on the right side of the table is visible in images 00008, 00009, 00010, and 00011.
+Among these, image 00010 provides the clearest view of the chair. The chair is
+wooden and matches the description provided in the query.
+Target Image ID: 00010
+Reference Image IDs: [00008, 00009, 00010, 00011]
+Queries and VLM Responses Wrong Images Correct Images
+Figure5: FailurecasesoftheVLMgroundingmodule.
+20Target: toilet flush button Target: ottomon
+(1) (2)
+Figure6: Failurecasesoftheopenvocabularydetectionmodule.
+(1) (2) (3)
+Figure7: FailurecasesoftheSAMmodule.
+(1) (2)
+(3) (4)
+Figure8: Afailurecaseoftheprojectionmodule.
+21D.5 SummaryofLimitations
+WhileVLM-Grounderachievessuperiorzero-shot3Dvisualgroundingbydirectlyoperatingon2D
+imageswithoutrequiring3Dpointcloudsorobjectpriors,ithasseverallimitations:
+CapabilitiesofVLMs. VLM-Grounderdependsonthevision-languagemodel(VLM)foranalyz-
+inggroundingconditionsandlocatingtargetobjectsinsequencesof2Dimages. IftheVLMlacks
+the ability to process multiple images or struggles with scene understanding from real 2D scans,
+performancemaydegrade. Inthisstudy,weusetheGPT-4omodel,whichdeliversexcellentresults.
+VLMtechnologyiscontinuouslyadvancing,andVLM-Grounder’smodulardesignallowsustore-
+placethecurrentVLMwithmorepowerfulmodelsastheybecomeavailable,potentiallyenhancing
+futureperformance.
+Noise from 2D models. VLM-Grounder utilizes off-the-shelf 2D open-vocabulary detectors and
+segmentation models to filter images and generate detailed image masks for projection. Despite
+their strengths, these 2D foundation models are not infallible. Issues like missed detections, false
+detections,orincorrectsegmentationscanpreventVLM-Grounderfromidentifyingthetargetobject,
+leadtoselectingthewrongobject,orproducenoisytargetmasks.Thisnoisecanresultininaccurate
+3Dboundingboxprojections.
+Noise from sensors. VLM-Grounder predicts the 3D bounding box of the target object from 2D
+images,relyingonaccuratecameraintrinsics,extrinsics,anddepthmaps. However,indatasetslike
+ScanNet [17], these parameters often contain noise. For instance, depth sensors can be inaccurate
+at object boundaries, and RGB images may suffer from motion blur. Such sensor noise leads to
+inaccuraciesinthepredicted3Dboundingboxes. Whilesensornoiseisanunavoidablechallengein
+roboticvision,VLM-Grounderattemptstomitigatetheseissuesthroughitsgroundingandfeedback
+scheme combined with multi-view ensemble projection. However, it cannot completely eliminate
+theeffectsofsensorinaccuracies. Inpracticalroboticdeployments, robotstypicallyhavemultiple
+types of sensors. Using multi-sensor fusion can help reduce noise and improve VLM-Grounder’s
+performance.
+D.6 FullDemos
+Inthissection,wepresentthreedemonstrationstoelucidatethecapabilitiesandbehaviorof
+VLM-Grounderinvariousscenarios. First,inFig.9,weillustratethebasicexecutionprocess
+involvingasingletargetobjectwithinascene. Subsequently,wedemonstratetheexecutionprocess
+inamorecomplexscenecontainingmultipletargetobjects,wheretheVLMisemployedto
+accuratelyselectthecorrectobject,asinFig.10. Lastly,weshowcasetheexecutionprocessina
+scenariowheretheVLMinitiallyselectsanincorrectimage,therebytriggeringafeedback
+mechanism,asshowninFig.11. Morphologicaloperationsareappliedtoallthemasksincluding
+matchedimages. Inalltheseexamples,weonlyillustratefourensembleimagesandshowtheresult
+ofthemorphologicaloperationontheanchormask. Thesystem promptandqueryanalysisarealso
+omittedinthefiguresforclarity.
+22... {input prompt}
+Now start the task:
+Image Sequence Query:"the radiator on the wall. the radiator is next to the toilet."
+Target Class:radiator
+Conditions: ["it's next to the toilet", "it's on the wall"]
+Here are the 15images for your reference.
+View Pre-Selection
+Dynamic Stitching
+reasoning: After examining all the images, I found that images 00056, 00057, 00058, 00059, 00070,
+00071, 00072, and 00073 show a radiator on the wall. Among these, images 00056, 00057, 00058,
+00059, 00070, and 00071 show the radiator next to a toilet. The radiator is most clearly observed in
+image 00058, where it is clearly visible next to the toilet.
+target_image_id: 00058,
+reference_image_ids: [00056, 00057, 00058, 00059, 00070, 00071]
+Target Bounding Box SAM Multi-ViewMatching Morpho. Ops
+Ensemble Projection Noise Filtering & Get 3D BBox
+Figure9: DemoofVLM-Grounder.
+23... {input prompt}
+Now start the task:
+Image Sequence Query:"There is a rectangular dark cabinet. it is next to a white cabinet."
+Target Class: cabinet
+Conditions:["it's rectangular", "it's dark", "it's next to a white cabinet"]
+Here are the 35images for your reference.
+View Pre-Selection
+Dynamic Stitching
+reasoning:After examining the images, I identified that images 00002, 00003, 00004, 00005,00029,
+00030, and 00032 show a dark rectangular cabinet next to a white cabinet. The dark cabinet is
+clearly visible in image 00003, and it is next to a white cabinet. This satisfies all the conditions: the
+cabinet is dark, rectangular, and next to a white cabinet.
+target_image_id:00003
+reference_image_ids:[00002, 00003, 00004, 00005, 00029, 00030, 00032]
+Target Image … {bboxselect prompt}
+There are 2candidate objects shown in the image. I have annotated
+each object at the center with an object ID in white color text and
+black background.
+…
+OV-Detection
+Visual Prompt
+reasoning: The query specifies a rectangular dark cabinet next to a white cabinet. In the image,
+object ID:0 is a dark cabinet and object ID:1 is a white cabinet. Since object ID:0 is dark and
+rectangular and is next to the white cabinet (ID:1), it meets all the conditions specified in the query.
+object_id:0
+Target Bounding Box SAM Multi-ViewMatching Morpho. Ops
+Ensemble Projection Noise Filtering & Get 3D BBox
+Figure10: DemoofVLM-Grounderwithseveraltargetobjectsinthescene.
+24... {input prompt}
+Now start the task:
+Image Sequence Query: "there is a rectangular computer tower. it is on a stand with wheels
+next to a sofa."
+Target Class: computer tower
+Conditions: ["it's rectangular", "it's on a stand with wheels", "it's next to a
+sofa"]
+View Pre-Selection Here are the57 images for your reference.
+Dynamic Stitching
+reasoning: After examining the images, I found that images 00013, 00014, 00015, 00016, 00017,
+00055, 00056, 00057, 00058, 00059, 00060, 00061, 00062, and 00063 show a computer tower that is
+rectangular and on a stand with wheels. Additionally, images 00016, 00017, 00060, 00061, 00062,
+and 00063 show that this stand is next to a sofa. Among these, image 00061 provides the clearest
+view of the computer tower on the stand with wheels next to the sofa.
+target_image_id: 00061
+reference_image_ids: [00013, 00014, 00015, 00016, 00017, 00055, 00056, 00057, 00058, 00059,
+00060, 00061, 00062, 00063]
+The image 61you selected does not seem to include any objects that fall into the category of
+computer tower. Please reconsider and select another image. Remember to reply using JSON
+format with the three keys "reasoning", "target_image_id", and "reference_image_ids" as required
+before.
+reasoning: Upon re-evaluating the images, I found that images 00013, 00014, 00015, 00016, 00017,
+00055, 00056, 00057, 00058, and 00059 show a rectangular computer tower on a stand with wheels.
+Additionally, images 00016 and 00017 show that this stand is next to a sofa. Among these, image
+00016 provides the clearest view of the computer tower on the stand with wheels next to the sofa.
+target_image_id: 00016
+reference_image_ids: [00013, 00014, 00015, 00016, 00017, 00055, 00056, 00057, 00058, 00059]
+Target Bounding Box SAM Multi-ViewMatching Morpho. Ops
+Ensemble Projection Noise Filtering & Get 3D BBox
+Figure11: DemoofVLM-Grounderwithfeedback.
+25
