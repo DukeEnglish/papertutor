@@ -1,0 +1,868 @@
+Preprint
+SIMLAYERKV: A SIMPLE FRAMEWORK FOR
+LAYER-LEVEL KV CACHE REDUCTION
+XuanZhang∗12,CunxiaoDu†1,ChaoDu†1,TianyuPang1,WeiGao2,MinLin1
+1SeaAILab,Singapore
+2SchoolofComputingandInformationSystems,SingaporeManagementUniversity
+xuanzhang.2020@phdcs.smu.edu.sg; weigao@smu.edu.sg;
+{ducx, duchao, tianyupang, linmin}@sea.com
+ABSTRACT
+Recentadvancementsinlargelanguagemodels(LLMs)haveextendedtheircapa-
+bilitiestohandlelongcontexts. However,increasingthenumberofmodellayers
+andthelengthofinputsequencessignificantlyescalatesthememoryrequiredto
+storekey-value(KV)cache,posingchallengesforefficientinference. Tomitigate
+this issue, we present SimLayerKV, a simple yet effective method that reduces
+inter-layerKVcacheredundanciesbyselectivelydroppingcacheinidentifiedlazy
+layers.Ourapproachisbasedontheobservationthatcertainlayersinlong-context
+LLMs exhibit “lazy” behavior, contributing less to modeling long-range depen-
+denciescomparedtonon-lazylayers. Byanalyzingattentionweightpatterns,we
+findthatthebehavioroftheselazylayersisconsistentacrosstokensduringgener-
+ationforagiveninput. ThisinsightmotivatesourSimLayerKV,whichidentifies
+lazy layers and reduces their KV cache accordingly. SimLayerKV is training-
+free, generalizable, and can be implemented with only seven lines of code. We
+conductextensiveexperimentsonthreerepresentativeLLMs,e.g.,LLaMA2-7B,
+LLaMA3-8B, and Mistral-7B across 16 tasks from the LongBench benchmark.
+TheresultsdemonstratethatSimLayerKVachievesaKVcachecompressionratio
+of5×withonlya1.2%performancedropwhencombinedwith4-bitquantization.
+Ourcodeisavailableathttps://github.com/sail-sg/SimLayerKV.
+1 INTRODUCTION
+Transformer-based autoregressive large language models (LLMs) have demonstrated exceptional
+performanceacrossawiderangeoftasks,suchasquestionansweringandarithmeticreasoning(Wei
+etal.,2022;Wangetal.,2022;Zhouetal.,2022;Yaoetal.,2023). Recentadvancementshaveex-
+tended their capabilities to handle long contexts, with models like Llama-3.1 supporting context
+lengths up to 128K tokens (Dubey et al., 2024) and Gemini-Pro-1.5 handling up to 1 million to-
+kens (Reid et al., 2024). A critical component of these models during inference is the key-value
+(KV) cache, which stores precomputed key and value tensors for each token in the language se-
+quencetoavoidrecomputingthemforeachattentionlayer. However,asthenumberofmodellayers
+andinputlengthsincreases,thememoryrequiredforstoringtheKVcachegrowssignificantly,pos-
+ingchallengesforinferenceefficiency(Zhangetal.,2024b;Wangetal.,2024;Lietal.,2024). For
+example,withaninputsequencelengthof128Ktokens,thememoryrequiredfortheKVcachein
+Llama2-7Bamountstoapproximately62.5GBGPUmemory,whichissignificantlylargerthanthe
+13.2GBneededforthemodelparameters.
+To address the challenge, various methods have been introduced to reduce the KV cache stor-
+age(Zhangetal.,2024b;Lietal.,2024;Hooperetal.,2024;Dongetal.,2024a;Yangetal.,2024c).
+One approach is quantization (Hooper et al., 2024; Dong et al., 2024a; Yang et al., 2024c; Dong
+et al., 2024b; Kang et al., 2024; Liu et al., 2024c; Sheng et al., 2023), which stores the KV cache
+inlow-bitformats. Anotherapproachresortstoeviction(Zhangetal.,2024b;Lietal.,2024;Zhang
+etal.,2024a;Yangetal.,2024b),whichonlypreservesthemostimportanttokensselectedbasedon
+∗WorkdoneduringXuanZhang’sassociatemembershipatSeaAILab.
+†CorrespondencetoCunxiaoDuandChaoDu.
+1
+4202
+tcO
+71
+]LC.sc[
+1v64831.0142:viXraPreprint
+Output Output Output
+…… …… Non-Lazy layer
+KVCache
+Cross Layer
+KVCache Compression Layer 𝑙+1 Inter- Merging Layer 𝑚 T ari cm co K rdV inC ga c th oe
+via Pruning / Quantization polation …… Layer
+Function
+Layer 𝑙 Layer 𝑙 Layer 𝑙 Lazy layer
+𝑁X …… ……
+Input Input Input
+(a) Intra-layer methods (b) Inter-layer method: MiniCache (c) Inter-layer method: SimLayerKV
+Figure1: Comparisonofintra-layertechniques(e.g.,pruningandquantization)withtwointer-layer
+methods: MinCacheandourproposedSimLayerKV.(a)Intra-layermethodstargetKVredundancy
+withinindividuallayers,applyingcompressionindependentlytoeachlayer;(b)MinCachereduces
+KVcachebymergingadjacentlayersthroughinterpolation;(c)OurSimLayerKVselectivelytrims
+KVcachebyidentifyingthefunctionalroleofeachlayer,reducingcacheonlyinlazylayers.
+carefullycraftedmetrics.However,theseworksmainlyaddressintra-layerredundancies,neglecting
+thepotentialsavingsfrominter-layerredundancies(Liuetal.,2024a),asillustratedinFigure1.
+Recentstudies(Rajputetal.,2024;Brandonetal.,2024;Wu&Tu,2024;Liao&Vargas,2024;Wu
+&Tu,2024;Liuetal.,2024a)havebeguntoexploreinter-layerKVcachecondense,leveragingre-
+dundanciesacrosslayerstoreduceKVcacheatthelayerlevel. Forexample,Cross-LayerAttention
+(CLA) (Brandon et al., 2024) reuses the KV cache from the n-th layer for the subsequent n+1-th
+layer. Whilethesemethodsareeffective,theyrequireadditionaltrainingonexistingLLMs(Rajput
+et al.,2024; Brandonet al.,2024; Wu &Tu, 2024;Liao &Vargas, 2024;Wu & Tu,2024), which
+hindersseamlessplug-and-playintegration. Ourfocusliesinmethodsthatdonotrequireretraining,
+withMiniCache(Liuetal.,2024a)servingasarepresentativeapproach. Bytakingadvantageofthe
+similaritybetweentheKVpairsacrosslayers, MiniCachecombinesthecacheofeverytwolayers
+through spherical interpolation, effectively compressing KV cache across layers(see Figure 1(b)).
+However, MiniCache operates under the implicit assumption that all layers within the merged set
+contribute equally, which may not always hold true. In fact, research on layer sparsity (Gromov
+etal.,2024)showsthatimportancelevelsvaryacrosslayerswithinthesamemodel,indicatingthat
+theircontributionsmaydiffer.
+Toinvestigatethischaracterfortheattentionlayer,weconductepreliminaryexperiments(Section4)
+andidentifiedthreekeyfindings: (1)Certainlayersinlong-contextLLMsexhibit“lazy”behavior,
+primarily focusing on semantically unimportant tokens (e.g., the initial few tokens) and the most
+recentonesduringanswergeneration. (2)Lazylayersarelessimportantthannon-lazylayersw.r.t.
+long-context capability: trimming KV cache in non-lazy layers significantly degrades model per-
+formance, whereas trimming KV cache in lazy layers has relatively little impact; and (3) After
+analyzing attention weight patterns, we find that layer behavior is consistent across tokens for a
+giveninput,andlazylayerscanbeeasilyidentified.
+The appearance of lazy layers suggests that we can directly reduce the KV cache for these layers
+without altering the cache of non-lazy layers or merging cache across layers. Building on this in-
+sight, we propose SimLayerKV, a simple yet effective method for inter-layer KV cache reduction.
+Thisdynamic,selectivereductioninKVcachedecreasesthenumberoflayersrequiringcachereten-
+tion, thereby enhancing computational efficiency. Specifically, we analyze the attention allocation
+patternsineachlayertodeterminewhetheritqualifiesasalazylayer. WethentrimtheKVcache
+in lazy layers while retaining the full KV cache in non-lazy layers (see Figure 1(c)). We conduct
+extensiveexperimentsonthreerepresentativeLLMs(i.e.,LLama2-7B-chat(Touvronetal.,2023),
+LLama3-8B-Instruct (Dubey et al., 2024), and Mistral-7B-Instruct (Jiang et al., 2023)) across 16
+tasksfromLongBench(Baietal.,2023). TheresultsdemonstratethatSimLayerKVachievesaKV
+cachecompressionratioof5×withonlya1.2%dropinperformancewhencombinedwitha4-bit
+quantization(Liuetal.,2024c). Meanwhile,itintegratesseamlesslyintopopularinferenceframe-
+works with just seven lines of code. Additionally, we evaluate SimLayerKV on the Ruler (Hsieh
+etal.,2024)datasetsusingMistral-7B-Instruct,focusingontaskslikeNeedle-in-a-Haystack(NIAH)
+2Preprint
+andscalingthecontextlengthfrom4Kto32K,whereitperformedstrongly.Evenwithinputtextsat
+32K,performanceonlydroppedby4.4%.Thecontributionsofthisworkaresummarizedasfollows:
+• Weobservethephenomenonoflazylayersinlong-contextLLMsandproposetwostrate-
+giesforidentifyingthemateithertheprefillingordecodingstage.
+• We introduce SimLayerKV, a simple yet effective method for reducing inter-layer KV
+cacheredundanciesthatcanbeimplementedwithonlysevenlinesofcode.
+• OurSimLayerKVachievesaKVcachecompressionratioof5×withonlya1.2%dropin
+performanceontheLongBenchbenchmarkonthreerepresentativeLLMs.
+2 RELATED WORK
+Due to the autoregressive architectures of transformer-based LLMs, the key and value states of
+previouslygeneratedtokenscanbestoredastheKVcache,whichfacilitatesthegenerationofsub-
+sequenttokenswithoutredundantcomputations. However, despiteitsbenefits, cachingintroduces
+asignificantbottleneckduringinferenceasitmustresideinGPUmemory. Severalworks(Prabhu
+et al., 2024; Kwon et al., 2023; Lin et al., 2024; Ye et al., 2024) have focused on optimizing KV
+cachememoryatthesystemlevel. OtherresearchhasinvestigatedreducingKVcachememoryre-
+quirementsbymodifyingmodelarchitectures(Shazeer,2019;Brandonetal.,2024;Goldsteinetal.,
+2024;Nawrotetal.,2024;Wangetal.,2024;Yuetal.,2024). Forexample,grouped-queryattention
+(GQA)(Ainslieetal.,2023)dividesthequeryheadsintomultiplegroups,witheachsharingitsown
+setofkeysandvalues. However,thesetechniquestypicallyneedtobeappliedduringpre-training,
+whichcanberesource-intensive.
+A different line of research focuses on reducing the KV cache memory usage post pre-training.
+Sometechniques(Xiaoetal.,2023;Lietal.,2024;Wangetal.,2024;Zhangetal.,2024b;Liuetal.,
+2024b;Yangetal.,2024b;Zhangetal.,2024a)identifyredundanttokenswithineachattentionlayer
+and evict their associated KV cache, thereby effectively lowering memory usage. Other methods
+(Hooperetal.,2024;Dongetal.,2024a;Yangetal.,2024c;Dongetal.,2024b;Kangetal.,2024;
+Sheng et al., 2023) reduce memory consumption by quantizing KV cache from full precision to
+lower bit values. However, these methods primarily exploit intra-layer KV cache redundancies
+while overlooking those across layers. These techniques are orthogonal to our approach and can
+potentiallybecombinedforfurtherimprovements.
+Adistinctlineofresearch(Rajputetal.,2024;Brandonetal.,2024;Wu&Tu,2024;Liao&Vargas,
+2024; Wu & Tu, 2024; Liu et al., 2024a; Ge et al., 2024), more closely aligned with our focus,
+explorestheinter-layerKVcacheredundancies. Forinstance,CLA(Brandonetal.,2024)reduces
+overallKVcachestoragebyreusingtheKVcachefromthecurrentlayerinsubsequentlayers. Mix
+Attention (Rajput et al., 2024) integrates cross-layer cache sharing with sliding window attention,
+whichretainsonlyasmallsubsetofrecenttokensintheKVcache,therebyfurtherreducingmemory
+usage. LongGen (Ge et al., 2024), Inheritune (Sanyal et al., 2024), and Gemma 2 (Team et al.,
+2024)employsapredefinedmixtureoffullattentionandslidingwindowattentionacrossdifferent
+layers during training. However, these approaches rely on a fixed, predefined structure and lack
+adaptability to the input data. In contrast, our method dynamically identifies lazy layers based on
+their attention allocation patterns. In addition, these methods require additional training, which is
+computationallydemanding. Incontrast,MiniCache(Reidetal.,2024)offersatuning-freesolution
+bymergingeverytwoadjacentlayersthroughsphericalinterpolation,assumingequalcontribution
+from all layers within the merged set. Our SimLayerKV approach differs by selectively trimming
+lazylayers,basedontheobservationthatnotalllayerscontributeequallytotheoverallgeneration.
+3 PRELIMINARY
+BeforeintroducingSimLayerKV,weformalizeournotationandprovideabriefoverviewofthegen-
+erativeinferenceinautoregressiveLLMs,whichisthekeybackgroundknowledgeforourmethod.
+We denote the input prompt X = {x ,··· ,x }, representing a sequence of tokens, where m
+0 m−1
+is the number of tokens in the input prompt, indicating the sequence length. The total number of
+tokens,includingboththeinputpromptandthegeneratedresponses,isdenotedasn. Thekeyand
+valuecachefortokenx arerepresentedbyK andV ,respectively.
+i xi xi
+3Preprint
+Prefilling
+Decoding
+(a) Layer 0 (b) Layer 10 (c) Layer 20 (d) Layer 30
+Figure 2: Attention patterns during long-context generation in layers 0, 10, 20, and 30 of the
+LLaMA3-8B-Instructmodel. Thegreendashedboxoutlinesthedecodingstage. Notably,incertain
+layers (e.g., 20), the model predominantly focuses its attention on initial tokens and recent tokens
+duringthedecodingstage,abehaviorweidentifyascharacteristicoflazylayers.
+Inferencestages. ThetypicalgenerativeLLMinferenceprocessinvolvestwostages: (1)Prefilling:
+theautoregressiveLLMprocessestheinputpromptX byparallelcomputing,andalsosavestheKV
+cacheofeachtokenx ∈ X,wherei = 0,1,··· ,m−1. Theoutputofthelasttokeninthisstage
+i
+isthefirsttokenx oftheresponse. (2)Decoding: aftertheprefillingstageiscompleted,theLLM
+m
+generatesoutputtokensx onebyone,wherej =m+1,m+2,···,andsavestheirKVcache. In
+j
+eachdecodingstep,anewtokenx isgeneratedbasedonthecurrenttokenx andtheKVCache
+j j−1
+storedfromearliersteps,continuinguntilastopcriterionismet.
+4 OBSERVATIONS
+Inthissection, weanalyzetheattentionpatternsduringtheprefillinganddecodingphaseinlong-
+context LLMs, providing insights that motivate our approach to reducing KV cache based on the
+layer-specific roles in attention allocation. The study is conducted on the LLaMA3-8B-Instruct
+model(Dubeyetal.,2024)usingrandomsamplesfromtheLongBench(Baietal.,2023)benchmark.
+Ourkeyfindingsareasfollows:
+LayerbehaviorinlongcontextLLMsduringdecoding. Previousresearch(Xiaoetal.,2023)has
+shownthatalargeportionofattentioninLLMstendstofocusonsemanticallyunimportanttokens
+(e.g., the first few tokens) and the most recent tokens. We refer to this pattern as lazy behavior,
+wherethemodel“takesshortcuts”byprimarilyattendingtothebeginningandendofthesequence,
+similar to someone skimming a paper by only reading the first few words in the abstract and the
+conclusion. Although this phenomenon is also known as “attention sink” (Xiao et al., 2023), we
+choosetocallit“lazybehavior”inourcontexttobetterhighlightthemodel’stendencytooverlook
+themiddleportionsofthesequence,emphasizingtheshortcutnature. However,inourexperiments
+(SeeTable1andTable3),wefindthatwhenKVcacheareretainedforonlythesetokensacrossall
+layers, the long-context capabilities of LLMs degrade sharply. This raises an important question:
+doesthislazybehaviordisappearwhenprocessinglongtexts?
+Through our analysis, we observe that even when handling long texts, many layers continue to
+exhibitthislazybehaviorduringdecoding(e.g., about55%inLLama3-8B-InstructinLongBench
+benchmark). Figure 2 presents the attention patterns across four different layers (0, 10, 20, and
+30). We observe that some layers (e.g., layer 0) do not follow a clear pattern in attention weight
+distribution, while others (e.g., 20) show a clear lazy behavior pattern. Based on this observation,
+we define a lazy layer as one that primarily attends to a limited subset of tokens, including both
+the initial tokens X = {x ,x ,x ,x } and recent w tokens X , while allocating minimal
+initial 0 1 2 3 recent
+attention to the rest of the tokens in the sequence during decoding stage. Intuitively, this suggests
+thatintheselazylayers,mostoftheKVcachecanbedropped,retainingonlytheportionsthemodel
+reliesonduringits“shortcut”behavior,i.e.,X andX .
+initial recent
+Lazy layer is less important than non-lazy layer. Although attention scores in lazy layers are
+concentratedoncertaintokens, thisdoesnotnecessarilyindicatethattheselayersareunimportant
+for long-context capability. To investigate this further, we conduct experiments on 6 random se-
+lected tasks from the LongBench benchmark (Bai et al., 2023), including Qasper (Dasigi et al.,
+2021),Dureader(Heetal.,2017),Musique(Trivedietal.,2022),GovReport(Huangetal.,2021),
+MultiFieldQA-en(Baietal.,2023), andHotpotQA(Yangetal.,2018). Wetesttheeffectoftrim-
+mingmostoftheKVcache,retainingonlythecachefor{X ,X }intwoscenarios: (1)lazy
+initial recent
+4Preprint
+50
+Lazy layers only Non-lazy layers only Full
+25
+0
+Qasper Musique DuReader GovReport MF-en HotpotQA
+Figure3: ComparisonoftheimportanceofKVcacheinlazyandnon-lazylayersusingLLama3-
+8B-Instruct. Performance is evaluated across three settings: (1) lazy layers only: trimming KV
+cacheinnon-lazylayers,(2)non-lazylayersonly: trimmingKVcacheinlazylayers,and(3)full:
+usingthefullKVcacheforgeneration.
+Prefilling stage Decoding stage
+Figure4: Visualizationofattentionweightsforeachtoken(x-axis)withrespecttotheinitialtokens
+andthemostrecent1024tokensduringtheprefillinganddecodingstagesonLLama3-8B-Instruct,
+across all layers (y-axis), using a randomly selected sample. Layers with predominantly higher
+attentionontheinitialandrecenttokens{X ,X }(indicatedbyredareas)arereferredtoas
+initial recent
+lazylayers. Thebrowndashedboxoutlinesonesuchlazylayer.
+layers,and(2)non-lazylayers. Forafaircomparison,thenumberoftrimmedlayersiskeptsimilar
+inbothsettings.Wealsoevaluatethevanillasetting,whichusesacompleteKVcache,forreference.
+AsshowninFigure3,trimmingtheKVcacheinnon-lazylayersleadtoasignificantperformance
+drop,withanaveragedecreaseof7.4%. Interestingly,trimmingtheKVcacheinlazylayersresults
+in only an average 1.5% decrease. These results suggest that lazy layers contribute less to the
+model’soverallperformancecomparedtonon-lazylayers.
+Layer behavior remains consistent for a given input. To further explore whether a layer
+consistently functions as a lazy layer during generation, we visualize the attention weights for
+{X ,X } across all layers for all generated tokens in Figure 4, using a randomly selected
+initial recent
+sample (additional examples are provided in Figure 7). Notably, for a given input prompt, layers
+thatexhibitlazybehaviormaintainthispatternrelativelyconsistentlyacrosstokens. Thissuggestsa
+certaindegreeofstabilityinattentiondynamicsthroughoutthegenerationprocess.
+5 METHODOLOGY: SIMLAYERKV
+In this section, we introduce our method SimLayerKV for reducing inter-layer KV cache usage
+in LLMs by leveraging the concept of lazy layers to optimize memory efficiency across layers.
+Empirical observations in Section 4 reveal that in certain layers, LLMs tend to take shortcuts by
+predominantlyallocatingattentionweightstotheinitialandmostrecenttokens, denotedasX
+initial
+and X , respectively. We refer to these layers as lazy layers because they contribute less to
+recent
+modelinglong-rangedependenciescomparedtonon-lazylayers. Notably,whetheralayerfunctions
+aslazyremainsrelativelyconsistentgivenaspecificinputsequence. Thisconsistencysuggeststhat
+attention patterns can be predicted from the allocation during the generation of previous tokens,
+enablingearlyidentificationoflazylayersinthegenerationprocess.
+5
+)%(
+ecnamrofrePPreprint
+Based on our observations of lazy layers, we aim to optimize memory usage by trimming the KV
+cacheintheselayers. Someexistingapproacheshaveattemptedtooptimizeattentionmechanisms
+atdifferentlayers. Forinstance,Gemma2(Teametal.,2024)employsapredefinedmixtureoffull
+attentionandslidingwindowattentionacrossdifferentlayersduringtraining,treatingcertainlayers
+aslazylayers. However,thisapproachreliesonafixed,predefinedstructureandlacksadaptability
+totheinputdata. Incontrast,ourmethoddynamicallyidentifieslazylayersbasedontheirattention
+allocation patterns, without the need for additional tuning or predefined settings. This dynamic
+identification allows our model to more flexibly optimize KV cache usage, adapting to different
+inputdatamoreefficiently. Ourapproachconsistsoftwocomponents: identifyingthefunctionof
+eachlayer(i.e.,whetheralayerislazy)andtrimmingtheKVcacheinthoseidentifiedlazylayers.
+5.1 IDENTIFYINGTHELAYERFUNCTION
+To apply SimLayerKV, the first step is to identify which layers function as lazy layers based on
+theirattentionallocationpatterns. Oncetheselayersareidentified,wecanproceedtotrimtheirKV
+cachetooptimizememoryusage. Inthefollowing,wedetailourstrategiesforidentifyingthelayer
+function. Corresponding to the two stages of the inference process (i.e., prefilling and decoding),
+weproposetwodifferentidentificationstrategies.
+1) Last tokens in prefilling: We analyze the attention weight allocation when processing the last
+w processed tokens X = {x ,··· ,x } to identify lazy layers during prefilling. For
+last last m−wlast+1 m
+each layer l, we calculate the average attention weights directed toward the X and X for
+initial recent
+alltokensinX . Ifthisaverageexceedsapredefinedthresholdδ,weclassifythelayerl aslazy;
+last
+otherwise,itisconsiderednon-lazy. Thiscanbeformalizedas:
+(cid:40) lazylayer, if 1 (cid:16) (cid:80) (cid:16) (cid:80) A (xˆ,x)(cid:17)(cid:17) >δ,
+Function[l]= wlast xˆ∈Xlast x∈{Xinitial,Xrecent} l (1)
+non-lazylayer, otherwise,
+whereA (xˆ,x)representstheattentionweightfromtokenxˆtotokenxinlayerlandthethreshold
+l
+δisapredefinedhyper-parameter.
+2) First token in decoding: We assess the attention weight distribution when generating the first
+tokenx duringthedecodingphasetoidentifylazylayers. Specifically, foreachlayerl, ifthe
+m+1
+attentionweightsdirectedtoward{X ,X }whengeneratingx exceedδ,weclassifythe
+initial recent m+1
+layeraslazy;otherwise,itisnotconsideredlazy. Thiscanbeformalizedas:
+(cid:40) (cid:80)
+lazylayer, if A (x ,x)>δ,
+Function[l]= x∈{Xinitial,Xrecent} l m+1 (2)
+non-lazylayer, otherwise.
+Remark. During the prefilling stage, flash attention (Dao, 2023) is commonly used to acceler-
+ate computations. However, flash attention does not return explicit attention weights, making it
+challengingtoapplythelazylayeridentificationstrategywithoutrecomputingtheattentionscores,
+whichwouldintroduceextracomputationaloverhead. Incontrast,duringthedecodingstage,tokens
+aregeneratedoneatatimewithoutusingflashattention,makingtheattentionweightsreadilyavail-
+able.Thisallowsustoapplyouridentificationstrategywithoutextracomputation.Inourexperiment
+(SeeTable 6),wefindthatthetwostrategiesperformcomparably,withnosignificantdifferences.
+5.2 CACHESTRATEGY
+Once lazy layers have been identified, we proceed to trim the KV cache for these specific layers.
+Lazylayersarecharacterizedbytheirsignificantattentionallocationtoalimitedsubsetoftokens,
+namely {X ,X }. Thus we retain only the KV cache corresponding to these tokens within
+initial recent
+lazylayers. ThisselectiveretentionstrategyissimilartoapproachesusedinmethodslikeGemma
+2(Teametal.,2024),whichalsoretainKVcacheforrecenttokensinpredefinedlayers.
+Specifically, for any lazy layer l, we trim its KV cache by retaining only those of tokens in
+{X ,X }. Otherwise,weretainthefullcache. Thisprocesscanbeexpressedas:
+initial recent
+(cid:26)
+{K ,V ,K ,V }, if Function[l]=lazylayer,
+Cache[l]= initial initial recent recent (3)
+fullKV, otherwise,
+whereCache[l]representstheKVcacheforlayerl.
+6Preprint
+Table 1: Performance comparison of SimLayerKV and baseline methods on LLaMA-2-7B-chat,
+LLaMA-3-8B-Instruct, and Mistral-7B-Intruct using LongBench. Bold denotes the best method,
+andthesecondbestifthetopmethodisFullKV.
+Single-Doc.QA Muti.-Doc.QA Summary Few-shot Syn. Code
+LLaMA2-7B-chat
+Full 18.5 18.3 36.4 26.3 7.6 7.9 26.9 21.0 26.0 64.0 83.2 41.1 4.5 7.0 59.9 54.7 31.5
+Str. 13.0 12.6 26.7 23.5 4.5 4.4 21.1 19.9 24.2 61.0 82.8 38.9 3.5 3.5 59.0 52.2 28.2
+Mini. 13.1 13.3 27.5 14.9 4.1 9.8 21.5 20.9 24.3 63.0 83.1 35.1 3.8 3.5 53.4 46.5 27.4
++Q. 16.4 13.9 29.4 14.1 3.9 9.7 21.4 20.5 24.4 61.5 79.1 31.1 2.3 1.0 53.1 46.2 26.7
+Ours 18.4 17.3 30.9 27.3 7.7 7.2 26.3 20.4 26.3 64.0 83.5 40.7 2.5 2.0 60.3 54.9 30.6
++Q. 17.3 16.5 31.5 27.7 8.5 6.9 26.6 20.5 26.3 62.5 81.8 39.8 4.0 2.5 57.5 51.9 30.1
+LlaMA-3-8B-Instruct
+Full 23.4 36.9 45.2 47.0 23.1 20.1 28.8 23.3 27.0 73.5 90.6 42.0 3.5 72.0 58.1 51.3 41.6
+Str. 19.5 23.8 28.5 40.5 16.8 12.1 22.8 21.4 25.4 66.0 86.6 40.2 3.5 72.0 59.7 54.2 37.1
+Mini. 18.8 30.3 31.6 36.2 18.6 15.9 23.8 20.1 25.5 74.5 84.5 37.4 4.9 64.8 48.5 45.3 36.3
++Q. 17.5 28.3 30.8 35.9 19.0 15.9 23.9 19.6 25.8 73.5 84.2 36.8 4.5 65.3 49.1 45.3 35.9
+Ours 23.6 34.7 43.9 48.0 22.5 17.0 26.2 22.5 26.2 73.5 89.3 40.6 3.5 72.5 58.0 50.7 40.8
++Q. 23.6 33.6 42.5 45.4 21.8 17.3 25.8 23.0 26.0 72.4 89.6 40.3 3.2 70.6 60.0 49.8 40.3
+Mistral-7B-Instruct
+Full 29.3 41.1 54.8 43.8 26.8 32.3 33.8 24.3 28.0 74.0 88.4 47.2 3.5 63.0 61.4 61.8 44.6
+Str. 21.3 27.5 31.7 39.5 17.9 17.7 24.3 20.5 25.6 67.5 87.0 45.5 3.5 54.0 61.8 58.9 37.8
+Mini. 22.2 32.1 44.8 41.7 23.0 20.3 24.8 21.3 26.0 65.0 86.7 40.4 3.5 46.0 52.8 47.9 37.4
++Q. 22.2 31.4 42.8 41.0 22.8 20.1 24.4 21.6 25.9 66.0 86.3 40.2 3.5 47.0 52.4 47.4 37.2
+Ours 25.0 37.7 56.4 43.7 26.4 33.5 33.1 23.4 27.4 74.0 88.1 47.1 3.5 64.5 62.3 61.3 44.2
++Q. 25.1 38.7 56.5 44.4 27.2 31.0 31.6 23.7 27.1 73.9 88.4 46.4 3.5 61.0 60.3 60.0 43.7
+6 EXPERIMENTS
+Inthissection,weempiricallyvalidatethatSimLayerKVcanacceleratedecodingwhilemaintaining
+long-textcapabilitiesanduncoverseveralinsightfulfindings.
+6.1 SETTINGS
+Baselines. To evaluate the effectiveness of our proposed SimLayerKV, we compare it against the
+followingbaselines: 1)FullKV(Full): AmethodthatretainsKVcacheforalltokensateachlayer
+duringgeneration. 2)StreamingLLM(Str.)(Xiaoetal.,2023): Anintra-layerKVcachereduction
+techniquethatkeepsonlytheKVcacheforthefirstfourtokensandthemostrecentwtokensateach
+attentionlayerduringgeneration.3)MiniCache(Mini.)(Liuetal.,2024a):Aninter-layerKVcache
+reduction method that merges KV cache of every two adjacent layers after the model’s midpoint
+usingsphericalinterpolationwhileretainingimportanttokenstoreducecachestorage.Additionally,
+forbothMiniCacheandourSimLayerKV,weevaluatetheirperformancewhencombinedwith4-bit
+quantization(Liuetal.,2024c)toassesstheircompatibilitywithquantizationtechniques.
+Datastes and evaluation metrics. To evaluate SimLayerKV’s performance on tasks with long-
+context inputs, we test it on the LongBench benchmark (Bai et al., 2023) and compare the re-
+sults with baseline methods. LongBench is a multi-task benchmark designed to assess the long-
+contextcapabilitiesofLLMs,consistingofdatasetsthatspanvarioustaskssuchassingle-document
+QA (Kocˇisky` et al., 2018; Dasigi et al., 2021), multi-document QA (Yang et al., 2018; Ho et al.,
+2020;Trivedietal.,2022;Heetal.,2017),summarization(Huangetal.,2021;Zhongetal.,2021;
+Fabbrietal.,2019;Wuetal.,2023),few-shotlearning(Joshietal.,2017;Gliwaetal.,2019;Joshi
+et al., 2017; NLPCC, 2014), synthetic tasks (Raffel et al., 2020), and code generation (Guo et al.,
+2023; Liu et al., 2023). For evaluation, we use the metrics recommended by LongBench. Addi-
+tionally,weprovidethecompressionratiosforboththenumberoflayersandmemoryusageofthe
+KVcache. Forlayers,theratioiscalculatedasthetotalnumberoflayersdividedbythenumberof
+7
+AQvtrN repsaQ ne-FM AQtoptoH euqisuM redaeRuD tropeRvoG muSMQ sweNitluM CERT AQaivirT muSMAS tnuoCP eRP CCL P-BR egarevAPreprint
+layerswithreducedKVcache. FortheKVcache,theratioistheoriginalmemoryusagedividedby
+thememoryusageaftercompression. Duetospaceconstraints,weonlyincludetheperformanceof
+16randomlyselectedtasksoutofthe21LongBenchtasksinthemaintext. Theperformanceonthe
+remaining5tasksisprovidedinAppendixA.3Table7.
+We also evaluate whether SimLayerKV can preserve in-context retrieval capabilities while trim-
+mingKVcacheinlazylayers. TheevaluationisconductedontheNeedle-In-A-Haystack(NIAH)
+benchmark(Kamradt,2023)includingvarioustypesandquantitiesofneedles,alongwithtaskssuch
+asaggregationforcommon/frequentwords,questionanswering(QA),andmulti-hopvariabletrac-
+ing(VT),allprovidedbytheRulerbenchmark(Hsiehetal.,2024). Wereporttheperformanceof
+Mistral-7B-Instructwithinputcontextlengthsof4K,8K,16K,and32K.Theevaluationisconducted
+usingthemetricsrecommendedbyRuler.
+Implementationdetails. OurexperimentsarebasedonwidelyusedLLMs,specificallyLLaMa2-
+7B-chat (Touvron et al., 2023), LLaMa3-8B-Instruct (Dubey et al., 2024), and Mistral-7B-
+Instruct (Jiang et al., 2023). The input context window sizes are 4K, 8K, and 32K, with average
+tokenizedsequencelengthsofapproximately13K,10K,and12KinLongBench. Itisworthnoting
+that we do not use different thresholds for each task. Instead, we search for the optimal threshold
+basedonthesyntheticNeed-in-a-Haystacktaskandapplythesamethresholdacrossalltasksindif-
+ferentbenchmarks. Thethresholds(δ)forthemodelsare0.65,0.9,and0.8respectively. Weadopta
+generativeformatwhereanswersareproducedusinggreedydecodingforalltasks.Wechosethefirst
+token identification strategy during the decoding stage in our experiments. For MiniCache, as the
+codewasnotopen-sourcedbeforeoursubmission,wereimplementeditbasedontheoriginalpaper
+andtheSLERP(Shoemake,1985)codeitreferences.Wefollowedallthehyper-parametersoutlined
+inthepaper,exceptforthenumberofretentiontokens.Toensureafaircomparison,wesetthenum-
+berofretentiontokensto1024,matchingthewindowsizewusedinourSimLayerKVmethod.Note
+thatevenwiththesameretentionwindowsize,MiniCache’scompressionratioisstilllowerthanthat
+ofourSimLayerKVasshowninTable2. AlltheexperimentsareconductedusingNVIDIAA100.
+6.2 EXPERIMENTSONLONGBENCH
+Table1summarizestheperformanceacrossvarioustasksintheLongBench(Baietal.,2023)bench-
+mark,andTable2showsthecorrespondingcompressionratio. Wehavethefollowingfindings:
+LLMs exhibit redundancy across
+layers. Table 2 demonstrates that Table 2: Comparison Ratio of layer and KV cache memory
+MiniCache and our SimLayerKV on LongBench. The higher the ratio, the better the perfor-
+achieve average layer compression manceintermsofcompressionefficiency. Bolddenotesthe
+ratios of 1.33× and 1.75×, respec- methodwiththehighestcompressionratio.
+tively. Our SimLayerKV demon-
+LLaMA2-7B LLaMA-3-8B Mistral-7B
+strates notably higher compression
+ratios in models with strong long- Layers KV Layers KV Layers KV
+contextcapabilities(i.e.,LLaMA-3- MiniCache 1.33× 1.27× 1.33× 1.25× 1.33× 1.26×
+8B-InstructandMistral-7B-Instruct) +4bitQ. 1.33× 3.95× 1.33× 3.88× 1.33× 3.92×
+thaninthosewithweakerones(i.e., SLKV(ours) 1.39× 1.35× 2.04× 1.85× 1.83× 1.71×
+LLaMA-2-7B-chat). Meanwhile,as +4bitQ. 1.35× 4.11× 1.96× 5.57× 1.81× 5.26×
+indicated in Table 1, while Mini-
+Cacheshowssomelimitations,ourSimLayerKVallowsthemodeltocontinueeffectivelymanaging
+long-texttaskswithminimallossinperformance(i.e.,anaveragedropof0.7%). Afterintegrating
+4-bitquantization,ourSimLayerKVachievesaremarkablecompressionrateof4.98×onaverage,
+while still maintaining robust performance. Compared to SimLayerKV without quantization, the
+averageperformancedropisonly0.5%.
+SimLayerKVoutperformsMiniCacheonaverage.UnlikeMiniCache,ourapproachdoesnotrely
+oncomplexinterpolationandretentionstrategiestomergeKVcachefromdifferentlayers. Instead,
+wesimplyidentifylazylayersbasedontheattentionweightpatternsandtrimtheKVcacheinthose
+layers. Additionally, our method seamlessly integrates reduction into the decoding process. More
+importantly, asshowninTable1andTable2, ourresultsshowaclearadvantageoverMiniCache,
+whetherornotcombinedwithquantization,achieving4.8%higherperformanceanda1.29×greater
+KVcachecompressionratio,furtheremphasizingtheefficiencyandeffectivenessofourapproach.
+8Preprint
+Table3:PerformancecomparisonofSimLayerKVandbaselinemethodsonRulerbenchmarkusing
+Mistral-7B-Instruct. NIAH: Needle-In-A-Haystack, S: Single Key, MK: Multi-Keys, MV: Multi-
+Values,MQ:Multi-Queries,CWE:CommonWordsExtraction,FWE:FrequentWordsExtraction,
+QA: Question Answering, VT: Variable Tracking. Bold denotes the best method, and the second
+bestifthetopmethodisFullKV.
+Context Retrieval:NIAH Aggregation
+Method QA VT Avg.
+Length
+S MK MV MQ CWE FWE
+Full 99.9 99.4 87.2 99.3 99.5 85.9 64.1 99.4 91.8
+MiniCache 37.2 18.1 20.6 30.9 77.3 77.4 55.8 77.8 49.4
+4096
+SimLayerKV 99.7 99.4 87.6 84.0 98.9 86.9 63.6 98.5 89.8
+Full 99.9 98.5 79.5 97.9 95.4 76.1 61.8 98.3 88.4
+8192 MiniCache 21.6 5.3 7.9 12.4 31.0 53.8 46.0 55.0 29.1
+SimLayerKV 99.8 98.6 79.0 89.1 87.8 76.1 60.4 95.0 85.7
+Full 99.9 95.1 81.8 96.3 89.4 96.9 58.8 94.1 89.0
+16384 MiniCache 14.0 1.2 3.1 3.1 15.9 49.3 38.3 34.0 19.9
+SimLayerKV 99.8 94.8 81.8 90.5 73.4 89.3 57.4 90.5 84.7
+Full 96.6 78.9 87.0 93.9 75.1 93.3 51.2 92.4 83.5
+32768 MiniCache 5.5 0.7 0.5 0.8 7.5 20.3 30.5 22.1 11.0
+SimLayerKV 96.7 78.2 86.2 91.1 48.6 88.5 52.1 91.7 79.1
+NarrativeQA Multifieldqa_En HotpotQA MuSiQue
+25.0 50.0 50.0 25.0
+45.2 48.0 23.1
+23.623.4 43.9 47.0 22.5
+22.5 22.5 22.6 22.8 40.7 21.3 44.2
+22.0 37.5 44.0 20.0 19.5
+34.7 34.7 35.0 19.1 19.1
+42.2
+41.7 41.7
+40.5
+28.5 Stream 16.8
+19.5 Stream Stream Stream
+19.0 25.0 38.0 15.0
+0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1
+Threshold Threshold Threshold Threshold
+Figure 5: Effect of threshold δ on lazy layer identification using LLama3-8B-Instruct: Increasing
+thethresholdresultsinmorelayersbeingidentifiedasnon-lazyratherthanlazy.
+6.3 EXPERIMENTSONRULER
+Table 3 summarizes the performance across various tasks in the Ruler (Hsieh et al., 2024) bench-
+mark,withthecontextlengthrangingfrom4Kto32K.WefindthatSimLayerKVmaintainsstrong
+performanceontheSingleKey,MultipleKeys,andMultipleValuesNeedle-In-A-Haystack(NIAH)
+tasks, exhibiting minimal to no degradation. For example, even with a 32K input context, Sim-
+LayerKVresultsinonlyaslightperformance dropof0.47%comparedtothefullKVcache. Our
+methodalsoperformswellontheQuestionAnsweringandVariableTrackingtasks,whichinvolve
+long context capabilities similar to NIAH. However, we observe a performance drop (8.2% on
+average)ontheMutlipleQueriesNIAHwithSimLayerKV.Thismaybeduetothedata-dependent
+nature of lazy layer identification in our approach. Ideally, varying the number of queries should
+lead to different layers being identified as lazy and reduced accordingly, but currently, the same
+layersarereducedregardlessofthequerycount. Additionally,weobserveasimilarphenomenonin
+aggregationtasks. AlthoughtheCommonWordsExtraction(CWE)andFrequentWordsExtraction
+(FWE) tasks are quite similar, both aiming to return the top-K frequent words in the context, our
+method shows a significantly more pronounced decline in performance on CWE. One possible
+reasonisthat,intheFWEtask,thevalueofK isconsistentlyfixedat3,whileintheCWEtask,K
+increaseswiththecontextlength,makingthetaskprogressivelymorechallengingforourmethod.
+9
+L-eguoR
+1F 1F 1FPreprint
+Layer N
+… lazy
+…
+Layer 16
+… lazy
+…
+Layer 0
+(a) Full (b) Pyramid (c) Random (d) SimLayerKV (ours)
+26 57
+Pyramid Random [0,16) Random [16,32) Pyramid Random [0,16) Random [16,32)
+Random [0,32) SLKV-prefill SLKV-decoding Random [0,32) SLKV-prefill SLKV-decode
+Full Full
+21.5 41
+17 25
+MuSiQue NarrativeQA Multifieldqa_En HotpotQA
+(e) (f)
+Figure 6: Different strategies for dropping KV cache at the layer level and their performance
+on LLama3-8B-Instruct: 1) Full: Use full KV cache for all layers. 2) Pyramid: KV cache are
+progressivelyreducedasthelayersincrease,formingapyramid-likestructure.3)Random:Dropthe
+KVcacheinrandomlyselectedlayerswithintheranges[0,16), [16,32), and[0,32). 4)OurSim-
+LayerKV(SLKV):Identifylazylayersduringeithertheprefillingordecodingstages,andtrimthe
+KVcacheaccordingly. WekeepasamenumberofdroppedKVcacheforallstrategies,exceptFull.
+6.4 ABLATIONSTUDIES&ANALYSIS
+Impactofthresholdonlazylayeridentification. Toassesstheimpactofthethresholdδ iniden-
+tifyinglazylayers,weconductanablationanalysisusingtheLLama3-8B-Instructmodel,varyingδ
+from0,0.2,upto1.AsillustratedinFigure5,weobservethatasthethresholdincreases,themodel’s
+performanceshowslittletonochangeoronlyslowimprovementinitially. However,afterexceeding
+0.6, the performance improves rapidly, and by 0.9, it approaches the performance seen when the
+threshold equals 1 in most tasks. This indicates that as the threshold increases, the likelihood of
+accuratelyidentifyingandtrimmingtrulylazylayersincreases,allowingthemodeltomaintainhigh
+performancewhilereducingunnecessarycomputations.
+EffectofdifferentstrategiesfordroppingKVcacheatlayerlevel. AsshowninFigure6(a-d),
+we experiment with four different strategies. We ensured the same number of dropped KV cache
+foreachstrategy,exceptforFull. TheresultsshowninFigure6(e-f)indicatesignificantreductions
+forPyramidandRandomstrategies,suggestingthatthepredefinedexpectationsabouteachlayer’s
+functionmaynotfullyalignwiththeiractualroles. Moreover,theperformancedifferencebetween
+SLKV-prefillandSLKV-decodestrategiesisminimal,withonlyslightreductionscomparedtothe
+fullKVcache(0.20%and0.28%onaverage,respectively). Thisindicatesthatbothapproachesare
+effectiveinreducingcacheusagewhilemaintainingperformance,regardlessofwhetherlazylayers
+areidentifiedduringtheprefillingordecodingstages.
+7 CONCLUSION
+In this work, we introduced SimLayerKV, a simple yet effective method for compressing the KV
+cacheinLLMs. ByidentifyinglazylayersandtrimmingtheirKVcache,SimLayerKVeffectively
+reducedinter-layerKVcacheredundancies.ExperimentsonthreedifferentLLMsacross16datasets
+from the LongBench benchmark demonstrated that SimLayerKV, with only seven lines of code,
+achievesaKVcachecompressionratioof5×withonlya1.2%dropinperformancewhencombined
+with4-bitquantization. Forfuturework,weaimtocombineourinter-layerKVcachecompression
+method,SimLayerKV,withotherpowerfulintra-layercompressionmethodslikeH2O(Zhangetal.,
+2024b)tofurtherenhanceperformanceandefficiency.
+10
+)%(
+ecnamrofreP
+)%(
+ecnamrofrePPreprint
+REFERENCES
+JoshuaAinslie,JamesLee-Thorp,MichieldeJong,YuryZemlyanskiy,FedericoLebro´n,andSumit
+Sanghai. Gqa: Training generalized multi-query transformer models from multi-head check-
+points. arXivpreprintarXiv:2305.13245,2023.
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu, Jiankai Tang, Zhidian Huang, Zhengxiao Du,
+Xiao Liu, Aohan Zeng, Lei Hou, et al. Longbench: A bilingual, multitask benchmark for long
+contextunderstanding. arXivpreprintarXiv:2308.14508,2023.
+William Brandon, Mayank Mishra, Aniruddha Nrusimha, Rameswar Panda, and Jonathan Ragan
+Kelly. Reducing transformer key-value cache size with cross-layer attention. arXiv preprint
+arXiv:2405.12981,2024.
+Tri Dao. Flashattention-2: Faster attention with better parallelism and work partitioning. arXiv
+preprintarXiv:2307.08691,2023.
+Pradeep Dasigi, Kyle Lo, Iz Beltagy, Arman Cohan, Noah A Smith, and Matt Gardner. A dataset
+of information-seeking questions and answers anchored in research papers. arXiv preprint
+arXiv:2105.03011,2021.
+HarryDong,XinyuYang,ZhenyuZhang,ZhangyangWang,YuejieChi,andBeidiChen. Getmore
+withless: Synthesizingrecurrencewithkvcachecompressionforefficientllminference. arXiv
+preprintarXiv:2402.09398,2024a.
+ShichenDong,WenCheng,JiayuQin,andWeiWang. Qaq: Qualityadaptivequantizationforllm
+kvcache. arXivpreprintarXiv:2403.04643,2024b.
+AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,etal. Thellama3herdofmodels.
+arXivpreprintarXiv:2407.21783,2024.
+AlexanderRFabbri,IreneLi,TianweiShe,SuyiLi,andDragomirRRadev. Multi-news: Alarge-
+scale multi-document summarization dataset and abstractive hierarchical model. arXiv preprint
+arXiv:1906.01749,2019.
+SuyuGe,XihuiLin,YunanZhang,JiaweiHan,andHaoPeng. Alittlegoesalongway: Efficient
+longcontexttrainingandinferencewithpartialcontexts. arXivpreprintarXiv:2410.01485,2024.
+BogdanGliwa,IwonaMochol,MaciejBiesek,andAleksanderWawer. Samsumcorpus: Ahuman-
+annotated dialogue dataset for abstractive summarization. arXiv preprint arXiv:1911.12237,
+2019.
+DanielGoldstein,FaresObeid,EricAlcaide,GuangyuSong,andEugeneCheah. Goldfinch: High
+performance rwkv/transformer hybrid with linear pre-fill and extreme kv-cache compression.
+arXivpreprintarXiv:2407.12077,2024.
+AndreyGromov,KushalTirumala,HassanShapourian,PaoloGlorioso,andDanielARoberts. The
+unreasonableineffectivenessofthedeeperlayers. arXivpreprintarXiv:2403.17887,2024.
+DayaGuo, CanwenXu, NanDuan, JianYin, andJulianMcAuley. Longcoder: Along-rangepre-
+trainedlanguagemodelforcodecompletion. InInternationalConferenceonMachineLearning,
+pp.12098–12107.PMLR,2023.
+WeiHe, KaiLiu, JingLiu, YajuanLyu, ShiqiZhao, XinyanXiao, YuanLiu, YizhongWang, Hua
+Wu,QiaoqiaoShe,etal. Dureader: achinesemachinereadingcomprehensiondatasetfromreal-
+worldapplications. arXivpreprintarXiv:1711.05073,2017.
+XanhHo,Anh-KhoaDuongNguyen,SakuSugawara,andAkikoAizawa. Constructingamulti-hop
+qa dataset for comprehensive evaluation of reasoning steps. arXiv preprint arXiv:2011.01060,
+2020.
+ColemanHooper,SehoonKim,HivaMohammadzadeh,MichaelWMahoney,YakunSophiaShao,
+KurtKeutzer,andAmirGholami.Kvquant:Towards10millioncontextlengthllminferencewith
+kvcachequantization. arXivpreprintarXiv:2401.18079,2024.
+11Preprint
+Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, and
+BorisGinsburg. Ruler:What’stherealcontextsizeofyourlong-contextlanguagemodels? arXiv
+preprintarXiv:2404.06654,2024.
+Luyang Huang, Shuyang Cao, Nikolaus Parulian, Heng Ji, and Lu Wang. Efficient attentions for
+longdocumentsummarization. arXivpreprintarXiv:2104.02112,2021.
+AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,
+DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,LucileSaulnier,etal.
+Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+MandarJoshi,EunsolChoi,DanielSWeld,andLukeZettlemoyer. Triviaqa: Alargescaledistantly
+supervisedchallengedatasetforreadingcomprehension.arXivpreprintarXiv:1705.03551,2017.
+Gregory Kamradt. Needle in a haystack - pressure testing llms. https://github.com/
+gkamradt/LLMTestNeedleInAHaystack/tree/main,2023. GitHubrepository.
+HaoKang,QingruZhang,SouvikKundu,GeonhwaJeong,ZaoxingLiu,TusharKrishna,andTuo
+Zhao. Gear: An efficient kv cache compression recipefor near-lossless generative inference of
+llm. arXivpreprintarXiv:2403.05527,2024.
+Toma´sˇKocˇisky`,JonathanSchwarz,PhilBlunsom,ChrisDyer,KarlMoritzHermann,Ga´borMelis,
+andEdwardGrefenstette. Thenarrativeqareadingcomprehensionchallenge. Transactionsofthe
+AssociationforComputationalLinguistics,6:317–328,2018.
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph
+Gonzalez,HaoZhang,andIonStoica. Efficientmemorymanagementforlargelanguagemodel
+servingwithpagedattention. InProceedingsofthe29thSymposiumonOperatingSystemsPrin-
+ciples,pp.611–626,2023.
+Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, HanchenYe, Tianle
+Cai, Patrick Lewis, and Deming Chen. Snapkv: Llm knows what you are looking for before
+generation. arXivpreprintarXiv:2404.14469,2024.
+BingliLiaoandDaniloVasconcellosVargas.Beyondkvcaching:Sharedattentionforefficientllms.
+arXivpreprintarXiv:2407.12866,2024.
+Bin Lin, Tao Peng, Chen Zhang, Minmin Sun, Lanbo Li, Hanyu Zhao, Wencong Xiao, Qi Xu,
+Xiafei Qiu, Shen Li, et al. Infinite-llm: Efficient llm service for long context with distattention
+anddistributedkvcache. arXivpreprintarXiv:2401.02669,2024.
+AkideLiu,JingLiu,ZizhengPan,YefeiHe,GholamrezaHaffari,andBohanZhuang. Minicache:
+Kvcachecompressionindepthdimensionforlargelanguagemodels. NeurIPS,2024a.
+TianyangLiu,CanwenXu,andJulianMcAuley. Repobench: Benchmarkingrepository-levelcode
+auto-completionsystems. arXivpreprintarXiv:2306.03091,2023.
+Zichang Liu, Aditya Desai, Fangshuo Liao, Weitao Wang, Victor Xie, Zhaozhuo Xu, Anastasios
+Kyrillidis, and Anshumali Shrivastava. Scissorhands: Exploiting the persistence of importance
+hypothesisforllmkvcachecompressionattesttime.AdvancesinNeuralInformationProcessing
+Systems,36,2024b.
+Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir Braverman, Beidi
+Chen,andXiaHu. Kivi: Atuning-freeasymmetric2bitquantizationforkvcache. arXivpreprint
+arXiv:2402.02750,2024c.
+Piotr Nawrot, Adrian Łan´cucki, Marcin Chochowski, David Tarjan, and Edoardo M Ponti. Dy-
+namic memory compression: Retrofitting llms for accelerated inference. arXiv preprint
+arXiv:2403.09636,2024.
+NLPCC. Taskdefinitionforlargescaletextcategorizationatnlpcc2014. http://tcci.ccf.
+org.cn/conference/2014/dldoc/evatask6.pdf,2014.
+12Preprint
+Ramya Prabhu, Ajay Nayak, Jayashree Mohan, Ramachandran Ramjee, and Ashish Panwar. vat-
+tention: Dynamicmemorymanagementforservingllmswithoutpagedattention. arXivpreprint
+arXiv:2405.04437,2024.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. Journalofmachinelearningresearch,21(140):1–67,2020.
+Shashank Rajput, Ying Sheng, Sean Owen, and Vitaliy Chiley. Inference-friendly models with
+mixattention. arXivpreprintarXiv:2409.15012,2024.
+Machel Reid, Nikolay Savinov, Denis Teplyashin, Dmitry Lepikhin, Timothy Lillicrap, Jean-
+baptisteAlayrac,RaduSoricut,AngelikiLazaridou,OrhanFirat,JulianSchrittwieser,etal.Gem-
+ini1.5: Unlockingmultimodalunderstandingacrossmillionsoftokensofcontext. arXivpreprint
+arXiv:2403.05530,2024.
+SunnySanyal,RavidShwartz-Ziv,AlexandrosG.Dimakis,andSujaySanghavi. Inheritune: Train-
+ing smaller yet more attentive language models, 2024. URL https://arxiv.org/abs/
+2404.08634.
+Noam Shazeer. Fast transformer decoding: One write-head is all you need. arXiv preprint
+arXiv:1911.02150,2019.
+YingSheng,LianminZheng,BinhangYuan,ZhuohanLi,MaxRyabinin,BeidiChen,PercyLiang,
+Christopher Re´, Ion Stoica, and Ce Zhang. Flexgen: High-throughput generative inference of
+largelanguagemodelswithasinglegpu. InInternationalConferenceonMachineLearning,pp.
+31094–31116.PMLR,2023.
+Ken Shoemake. Animating rotation with quaternion curves. In Proceedings of the 12th annual
+conferenceonComputergraphicsandinteractivetechniques,pp.245–254,1985.
+GemmaTeam,MorganeRiviere,ShreyaPathak,PierGiuseppeSessa,CassidyHardin,SuryaBhu-
+patiraju,Le´onardHussenot,ThomasMesnard,BobakShahriari,AlexandreRame´,etal. Gemma
+2: Improvingopenlanguagemodelsatapracticalsize. arXivpreprintarXiv:2408.00118,2024.
+QwenTeam.Qwen2.5:Apartyoffoundationmodels,September2024.URLhttps://qwenlm.
+github.io/blog/qwen2.5/.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Niko-
+layBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfounda-
+tionandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+HarshTrivedi,NiranjanBalasubramanian,TusharKhot,andAshishSabharwal.Musique:Multihop
+questionsviasingle-hopquestioncomposition.TransactionsoftheAssociationforComputational
+Linguistics,10:539–554,2022.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H Chi, Sharan Narang, Aakanksha
+Chowdhery,andDennyZhou. Self-consistencyimproveschainofthoughtreasoninginlanguage
+models. InICLR,2022.
+ZhengWang,BoxiaoJin,ZhongzhiYu,andMinjiaZhang. Modeltellsyouwheretomerge: Adap-
+tivekvcachemergingforllmsonlong-contexttasks. arXivpreprintarXiv:2407.08454,2024.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,Denny
+Zhou,etal.Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels.NeurIPS,35:
+24824–24837,2022.
+Han Wu, Mingjie Zhan, Haochen Tan, Zhaohui Hou, Ding Liang, and Linqi Song. Vcsum: A
+versatilechinesemeetingsummarizationdataset. arXivpreprintarXiv:2305.05280,2023.
+HaoyiWuandKeweiTu.Layer-condensedkvcacheforefficientinferenceoflargelanguagemodels.
+arXivpreprintarXiv:2405.10637,2024.
+13Preprint
+Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, and Mike Lewis. Efficient streaming
+languagemodelswithattentionsinks. arXivpreprintarXiv:2309.17453,2023.
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Zhou, Chengpeng Li,
+Chengyuan Li, Dayiheng Liu, Fei Huang, et al. Qwen2 technical report. arXiv preprint
+arXiv:2407.10671,2024a.
+DongjieYang,XiaoDongHan,YanGao,YaoHu,ShilinZhang,andHaiZhao. Pyramidinfer: Pyra-
+midkvcachecompressionforhigh-throughputllminference. arXivpreprintarXiv:2405.12532,
+2024b.
+June Yong Yang, Byeongwook Kim, Jeongin Bae, Beomseok Kwon, Gunho Park, Eunho Yang,
+Se Jung Kwon, and Dongsoo Lee. No token left behind: Reliable kv cache compression via
+importance-awaremixedprecisionquantization. arXivpreprintarXiv:2402.18096,2024c.
+ZhilinYang,PengQi,SaizhengZhang,YoshuaBengio,WilliamWCohen,RuslanSalakhutdinov,
+and Christopher D Manning. Hotpotqa: A dataset for diverse, explainable multi-hop question
+answering. arXivpreprintarXiv:1809.09600,2018.
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao.
+ReAct: Synergizingreasoningandactinginlanguagemodels. InICLR,2023.
+LuYe,ZeTao,YongHuang,andYangLi.Chunkattention:Efficientself-attentionwithprefix-aware
+kvcacheandtwo-phasepartition. arXivpreprintarXiv:2402.15220,2024.
+AlexYoung,BeiChen,ChaoLi,ChengenHuang,GeZhang,GuanweiZhang,HengLi,Jiangcheng
+Zhu, Jianqun Chen, Jing Chang, et al. Yi: Open foundation models by 01. ai. arXiv preprint
+arXiv:2403.04652,2024.
+Hao Yu, Zelan Yang, Shen Li, Yong Li, and Jianxin Wu. Effectively compress kv heads for llm.
+arXivpreprintarXiv:2406.07056,2024.
+YichiZhang,BofeiGao,TianyuLiu,KemingLu,WayneXiong,YueDong,BaobaoChang,Junjie
+Hu,WenXiao,etal.Pyramidkv:Dynamickvcachecompressionbasedonpyramidalinformation
+funneling. arXivpreprintarXiv:2406.02069,2024a.
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song,
+YuandongTian,ChristopherRe´,ClarkBarrett,etal. H2o: Heavy-hitteroracleforefficientgen-
+erativeinferenceoflargelanguagemodels. AdvancesinNeuralInformationProcessingSystems,
+36,2024b.
+MingZhong,DaYin,TaoYu,AhmadZaidi,MutethiaMutuma,RahulJha,AhmedHassanAwadal-
+lah,AsliCelikyilmaz,YangLiu,XipengQiu,etal. Qmsum: Anewbenchmarkforquery-based
+multi-domainmeetingsummarization. arXivpreprintarXiv:2104.05938,2021.
+Denny Zhou, Nathanael Scha¨rli, Le Hou, Jason Wei, Nathan Scales, Xuezhi Wang, Dale Schuur-
+mans,ClaireCui,OlivierBousquet,QuocVLe,etal. Least-to-mostpromptingenablescomplex
+reasoninginlargelanguagemodels. InICLR,2022.
+14Preprint
+A APPENDIX
+A.1 LIMITATION
+WhileourSimLayerKVhasdemonstratedsignificantadvantagesininter-layerKVcachecompres-
+sion, we have primarily focused on combining it with quantization, as quantization is one of the
+mostwidelyusedtechniques. However,therearemanyotherKVcacheoptimizationmethods,such
+as intra-layer eviction, which are orthogonal to our approach. In this study, we have not explored
+the potential of integrating our method with these techniques. In the future, we aim to combine
+ourmethodwithotheroptimizationstrategies,tofurtherimproveperformanceandefficiency. This
+will help validate the effectiveness of our method in a broader framework and potentially lead to
+even greater performance gains. Meanwhile, for simplicity, we have only explored KV cache re-
+dundancies across layers in this work. In the future, we plan to extend our approach to consider
+redundanciesacrossattentionheadsaswell.
+A.2 PSEUDOCODE
+The pseudo-code for SimLayerKV-prefill and SimLayerKV-decoding are in Table 4 and Table 5
+respectively.
+Table4: PseudocodeintorchstyleforourSimLayerKV-prefilling.
+def SLKV prefilling(
+query states,# batch size ∗ num heads ∗ seq len ∗ head dim
+key states,# batch size ∗ num heads ∗ seq len ∗ head dim
+value states,# batch size ∗ num heads ∗ seq len ∗ head dim
+window size,
+threshold,
+):
+attn weights = compute attn(query states, key states, attention mask)
+lazy weights = compute lazy weights(attn weights)
+if lazy weights ≥ threshold:
+key states = torch.cat([key states[:,:,0:4],
+key states[:,:,-window size:]],dim=-2)
+value states = torch.cat([value states[:,:,0:4],
+value states[:,:,-window size:]],dim=-2)
+return key states, value states
+Table5: PseudocodeintorchstyleforourSimLayerKV-decoding.
+def SLKV decoding(
+query states,# batch size ∗ num heads ∗ 1 ∗ head dim
+key states,# batch size ∗ num heads ∗ seq len ∗ head dim
+value states,# batch size ∗ num heads ∗ seq len ∗ head dim
+window size,
+threshold,
+):
+attn weights = compute attn(query states, key states, attention mask)
+lazy weights = (attn weight[:,:,:,0:4]
++attn weight[:,:,:,-window size:]).sum(dim=-1).mean(dim=1)
+if lazy weights ≥ threshold:
+key states = torch.cat([key states[:,:,0:4],
+key states[:,:,-window size:]],dim=-2)
+value states = torch.cat([value states[:,:,0:4],
+value states[:,:,-window size:]],dim=-2)
+return key states, value states
+15Preprint
+Table 6: Performance comparison of SimLayerKV and inter-layer KV cache compression models
+onYi-9B-chat-16KandQwen2.5-3B-chat-32KusingLongBench. SKV:snapKV.
+Yi-9B-chat-16K Qwen2.5-3B-chat-32K
+Full Str. SKV Ours Full Str SKV Ours
+Single-DocumentQA
+NrtvQA 26.1 21.3 23.0 26.0 22.6 21.8 21.6 22.1
+Qasper 39.7 27.4 38.7 38.2 34.1 24.4 32.9 30.9
+MF-en 43.3 28.0 41.5 42.1 44.0 27.1 42.4 43.8
+MF-zh 55.8 35.1 55.3 52.4 51.6 32.1 49.9 52.6
+Multi-DocumentQA
+HotpotQA 48.2 42.3 47.9 47.0 40.4 35.4 40.5 40.1
+2WikiMQA 39.6 35.4 40.0 39.8 38.2 36.5 38.7 37.0
+Musique 26.4 21.9 25.0 25.6 16.1 12.0 16.0 16.8
+DuReader 26.4 14.9 19.6 25.4 33.7 15.5 24.1 30.2
+Summarization
+GovReport 33.1 14.7 27.1 32.7 31.8 22.5 22.0 28.7
+QMSum 21.7 19.6 22.2 21.6 22.9 20.6 23.0 22.8
+MultiNews 25.5 19.5 23.6 25.1 24.7 22.9 22.5 23.8
+VCSUM 14.3 13.1 13.1 13.7 15.3 15.0 13.2 14.8
+Few-shotLearning
+TREC 71.0 67.0 70.4 71.5 66.5 61.0 63.0 67.0
+TriviaQA 87.7 85.7 87.3 88.0 87.2 88.0 88.1 88.2
+SAMSum 42.8 40.5 40.1 41.1 44.0 42.7 43.5 44.0
+LSHT 34.5 22.0 37.0 33.3 34.0 25.5 34.0 34.0
+SyntheticTask
+PCount 4.0 4.5 2.0 4.5 2.5 4.0 3.5 4.0
+PRe 56.0 14.8 62.0 54.3 41.5 37.5 45.0 42.0
+PRz 92.5 26.0 89.4 90.5 34.3 14.1 34.3 36.1
+CodeCompletion
+LCC 63.4 62.9 64.5 64.0 56.9 55.4 55.1 56.8
+RB-P 60.8 57.9 60.2 60.2 56.3 52.8 53.9 55.9
+Average 43.5 32.1 42.2 42.7 37.9 35.6 36.5 37.7
+Compress. Ratio 1× 13.5× 1.7× 1.8× 1× 9.9× 1.2× 1.7×
+A.3 ADDITIONALEXPERIMENTS
+Comparisionwithinter-layerKVcachecompressionmethods&AdditionalLLMs Wealso
+compareSimLayerKVwiththeinter-layerKVcachecompressionmethodSnapKV(Lietal.,2024),
+whichcompressesKVcacheintoafixedlengthbyselectingclusteredimportantKVpositionsfor
+each attention head based on attention scores. We use two additional LLMs, i.e., Qwen2.5-3B-
+Instruct (Yang et al., 2024a; Team, 2024) and Yi-1.5-9B-Chat (Young et al., 2024). Note that our
+SimLayerKVfocusesonintra-layerKVcacheredundancieswhiletheystudyinter-layerredundan-
+cies, and our approach is orthogonal to them. For the SnapKV method, due to its head-wise KV
+evictionmechanism,itnecessitatesstoringKVcacheforn headsinsteadoftheconventionaln ,
+q kv
+wheren isthenumberofheadsforqueryandn isthenumberofheadsforkeyandvalue. For
+q kv
+models using the GQA technique, n = g ∗ n and g is the group number. For examples, in
+q kv
+Qwen2.5-3B-Instruct and Yi-1.5-9B-Chat, g is equal to 8. To ensure a fair comparison and cre-
+aterelativelysimilarconditionsforeachmethod, westandardizethesizeofrecentwindowsw for
+SnapKVandourSimLayerKvto768and1024respectively. AsshowninTable6,wecanseethat
+our SimLayerKV achieves comparable performance with snapKV with a slightly higher compres-
+sion ratio. Additionally, our method and SnapKV are entirely orthogonal. We can simply apply
+SnapKV when pruning lazy layers. Exploring the combination of the two methods in the future
+couldbeinteresting.
+16Preprint
+Table 7: Performance comparison of SimLayerKV and baseline methods on LLaMA-2-7B-chat,
+LLaMA-3-8B-Instruct,andMistral-7B-IntructonadditionaltasksofLongBench.
+MF-zh 2Wiki. VCSum LSHT PRz
+LLaMA2-7B-chat
+Full 11.3 31.4 0.2 17.3 5.0
+Str. 6.7 23.1 0.2 14.8 1.0
+Mini. 8.7 19.8 4.4 15.0 0.5
++Q. 8.0 18.6 3.8 13.0 0.5
+Ours 9.1 31.6 0.2 17.8 4.5
++Q. 9.3 27.6 0.2 16.0 7.0
+LlaMA-3-8B-Instruct
+Full 56.1 35.3 14.7 23.5 94.0
+Str. 35.2 29.1 12.6 20.0 23.0
+Mini. 50.3 30.1 14.7 22.5 80.4
++Q. 51.6 27.9 13.9 23.0 83.4
+Ours 55.0 31.8 11.6 23.3 87.0
++Q. 56.1 33.7 13.5 24.0 89.5
+Mistral-7B-Instruct
+Full 56.7 39.1 15.7 31.3 92.5
+Str. 27.2 32.4 14.0 20.5 15.0
+Mini. 33.3 35.5 13.5 21.8 23.1
++Q. 31.5 35.1 13.7 21.8 23.1
+Ours 57.0 38.6 15.4 31.8 85.5
++Q. 55.7 39.8 15.5 30.0 81.0
+ExperimentresultsonotherdatasetsonLongBenchdatasets Duetospaceconstraints,weonly
+includedtheperformanceof16outofthe21LongBenchtasksinthemaintext. Experimentsresult
+onadditional5tasksinLongBenchdatasetscanbefoundinTable7.
+A.4 EXAMPLESABOUTLAYERBEHAVIORACROSSTOKENS
+Additional examples of layer behavior across tokens for a given input can be found in Figure 7.
+TheexamplesarerandomlychosenfromLongBenchbenchmarks. Theanalysisisconductedusing
+LLama3-8B-Instruct.
+17Preprint
+(a) Example0
+(b) Example1
+(c) Example2
+Figure7: Additionalexamplesoflayerbehavioracrosstokens.
+18
