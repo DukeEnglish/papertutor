@@ -1,0 +1,645 @@
+NATURAL GALORE: ACCELERATING GALORE FOR
+MEMORY-EFFICIENT LLM TRAINING AND FINE-
+TUNING
+ArijitDas
+ERGOGroupAG
+Du¨sseldorf,Germany
+arijit.das@selfsupervised.de
+ABSTRACT
+Training LLMs presents significant memory challenges due to growing size of
+data, weights, and optimizer states. Techniques such as data and model paral-
+lelism,gradientcheckpointing,andoffloadingstrategiesaddressthisissuebutare
+ofteninfeasibleduetohardwareconstraints. Tomitigatememoryusage,alterna-
+tive methods like Parameter-Efficient-Fine-Tuning (PEFT) and GaLore approxi-
+mateweightsoroptimizerstates.PEFTmethods,suchasLoRA,havegainedpop-
+ularityforfine-tuningLLMs,thoughtheyrequireafull-rankwarmstart. Incon-
+trast,GaLoreallowsfull-parameterlearningwhilebeingmorememory-efficient.
+ThisworkintroducesNaturalGaLore,asimpledropinreplacementforAdamW,
+whichefficientlyappliestheinverseEmpiricalFisherInformationMatrixtolow-
+rank gradients using Woodbury’s Identity. We demonstrate that incorporating
+second-order information speeds up optimization significantly, especially when
+theiterationbudgetislimited. Empiricalpretrainingon60M,130M,350M,and
+1.1BparameterLlamamodelsonC4datademonstratesignificantlylowerperplex-
+ityoverGaLorewithoutadditionalmemoryoverhead. Byfine-tuningRoBERTa
+on the GLUE benchmark using Natural GaLore, we demonstrate significant re-
+duction in gap 86.05% vs 86.28% for full-finetuning. Furthermore, fine-tuning
+the TinyLlama 1.1B model for function calling using the TinyAgent framework
+showsthatNaturalGaLoreachieving83.09%accuracyontheTinyAgentdataset,
+significantlyoutperforms16-bitLoRAat80.06%andevensurpassesGPT4-Turbo
+by4%,allwhileusing30%lessmemory. 1
+1 INTRODUCTION
+LargeLanguageModels(LLMs)haveachievedremarkableperformanceacrossvariousdisciplines,
+includingconversationalAIandlanguagetranslation. However,trainingandfine-tuningthesemod-
+els demand enormous computational resources and are highly memory-intensive. This substantial
+memoryrequirementarisesfromstoringbillionsoftrainableparametersalongwithassociatedgra-
+dientsandoptimizerstates.
+Toquantifythis,consideramodelwithΨparameterswhichisbeingtrainedusingtheAdamopti-
+mizer. Inthiscase, storingparametersandtheirgradientsin16-bitprecisionformatslikeFP16or
+BF16requires2Ψbyteseach.Theassociatedoptimizerstatesaretypicallystoredin32-bitprecision
+(FP32)fornumericalstability,necessitatinganadditional4Ψbytesforeachparameter,gradientmo-
+mentum,andvariance,amountingto12Ψbytes. Therefore,thetotalmemoryrequirementsumsup
+to16Ψbytes. Whenaccountingformodel-dependentmemory, suchasactivationsduringforward
+andbackwardpasses,andresidualmemory,liketemporarybuffersandmemoryfragmentation,the
+overall memory footprint can easily exceed 18Ψ bytes (Raffel et al., 2020; Touvron et al., 2023;
+Chowdheryetal.,2022).
+This enormous memory demand poses significant challenges, especially when training LLMs on
+hardwarewithlimitedmemorycapacity. Asmodelscontinuetoscale,efficientmemoryutilization
+1Allcodetoreproducetheresultsareavailableat:https://github.com/selfsupervised-ai/Natural-GaLore.git
+1
+4202
+tcO
+12
+]GL.sc[
+1v92061.0142:viXrabecomescriticalformakingtrainingfeasibleandaccessible. Inthiswork, wedevelopanefficient
+adaptation to the GaLore algorithm (Zhao et al., 2024a), which significantly reduces the memory
+footprint during training and fine-tuning of LLMs by approximating the optimizer state. Our ap-
+proach,NaturalGaLore,leveragesthelow-rankstructureofgradientsandincorporatessecond-order
+informationtoachievefasterconvergenceandhigherperformancewithoutadditionalmemoryover-
+headandcanbeusedasadropinreplacementtostandardoptimizationalgorithmslikeAdamand
+AdamW.
+Parallel and Distributed Training Techniques Researchers have developed various distributed
+computingtechniquesthatleveragesystem-leveloptimizationsandhardwareresourcestomitigate
+thesubstantialmemoryrequirementsintrainingLLMs.
+OneprominentframeworkisDistributedData-Parallel(DDP)thatcombinesdataparallelismwhere
+thetrainingdatasetispartitionedacrossmultipledevicesornodes,withefficientgradientsynchro-
+nizationmechanisms,minimizingcommunicationoverhead. Whiledataparallelismefficientlyuti-
+lizes multiple GPUs, it can still face memory bottlenecks when model sizes exceed the memory
+capacityofasingledevice.
+Modelparallelismaddressesthislimitationbypartitioningthemodelacrossmultipledevices,allow-
+ingforthetrainingofmodelsthataretoolargetofitintothememoryofasingleGPU.Techniques
+likepipelineparallelism(Huangetal.,2019)andtensorparallelism(Shoeybietal.,2019)enables
+thedistributionofdifferentlayersorpartitionsoflayersacrossdevices.However,modelparallelism
+introducescommunicationoverheadandcanbecomplextoimplementeffectively.
+Another effective technique is gradient checkpointing (Chen et al., 2016), which reduces memory
+usage by selectively storing only a subset of activations during the forward pass and recomputing
+themduringthebackwardpassasneeded. Thisapproachtradesincreasedcomputationaloverhead
+forreducedmemoryconsumption,enablingthetrainingofdeepermodelswithoutexceedingmem-
+oryconstraints.
+Memory offloading strategies, such as those implemented in ZeRO-Offload (Rajbhandari et al.,
+2020), move optimizer states and gradients to CPU memory when not actively in use, freeing up
+GPU memory for other operations. ZERO can also partition optimizer states and gradients across
+DDPprocesses,eliminatingredundancyandsignificantlyreducingmemoryfootprint.FullySharded
+DataParallel(Zhaoetal.,2020)extendsthisconceptbyshardingmodelparametersinadditionto
+optimizerstatesandgradients.
+Thesesystem-leveloptimizationshavebeeninstrumentalintrainingstate-of-the-artLLMssuchas
+LLaMA3(Touvronetal.,2023),GPT-3(Brownetal.,2020),Mistral(Jiangetal.,2023),andGopher
+(Raeetal.,2021)onmulti-node,multi-GPUclusters.
+Whilethesedistributedcomputingsolutionsenablethetrainingoflargemodelsbyleveragingexten-
+sivehardwareresources,theycomewithincreasedsystemcomplexityandoperationalcosts. There-
+fore, there is a pressing need for alternative approaches that reduce memory consumption without
+relying solely on distributed computing resources. Optimization techniques that approximate pa-
+rameters or optimizer states offer a promising direction for making LLM training more accessible
+andefficient.
+Parameter-Efficient Fine-Tuning PEFT techniques efficiently adapt pre-trained language mod-
+elstovariousdownstreamapplicationswithoutfine-tuningallthemodel’sparameters(Dingetal.,
+2022),significantlyreducingthecomputationalandmemoryoverhead.
+Among these techniques, the popular LoRA (Hu et al., 2022) parametrizes a weight matrix W ∈
+Rn×mas:
+W =W +BA, (1)
+0
+where W is a frozen full-rank pre-trained weight matrix, and B ∈ Rn×r and A ∈ Rr×m are
+0
+trainable low-rank adapters to be learned during fine-tuning. Since the rank r ≪ min(m,n), the
+adaptersB andAcontainsignificantlyfewertrainableparameters,reducingmemoryrequirements
+forbothparameterandoptimizerstates.
+LoRA has been extensively used to reduce memory usage during fine-tuning, effectively enabling
+largemodelstobeadaptedtonewtaskswithminimaladditionalmemoryoverhead. Thereareafew
+2variants of LoRA proposed to enhance its performance (Renduchintala et al., 2023; Sheng et al.,
+2023;Zhangetal.,2023;Xiaetal.,2024),supportingmulti-tasklearning(Wangetal.,2023),and
+furtherreducingthememoryfootprint(Dettmersetal.,2023).Itsvariant,ReLoRA(Lialin&Schatz,
+2023), extendsLoRA’sapproachtopre-trainingbyperiodicallyupdatingthefrozenweightmatrix
+W usingthepreviouslylearnedlow-rankadapters. Thisincrementalupdatingallowsforcontinual
+0
+learning without storing entire optimizer states for all parameters, leading to faster training times
+and lower computational costs. Furthermore, this allows for rapid adaptation of large models to
+multipledownstreamtaskswithoutstoringseparatecopiesoftheentiremodelforeachtask.
+Despite their benefits, recent works have highlighted several limitations of low-rank reparameteri-
+zationapproaches. LoRAdoesnotconsistentlyachieveperformancecomparabletofull-rankfine-
+tuning, particularlyincomplextasks(Xiaetal.,2024). Inpre-trainingfromscratch, methodslike
+ReLoRArequireaninitialphaseoffull-rankmodeltrainingasawarmupbeforeoptimizinginthe
+low-ranksubspace(Lialin&Schatz,2023). Theshortcomingsoflow-rankparameterreparameter-
+ization suggest that alternative strategies are needed to achieve both memory efficiency and high
+performance.
+GradientLow-RankProjection(GaLore) Analternativetoparameterapproximationistheap-
+proximation of the optimizer states. By reducing the memory footprint associated with optimizer
+states, it is possible to maintain full-parameter learning—thus preserving model capacity and per-
+formance—whileachievingsignificantmemorysavings.
+ThecoreideabehindGaLore(Zhaoetal.,2024a)istoexploittheslowlychanginglow-rankstructure
+of the gradient matrix g ∈ Rn×m, rather than approximating the weights. During neural network
+training,gradientsnaturallyexhibitlow-rankproperties,aphenomenonstudiedextensivelyinboth
+theoretical and practical settings (Zhao et al., 2022; Cosson et al., 2023; Yang et al., 2023). This
+intrinsic low-rank structure of gradients has been applied to reduce communication costs (Wang
+et al., 2018; Vogels et al., 2020) and to decrease memory footprints during training (Gooneratne
+etal.,2020;Zhaoetal.,2024b).
+Specifically, considerthecompactSVDdecompositionofthegradientmatrixg = PΣQT, where
+P ∈ Rn×r andQ ∈ Rm×r aretheassociatedsemi-orthognalmatrices. Then,GaLoreprojectsthe
+gradientmatrixgintoalow-rankform:
+g =PTg. (2)
+low-rank
+Here,r ≪ min(n,m)isthetargetrank,nistheparametercount,misthebatchsizeandg
+low-rank
+serves as an efficient approximation of the original gradient. The projection matrix P is updated
+periodically(e.g.,every200iterations),whichincursminimalamortizedcomputationalcost.
+Byoperatingonlow-rankapproximationsofthegradients,GaLoresignificantlyreducesthememory
+footprint,leadingtoupto30%memoryreductioncomparedLoRA(Zhaoetal.,2024a). Moreover,
+GaLoremaintainsfull-parameterlearning,allowingupdatestoallmodelparameters,leadingtobet-
+tergeneralizationandperformancethanlow-rankadaptationmethods. Further,GaLoreisagnostic
+to the choice of optimizer and can be easily integrated into existing optimization algorithms with
+minimalcodemodifications.
+While GaLore offers significant memory savings and enables full-parameter learning, its perfor-
+mancehasyettomatchthatofoptimizersinfulloptimizerstatespace. Relianceonlow-rankgradi-
+entapproximationsmaynotfullycapturetherichoptimizationdynamics. Theselimitationssuggest
+that while GaLore is a valuable step toward memory-efficient training, further enhancements are
+necessarytobridgetheperformancegapwithstandardoptimizers.
+OurApproach Inthiswork,weproposetobridgethegapbyincorporatingasecond-orderregu-
+larizerintothelow-rankgradientestimate,whichadjustsparameterupdatesmoreeffectively,lead-
+ing to faster convergence. We show that applying the inverse of the empirical Fisher Information
+Matrix(FIM)tothelow-rankgradientsleadstovariancereductionofthegradientestimate,incorpo-
+ratesinformationaboutthecurvatureofthelosslandscape,andreducesdependenceonthestarting
+point. Alloftheseleadtosignificantlyfasterconvergence,especiallyinalimitediterationregime.
+We introduce the Natural GaLore algorithm, a matrix-free algorithm for efficiently applying the
+inverse FIM to the low-rank gradients, using Woodbury Identity, Cholesky Decomposition, and
+3Matrix-VectorProducts, allofwhichcanbeefficientlyimplementedontheGPU.Further, ourap-
+proachdoesnotrequireanyexplicitlayer-wiseinformationorsignificantcomputationaloverhead,
+asisseeninexistingapproacheslikeK-Fac(Martens&Grosse,2015).
+We validate the effectiveness of Natural GaLore through extensive empirical evaluations. Pre-
+trainingexperimentsonLLaMAmodelswith60M,300M,and1.1BparametersusingtheC4dataset
+demonstratethatNaturalGaLoreachievessignificantlylowerperplexitythanGaLorewithoutaddi-
+tionalmemoryoverhead,indicatingfasterconvergencewithinthesamecomputationalbudget.
+Furthermore, we showcase the practical benefits of Natural GaLore in fine-tuning tasks. We fine-
+tune the TinyLlama 1.1B model for function calling using the TinyAgent framework. Our results
+show that Natural GaLore significantly outperforms LoRA in this setting, achieving an accuracy
+of 83.09% on the TinyAgent dataset. This performance significantly surpasses 16-bit LoRA and
+exceedsthatofGPT-4-turboby4%,allwhileusing30%lessmemory.
+2 ACCELERATING GALORE WITH NATURAL GRADIENTS
+2.1 NEXTTOKENPREDICTION
+GenerativeLLMsaretrainedtopredictthenexttokeninasequencebasedsolelyonthepreviously
+observedtokens. This”causal”approachrespectsthetemporalorderoflanguage,ensuringthatthe
+model’spredictionsatanypointdependonlyonpastandnotfutureinputs.
+Givenasequenceoftokensx = (x ,x ,...,x ),theobjectiveistomaximizethelikelihoodofa
+1 2 T
+sequencebydecomposingitintoaproductofconditionalprobabilities:
+T
+(cid:89)
+Prob (x)= Prob (x |x ) (3)
+θ θ t <t
+t=1
+wherex = (x ,x ,...,x )representsalltokensbeforepositiontandProb (x | x )isthe
+<t 1 2 t−1 θ t <t
+probabilityofthenexttokengivenallprevioustokensandtheparameterθ ∈Rn×m.
+This is equivalent to minimizing the Negative Log-Likelihood (NLL) of the observed sequences,
+which is the cross-entropy loss between the predicted probability distribution and the actual next
+token:
+T
+(cid:88)
+Φ(θ)=− logProb (x |x ) (4)
+θ t <t
+t=1
+Thislosspenalizesthemodelmorewhenitassignslowerprobabilitiestothecorrectnexttoken. By
+minimizingthisloss,themodellearnstoassignhigherprobabilitiestoappropriatecontinuationsof
+text. However,thelossisnon-convexandhigh-dimensional,forLLMsthedatasetisalsomassive,
+makingtheoptimizationproblemverychallenging.
+2.2 LOW-RANKGRADIENTDESCENT
+Stochasticgradientdescentalgorithmsareiterative,whereeachstepaimstofindtheoptimalupdate
+directionthatminimizesthelossfunctionlocally.NowinthecaseofGaLore,theupdatedirectionis
+restrictedtotheaffinesubspaceu ∈θ +Range(P ). HereP ∈Rn×r istheleftprojectionma-
+k k k k
+trix,calculatedusingthecompactSVDdecompositionofthegradientmatrix∇ Φ(θ )=P ΣQT.
+θ k k k
+Then, the local neighborhood around this update can be defined using the Taylor series expansion
+(Linetal.,2022):
+1
+Φ(θ +P u )≈Φ(θ )+gTu + uTH u (5)
+k k k k k k 2 k k k
+whereg =PT∇ Φ(θ )isthelowrankprojectedgradientandH =PT∇2Φ(θ)P istheHessian
+k k θ k k k θ k
+matrix.
+4However,theHessianmatrixH isoftencomputationallyexpensivetocomputeandstore,especially
+k
+for large-scale language models (LLMs) with billions of parameters. Fortunately, precisely under
+theconditionthatthelossfunctioncanberepresentedintermsofKLdivergencebetweentheactual
+andapproximateddistributions[4],thenH canbeapproximatedbytheFIM.TheFIMisdefined
+k
+astheexpectationoftheHessianofthenegativelog-likelihoodw.r.t. thedatadistribution:
+F =E [H ] (6)
+k x∼pdata k
+The FIM captures the curvature of the loss landscape and provides a natural metric for the opti-
+mization process. Hence, it can better adjust parameter updates according to the geometry of the
+parameterspace. However, asthetheoreticaldatadistributionisunknown, inpractice, weneedto
+estimateitusingtheempiricalFIM(Martens,2014)definedby:
+h
+1 (cid:88)
+Fˆ = g g T (7)
+k h k k
+k=1
+wherehisthehistoryofgradientsfrompastbatcheswewouldliketoconsider. Then,theoptimal
+directionu∗,whichminimizesthelossinthislocalneighborhood,isgivenby(citeFujietal.paper):
+k
+u∗ =Fˆ−1g (8)
+k k k
+Thisleadstotheoptimalgradientdescentupdatestep:
+θ =θ −ηP u∗ (9)
+k+1 k k k
+forsomelearningrateη.
+Many popular stochastic optimization algorithms approximate the diagonal of the empirical FIM
+usingsecond-momentestimatesofthegradientg ,whichwhenaddedwithPolyakstyleparameter
+k
+averaging (i.e., momentum), asymptotically achieve the optimal Fisher efficient convergence rate
+(Martens,2020).
+For instance, in thecase of Adam(Kingma &Ba, 2014), theoptimal updatestep is approximated
+byincludingthemomentumtermm ∈ Rr×m andthelearningrateη isscaledbythesquareroot
+k
+of the second moment estimate v ∈ Rr×m. With all operations being elementwise, the update
+k
+directionbecomes:
+m =β m +(1−β )g (10)
+k 1 k−1 1 k
+v =β v +(1−β )g2 (11)
+k 2 k−1 2 k
+√
+u∗ =m / v +ϵ (12)
+k k k
+Thisupdate, whenappliedto[9], givestheGaLoreoptimizationalgorithm, whichismemoryeffi-
+cientasitonlyrequiresstoringtheprojectionmatrixandthecostlyoptimizerstates(g ,m ,v )are
+k k k
+nowsignificantlyreducedbyafactorof n, wheretherankr, canbechosenbasedonthetradeoff
+r
+betweenmemorylimitationsandperformancerequirements.
+2.3 NATURALGALOREANDFISHEREFFICIENCY
+Despiteclearadvantages,theperformanceofGaLoreisnotonparwithAdamW(Loshchilov&Hut-
+ter,2017)optimizationontheoriginalspace.Tobridgethisgap,weproposeNaturalGaLore,which
+usesthefullempiricalFIM,therebyincorporatingthemissingsecond-orderinteractioninformation
+intheoptimizationprocess.
+As we now argue, this leads to a much more favorable dependence on the starting point, which
+means that the optimizer can make much more progress given a limited iteration budget. Further,
+whenusingadecayinglearningrateschedulelikewithAdamW(Loshchilov&Hutter,2017), the
+asymptoticconvergenceratecanbefaster(Martens,2020)byasignificantlylargeconstantfactor.
+5Natural gradient descent is known (Martens, 2020) to be Fisher efficient, precisely for our loss
+function[4]. Fisherefficiencymeansthatthenaturalgradientestimatorasymptoticallyachievesthe
+lowestpossiblevarianceamongallunbiasedgradientestimators.
+For Natural GaLore, the gradient descent update [9] leads to a sequence of estimates θ whose
+k
+variancesatisfies(Amari,1998):
+(cid:18) (cid:19)
+1 1
+Var[θ ]= F−1(θ∗)+O (13)
+k mk k k k2
+which is asymptotically the smallest possible variance matrix satisfying the Crame´r-Rao lower
+bound, that any unbiased estimator computed from mk training samples can have, with m being
+thebatchsize.
+Here,θ∗isthelocaloptimumintheneighborhooddefinedbytheTaylorseriesexpansion[5]around
+k
+theupdatedirection. Thisisanimportantcaveat,astheguaranteeisonlyforlocalconvergenceina
+convexneighborhood. Thelossfunctionisnon-convex,sothepropertycannotbestatedtoholdfor
+theglobaloptimum.
+TheresultalsoreliesonthecomputationoftheexactFIMF (θ )usingtheentiredatadistribution,
+k k
+which is not practical. The Fisher efficiency guarantee is, however, only approximately satisfied
+when using the empirical FIM Fˆ instead. Nevertheless, we still get a variance reduction in the
+k
+gradient estimates, leading to faster convergence and better optimization performance in the early
+stagesoftraininglarge-scalemodels,makingitespeciallyvaluablefortrainingwithalimiteditera-
+tionbudget.
+Further, incorporating second-order information through the empirical FIM allows the optimizer
+to account for the curvature of the loss landscape, enabling natural gradient descent to take more
+informedstepsthanstandardgradientdescent,potentiallyescapingflatregionsornavigatingsteep
+ravinesmoreeffectively.
+In (Martens, 2020), it was shown that the expected update direction can be expressed as a sum of
+two terms, one that scales as O(1/k), which is independent of the starting point and another that
+scalesasO(1/k2),whichisdependentonthestartingpoint. Ifmomentumisappliedtothegradient
+estimator, the first term becomes independent of the choice of FIM estimator, thereby not leading
+to any asymptotic improvements. However, regularizing with the empirical FIM estimate can sig-
+nificantlyreducetheconstantfactorassociatedwiththestarting-point-dependentsecondterm. This
+leadstopracticalperformancegainsinfiniteiterationregimes(althoughnegligibleforlargek).
+Finally,theFisherefficiencyresultalsoassumesthatthemodelcanperfectlycapturethedatadistri-
+bution,aconditionknownasrealizability.However,withthegrowingsizeofLLMs,thisassumption
+is likely to hold, thereby satisfying the conditions for the guarantee. Therefore, especially in low-
+resource settings, Natural GaLore can be a promising approach for training LLMs under memory
+constraints.
+2.4 NATURALGRADIENTTRANSFORM
+OurNaturalGaLorealgorithmisdesignedtoefficientlyapplytheinverseempiricalFIMtolow-rank
+gradientsusingWoodbury’sIdentity. MostofthestepsinthealgorithmaresimilartoGaLore(Zhao
+etal.,2024a),withthecriticaldifferencebeingtheincorporationofthenaturalgradienttransform.
+Inordertoimplementthenaturalgradienttransform,wecomputetheinverseoftheempiricalFIM
+and apply it to the gradient g using Woodbury’s Identity, which allows us to efficiently compute
+k
+theinverseofamatrixoftheformA+UBUT. Woodbury’sIdentitystatesthat:
+(A+UBUT)−1 =A−1−A−1U(B−1+UTA−1U)−1UTA−1 (14)
+Now, if we choose Fˆ = λI + GGT, A = λI, U = G, and B = I, where G =
+k
+[vec(g ),vec(g ),...,vec(g )] is the stacked gradient matrix over the past s gradients and
+k k−1 k−s
+λisasmallconstantforTikhonovregularization,then,theinverseoftheempiricalFIMappliedto
+thegradientg i.e. thenaturalgradientg˜ =Fˆ−1g canbecalculatedas:
+k k k k
+6g˜ = 1 g − 1 G(cid:0) λI+GTG(cid:1)−1 GTg (15)
+k λ k λ k
+Tocomputetheaboveformulaefficiently,letS = I + 1GTG ∈ Rs×s andy = GTg . Cholesky
+λ k
+decompositionisusedtosolveforzin
+Sz =y (16)
+which requires only O(s2) time. Then, the final natural gradient estimate can be computed using
+onlymatrix-vectorproducts,whichisverymemoryefficient:
+1 1
+g˜ = g − Gz (17)
+k λ k λ2
+This natural gradient estimate g˜ can then be sent to the Adam optimizer [12], and the model pa-
+k
+rametersthesamewayasinGaLore.
+3 EXPERIMENTS
+We evaluate Natural GaLore on pre-training and fine-tuning tasks for LLMs. All experiments are
+conductedonasinglenodewith8NVIDIAA100GPUstoleveragehigh-performancecomputing
+capabilities,yetstaywithinreasonablelimits.
+3.1 PRE-TRAININGONTHEC4DATASET
+To assess the effectiveness of Natural GaLore, we apply it to pre-train LLaMA-based language
+modelsofsizesrangingfrom60millionto1.1billionparameters,ontheC4dataset. TheC4dataset
+is a colossal, cleaned version of the Common Crawl Corpus, primarily intended for pre-training
+languagemodelsandwordrepresentations(Raffeletal.,2020). Itprovidesadiverseandextensive
+corpus,makingitsuitableforevaluatingpre-trainingmethodsinrealisticscenarios.
+WeadopttheexperimentalsetupfromLialin&Schatz(2023),utilizingaLLaMA-based2 architec-
+turewithRMSNormandSwiGLUactivations(Shazeer,2020;Touvronetal.,2023). Wemaintain
+thesamesetofhyperparametersforeachmodelsizeacrossallmethods,exceptforthelearningrate,
+which is tuned individually to ensure optimal performance. All experiments use the BF16 format
+to reduce memory usage without compromising computational efficiency, the same computational
+budgetandthebestvalidationperplexityisreported.
+- - - - - -
+Natural GaLore GaLore AdamW Natural GaLore GaLore AdamW
+10
+3.8
+y y
+tix 8 tix 3.6
+e e
+lp lp 3.4
+re P 6 re P 3.2
+g o l 4 g o l 3.0
+2.8
+5k 10k 15k 5k 10k 15k 20k
+Step Step
+Figure1: TrainingandValidationlogPerplexityforLlama1.1B
+Table1presentsthevalidationperplexityandmemoryconsumptionformodelstrainedwithdiffer-
+entmethodsandFigure1showsthetrainingrunfortheLlama1.1Bmodel. OurproposedNatural
+GaLoreconsistentlyoutperformsGaLore(Zhaoetal.,2024a)acrossallmodelsizes,achievingval-
+idation perplexities closer to the full-rank baseline while maintaining significant memory savings.
+Furthermore, Natural GaLore exhibits lower perplexities and greater memory consumption com-
+paredtootherlow-rankadaptationmethodslikeLoRAandReLoRA,duetotheirlessefficientuse
+oflow-rankstructuresandtheneedforadditionaloptimizerstates.
+2LLaMAmaterialsinourpaperaresubjecttotheLLaMAcommunitylicense.
+760M 130M 350M 1.1B
+Full-Rank 3.52(0.36G) 3.22(0.76G) 2.93(2.06G) 2.72(7.80G)
+NaturalGaLore 3.53(0.24G) 3.22(0.52G) 2.93(1.22G) 2.80(4.38G)
+GaLore 3.56(0.24G) 3.24(0.52G) 2.95(1.22G) 2.90(4.38G)
+Low-Rank 4.35(0.26G) 3.82(0.54G) 3.62(1.08G) 4.96(3.57G)
+LoRA 3.55(0.36G) 3.52(0.80G) 3.24(1.76G) 2.96(6.17G)
+ReLoRA 3.61(0.36G) 3.38(0.80G) 3.37(1.76G) 2.91(6.17G)
+Rankr/d 128/256 256/768 256/1024 512/2048
+model
+TrainingTokens 1.1B 2.2B 6.4B 13.1B
+Table 1: Comparison of Natural GaLore with other low-rank algorithms on pre-training various sizes of
+LLaMAmodelsontheC4dataset. Validationlogperplexityisreported(averagedover5runs),alongwitha
+memoryestimate(ingigabytes)ofthetotalparametersandoptimizerstatesbasedonBF16format.
+3.2 FINE-TUNINGROBERTA-BASEONTHEGLUEBENCHMARK
+To further evaluate the effectiveness of Natural GaLore, we conduct experiments on the Gen-
+eralLanguageUnderstandingEvaluation(GLUE)benchmarkusingthepre-trainedRoBERTa-Base
+model.TheGLUEbenchmarkisacollectionofninenaturallanguageunderstandingtasks,including
+single-sentencetaskslikeCoLA(Warstadtetal.,2019),similarityandparaphrasetaskslikeMRPC
+(Dolan&Brockett,2005)andSTS-B(Ceretal.,2017),andinferencetaskslikeRTE(Daganetal.,
+2006),MNLI(Williamsetal.,2018),andQNLI(Rajpurkaretal.,2016). Thisbenchmarkiswidely
+usedtoassesstheperformanceoflanguagemodelsondiverselinguisticphenomena.
+Inourexperiments,wefine-tunetheRoBERTa-BasemodelusingNaturalGaLoreandcompareits
+performancewithfullfine-tuningandLoRA(Huetal.,2022). Wefocusonmemory-efficientfine-
+tuningmethodstoreducethecomputationalfootprintwhilemaintaininghighperformance.Foreach
+method,wereporttheaveragescoreacrossallGLUEtasksandindividualtaskscores.
+Weusethesametraininghyperparametersacrossallmethodsforafaircomparison. Thebatchsize
+is32,andwefine-tunedeachmodelforthreeepochs. Thelearningrateisselectedfrom{1e-5,2e-5,
+3e-5}basedonthebestvalidationperformanceforeachtask. ForNaturalGaLoreandLoRA,we
+experiment with rank values of 4 and 8 to study the trade-off between performance and memory
+efficiency.
+Table2presentstheresultsofourexperiments. NaturalGaLoreconsistentlyachievescomparable
+or better performance than LoRA across most tasks while using less memory. Precisely, with a
+rank of 4, Natural GaLore attains an average score of 86.05, closely matching the complete fine-
+tuningbaselineof86.28andoutperformingLoRA’saveragescoreof85.61. Thisdemonstratesthat
+NaturalGaLorecaneffectivelyfine-tunelargemodelswithreducedmemoryconsumptionwithout
+sacrificingperformance.
+Memory CoLA STS-B MRPC RTE SST-2 MNLI QNLI QQP Avg
+FullFine-Tuning 747M 62.24 90.92 91.30 79.42 94.57 87.18 92.33 92.28 86.28
+NaturalGaLore(rank=4) 253M 61.50 90.80 92.10 79.50 94.20 87.05 92.30 91.15 86.05
+GaLore(rank=4) 253M 60.35 90.73 92.25 79.42 94.04 87.00 92.24 91.06 85.89
+LoRA(rank=4) 257M 61.38 90.57 91.07 78.70 92.89 86.82 92.18 91.29 85.61
+NaturalGaLore(rank=8) 257M 61.70 90.90 92.25 79.80 94.40 87.20 92.35 91.25 86.23
+GaLore(rank=8) 257M 60.06 90.82 92.01 79.78 94.38 87.17 92.20 91.11 85.94
+LoRA(rank=8) 264M 61.83 90.80 91.90 79.06 93.46 86.94 92.25 91.22 85.93
+Table 2: Evaluating Natural GaLore for memory-efficient fine-tuning on the GLUE benchmark using pre-
+trainedRoBERTa-Base.Wereporttheaveragescoreofalltasks.Memoryconsumptionisreportedinmillions
+ofparameters(M).
+83.3 FINE-TUNINGTINYLLAMA1.1BFORFUNCTIONCALLINGINADVANCEDAGENTIC
+SYSTEMS
+AdvancedAgenticSystems(AAS)requirelanguagemodelsthatcanunderstandandgeneratecode
+snippets to integrate various tools and APIs, fulfilling user queries through function-calling. We
+utilizetheTinyAgentframework,whichprovidesanend-to-endpipelinefortraininganddeploying
+task-specificLLMagentscapableofefficientandaccuratefunction-calling(Erdoganetal.,2024)to
+driveagenticsystemsattheedge.
+Givenanaturallanguagequery,theLLMagentmustgenerateasequenceofpre-definedfunction-
+callsthataccomplishthedesiredtasks.Thechallengeliesindeterminingtheappropriatearguments,
+tocallthecorrectfunctions,intherightorderwhilerespectinginterdependenciesamongthefunc-
+tions.
+LLMCompilerKimetal.(2023),isaframeworkthatenableslanguagemodelstoperformfunction-
+callingbyfirstgeneratingafunction-callingplan, whichincludestherequiredfunctionsandargu-
+ments. The LLMCompiler then compiles this plan into an executable sequence of function-calls.
+Thecriticalaspectistrainingthemodeltoproduceafunction-callingplanwiththecorrectsyntax
+anddependencies.
+The off-the-shelf pre-trained TinyLlama 1.1B (instruct-32k) model performs poorly on this task.
+Themodelgeneratesincorrectsetsoffunctions,hallucinatedfunctionnames,failstorespectdepen-
+dencies,andpassesargumentsincorrectly.Thisunderperformanceisexpected,asthemodelwasini-
+tiallytrainedondatasetslikeSlimPajamaandStarCoder,whicharenotspecifictofunction-calling
+tasks. Toaddressthis,wefollowtheTinyAgentframework(Erdoganetal.,2024)andfine-tunethe
+TinyLlama1.1Bmodelonahigh-quality,curateddatasetdesignedforfunction-calling.
+TinyAgentDataset TheTinyAgentdataset(Erdoganetal.,2024)isameticulouslycuratedcol-
+lectionaimedatbuildingalocalagenticsystemforfunction-callingonAppleMacBooksforday-to-
+daytasks. Itcontains40Kexamplesofnaturallanguagequeriesandcorrespondingfunction-calling
+plans. Thedatasetisdividedinto38Ktrainingexamples,1Kvalidationexamples,and1Ktestex-
+amples. It encompasses 16 tasks, including Email, Contacts, SMS, Calendar, Notes, Reminders,
+File Management and Zoom Meetings. Each task has predefined scripts that the model needs to
+generate. Thedatasetisintentionallychallenging,requiringthemodeltounderstanddependencies
+betweenfunction-callsandtheargumentstobepassed.
+Fine-Tuning Procedure We fine-tune the TinyLlama 1.1B model on the TinyAgent dataset for
+three epochs using a batch size of 32. The learning rate is set to 7 × 10−5. After each epoch,
+the model is evaluated on the validation set, and the best-performing model is selected based on
+validationperformancetobeevaluatedonthetestset.
+During fine-tuning, the prompt includes descriptions of the ground truth functions and irrelevant
+functions serving as negative samples. This strategy encourages the model to learn to select the
+correctfunctionsratherthanmerelymemorizingthegroundtruth. Additionally,severalin-context
+examples demonstrate how queries are translated into function-calling plans. These examples are
+selectedusingaRetrieval-AugmentedGeneration(RAG)processbasedontheuser’squeryfromthe
+trainingdataandaDeBERTa-v3-smallmodel(Heetal.,2021)fine-tunedformulti-labelclassifica-
+tionforretrievalamongthe16tools.
+The training objective is then to maximize the accuracy of the generated function-calling plans.
+Success is defined by the model generating the correct plan with the proper set of function-calls,
+correctarguments,andtheappropriateorderoffunction-calls. Verifyingtheselectionofthecorrect
+set of functions involves straightforward set comparison. However, ensuring the correctness of
+argumentsandtheorderoffunction-callsismorecomplexandrequiresconstructingtheassociated
+DirectedAcyclicGraphtocheckforequality.
+ResultsandDiscussion Afterfine-tuning,theTinyLlama1.1Bmodel’ssuccessrateonthetestset
+improvedsignificantly. Table3presentsthelatency,modelsize,andsuccessrateofvariousmodels
+ontheTinyAgentdataset. Asshown,NaturalGaLoreimprovesthesuccessrateofthe1.1Bmodel
+from80.06%(16-bitLoRA)to83.09%,alsosurpassingGPT-4-Turboby4%andapproachingthe
+performanceofthelargerTinyAgent-7Bmodel,whichachieves84.95%.
+9Model WeightPrecision Latency(seconds) ModelSize(GB) SuccessRate(%)
+GPT-3.5 Unknown 3.2 Unknown 65.04
+GPT-4-Turbo Unknown 3.9 Unknown 79.08
+16-bit(NaturalGaLore) 3.9 2.2 83.09
+TinyAgent-1.1B
+16-bit(LoRA) 3.9 2.2 80.06
+TinyAgent-7B 16-bit(Erdoganetal.,2024) 19.5 14.5 84.95
+Table3: Latency,size,andsuccessrateofTinyAgentmodelsbeforeandafterquantization. Latency
+istheend-to-endlatencyofthefunctioncallingplanner,includingthepromptprocessingtimeand
+generation.
+TheseresultsdemonstratethatNaturalGaLorenotonlyenhancestheperformanceofsmallermod-
+els like the 1.1B parameter TinyLlama but also makes them competitive with significantly larger
+models. By efficiently incorporating second-order information through low-rank natural gradient
+updates, Natural GaLore enables smaller models to achieve higher accuracy without additional
+memoryoverhead.
+4 CONCLUSION
+We have introduced Natural GaLore, a memory-efficient pre-training and fine-tuning strategy for
+largelanguagemodels.NaturalGaLoresignificantlyreducesmemoryusage—byupto65.5%inop-
+timizerstates—whilemaintainingorevenimprovingperformanceinlarge-scaleLLMpre-training
+and fine-tuning tasks. By incorporating second-order information through an efficient approxima-
+tion of the inverse Empirical Fisher Information Matrix, Natural GaLore enhances convergence
+rates,especiallyinregimeswithalimitediterationbudget.
+Importantly, Natural GaLore can serve as a drop-in replacement for standard optimizers like
+AdamW and integrates seamlessly into existing training pipelines. Our experimental results high-
+light the reproducibility and effectiveness of Natural GaLore across various tasks, including pre-
+trainingLLaMAmodelsandfine-tuningontheGLUEbenchmark,aswellastheTinyAgentfunc-
+tion calling tasks. This makes it a compelling choice for large-scale pre-training scenarios where
+bothmemoryefficiencyandmodelperformancearecritical.
+Inthefuturewewanttoexplore(1)furtherenhancingmemoryefficiencybyemployinglow-memory
+andstructuredprojectionmatrices,and(2)moreextensiveempiricalevaluationonfine-tuningAAS
+on a wide variety of tasks. We also hope that our work will inspire future research on memory-
+efficient training methods from the perspective of optimizer state approximation. We believe that
+NaturalGaLorewillbeavaluabletoolforthecommunity,enablingthetrainingoflarge-scalemod-
+elsonconsumer-gradehardwarewithlimitedresources.
+IMPACT STATEMENT
+This work aims to improve the memory efficiency of training LLMs, thereby reducing the envi-
+ronmental impact of LLM pre-training and fine-tuning. By enabling the training of larger models
+on hardware with lower memory requirements, our approach helps to minimize energy consump-
+tionandcarbonfootprintassociatedwithtrainingLLMs. Furthermore,bymakingadvancedmodel
+trainingmoreaccessible,wecontributetodemocratizingAIresearchanddevelopment,allowinga
+broadercommunitytoengagewithlarge-scalemodelswithouttheneedforexpensivecomputational
+resources.
+REFERENCES
+Shun-ichiAmari. Naturalgradientworksefficientlyinlearning. NeuralComputation,1998.
+Tom B Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. InAdvancesinNeuralInformationProcessingSystems,2020.
+10DanielCer,MonaDiab,EnekoAgirre,In˜igoLopez-Gazpio,andLuciaSpecia. Semeval-2017task
+1: Semantictextualsimilaritymultilingualandcrosslingualfocusedevaluation. InProceedings
+ofthe11thInternationalWorkshoponSemanticEvaluation(SemEval-2017),2017.
+Tianqi Chen, Bing Xu, Chiyuan Zhang, and Carlos Guestrin. Training deep nets with sublinear
+memorycost.InProceedingsofthe20thInternationalConferenceonMachineLearning(ICML),
+2016.
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam
+Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, et al. PaLM:
+Scalinglanguagemodelingwithpathways. arXivpreprintarXiv:2204.02311,2022.
+Victor Cosson, Baptiste Lecouat, Arthur Varre, Ste´phane d’Ascoli, and Giulio Biroli. Low-rank
+gradientdescentconvergesandgeneralizes. arXivpreprintarXiv:2301.12995,2023.
+Ido Dagan, Oren Glickman, and Bernardo Magnini. The PASCAL recognising textual entailment
+challenge. In Proceedings of the First International Conference on Machine Learning Chal-
+lenges: EvaluatingPredictiveUncertainty,VisualObjectClassification,andRecognisingTextual
+Entailment.Springer,2006.
+TimDettmers,ArtidoroPagnoni,AriHoltzman,andLukeZettlemoyer.QLoRA:Efficientfinetuning
+ofquantizedLLMs. arXivpreprintarXiv:2305.14314,2023.
+Ning Ding, Xiang Zheng, Yujia Wang, Yifei Chen, Yichi Liu, Haitao Zheng, Xipeng Qiu, Yujun
+Shen, Bolin Ding, and Jie Tang. Delta tuning: A comprehensive study of parameter efficient
+methodsforpre-trainedlanguagemodels.InAdvancesinNeuralInformationProcessingSystems,
+2022.
+WilliamBDolanandChrisBrockett.Automaticallyconstructingacorpusofsententialparaphrases.
+InProceedingsoftheThirdInternationalWorkshoponParaphrasing(IWP2005),2005.
+LutfiErenErdogan,NicholasLee,SiddharthJha,SehoonKim,RyanTabrizi,SuhongMoon,Cole-
+man Hooper, Gopala Anumanchipalli, Kurt Keutzer, and Amir Gholami. TinyAgent: Function
+callingattheedge. arXivpreprintarXiv:2409.00608,2024.
+Shamal Gooneratne, Meng Wang, Zhili Guo, Vamsi Krishna Kanuparthi, Dinesh Rajan, and
+AnuraPJayasumana. Low-rankgradientapproximationformulti-tasklearning. arXivpreprint
+arXiv:2011.01679,2020.
+Pengcheng He, Jianfeng Gao, and Weizhu Chen. DeBERTaV3: Improving DeBERTa using
+ELECTRA-style pre-training with gradient-disentangled embedding sharing. arXiv preprint
+arXiv:2111.09543,2021.
+EdwardJHu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,andWeizhu
+Chen. LoRA: Low-rank adaptation of large language models. In International Conference on
+LearningRepresentations,2022.
+YanpingHuang,YoulongCheng,AnkurBapna,OrhanFirat,MenglongChen,DennyChen,Zhifeng
+Hu, Yuxin Shen, Maxim Krikun, Yonghui Wu, et al. GPipe: Efficient training of giant neural
+networks using pipeline parallelism. In Advances in Neural Information Processing Systems,
+2019.
+Ye Jiang, Pengcheng Li, Zhe Gan, Jianfeng Liu, Dongdong Chen, Xiaodong Zhu, Zhangyang Li,
+LijuanWang,JianfengWang,andZichengLiu. Mistral: Efficientcomposableinferenceforlarge
+languagemodels. arXivpreprintarXiv:2305.15334,2023.
+SehoonKim,SuhongMoon,RyanTabrizi,NicholasLee,MichaelWMahoney,KurtKeutzer,and
+AmirGholami.AnLLMcompilerforparallelfunctioncalling.arXivpreprintarXiv:2312.04511,
+2023.
+Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980,2014.
+11Vladimir Lialin and Arthur Schatz. ReLoRA: Low-rank fine-tuning reloaded. arXiv preprint
+arXiv:2307.09769,2023.
+Tianyi Lin, Zhihui Zhu, and Yongyi Mao. Randomized subspace regularized newton method for
+unconstrainednon-convexoptimization. arXivpreprintarXiv:2209.04170,2022.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101,2017.
+JamesMartens. Newperspectivesonthenaturalgradientmethod. arXivpreprintarXiv:1412.1193,
+2014.
+JamesMartens. Newinsightsandperspectivesonthenaturalgradientmethod. JournalofMachine
+LearningResearch,2020.
+JamesMartensandRogerGrosse.Optimizingneuralnetworkswithkronecker-factoredapproximate
+curvature. In Proceedings of the 32nd International Conference on Machine Learning (ICML),
+2015.
+JackWRae,SebastianBorgeaud,TrevorCai,KatieMillican,JordanHoffmann,FrancisSong,John
+Aslanides, Sarah Henderson, Roman Ring, Susannah Young, et al. Scaling language models:
+Methods,analysis&insightsfromtraininggopher. arXivpreprintarXiv:2112.11446,2021.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. JournalofMachineLearningResearch,2020.
+SamyamRajbhandari,JeffRasley,OlatunjiRuwase,andYuxiongHe.ZeRO:Memoryoptimizations
+toward training trillion parameter models. In Proceedings of the International Conference for
+HighPerformanceComputing,Networking,StorageandAnalysis,2020.
+PranavRajpurkar,JianZhang,KonstantinLopyrev,andPercyLiang. SQuAD:100,000+questions
+formachinecomprehensionoftext.InProceedingsofthe2016ConferenceonEmpiricalMethods
+inNaturalLanguageProcessing,2016.
+Adithya Renduchintala, Pedro Rodriguez, and Mathias Creutz. Tied lora: Enhancing parameter-
+efficientfine-tuningwithtiedweights. arXivpreprintarXiv:2306.13420,2023.
+NoamShazeer. GLUvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+YiSheng,XuefeiHan,XuefengZhu,YuanzhiYang,JianiSun,andGuohuiZhou.S-LoRA:Scalable
+efficientmodelservingformassiveloramodels. arXivpreprintarXiv:2306.01125,2023.
+Mohammad Shoeybi, Mostofa Patwary, Rohan Puri, Patrick LeGresley, Jared Casper, and Bryan
+Catanzaro. Megatron-LM:Trainingmulti-billionparameterlanguagemodelsusingmodelparal-
+lelism. arXivpreprintarXiv:1909.08053,2019.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothe´e
+Lacroix, BaptisteRozie`re, NamanGoyal, EricHambro, FaisalAzhar, etal. LLaMA:Openand
+efficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,2023.
+ThijsVogels, MartinJaggi, andGiorgioPatrini. PowerGossip: Practicallow-rankcommunication
+fordecentralizedoptimization. InInternationalConferenceonMachineLearning,2020.
+Shiqiang Wang, Gauri Joshi, Sreeram K Ghosh, and H Vincent Poor. ATOMO: Communication-
+efficient learning via atomic sparsification. In Advances in Neural Information Processing Sys-
+tems,2018.
+ZihaoWang, ZhenBai, andSophiaAnaniadou. Multi-LoRA:Efficientfine-tuningfordemocratic
+AI. arXivpreprintarXiv:2305.14377,2023.
+AlexWarstadt,AmanpreetSingh,andSamuelRBowman. Neuralnetworkacceptabilityjudgments.
+TransactionsoftheAssociationforComputationalLinguistics,2019.
+12Adina Williams, Nikita Nangia, and Samuel R Bowman. A broad-coverage challenge corpus for
+sentence understanding through inference. In Proceedings of the 2018 Conference of the North
+AmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguageTechnolo-
+gies,2018.
+Tianxiang Xia, Hao Peng, Zheyu Chen, Lemao Li, Zhiyuan He, Zhen Yang, and Wei-Ying Ma.
+Chain-of-thoughtlora: Efficientadaptationoflargelanguagemodels. InProceedingsofthe2024
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing(EMNLP),2024.
+ZhilinYang,EdwardJHu,TianleXia,RichardSocher,andYuanzhiLi. Spectralmethodsinlow-
+rankmodeladaptation. arXivpreprintarXiv:2305.14683,2023.
+RuiZhangetal. LoRA-FA:Memory-efficientlow-rankadaptationviafeaturere-alignment. arXiv
+preprintarXiv:2302.05653,2023.
+Jiawei Zhao, Zhenyu Zhang, Beidi Chen, Zhangyang Wang, Anima Anandkumar, and Yuandong
+Tian. GaLore: Memory-efficientLLMtrainingbygradientlow-rankprojection. arXivpreprint
+arXiv:2403.03507,2024a.
+JiaweiZhao, ZhenyuZhang, etal. Galore: Low-rankgradientdescent: Fastconvergenceandlow
+memorycost. InternationalConferenceonMachineLearning,2024b.
+ShangqianZhao,ShiyuLi,andYiMa. ZerOinitialization: Initializingneuralnetworkswithzero-
+valuedparameters. arXivpreprintarXiv:2207.05848,2022.
+TianshiZhao,ZhenSun,XiaodongWang,FeiZhou,YangGuo,andAlexanderJSmola. Extending
+torchelasticforstatefultrainingjobs. arXivpreprintarXiv:2006.06873,2020.
+13

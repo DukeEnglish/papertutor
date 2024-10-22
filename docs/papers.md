@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13857v1 |
-|title| How Numerical Precision Affects Mathematical Reasoning Capabilities of LLMs |
-|authors| Guhao FengKai YangYuntian GuXinyue AiShengjie LuoJiacheng SunDi HeZhenguo LiLiwei Wang
-|links| http://arxiv.org/abs/2410.13857v1 |
-|updated| 2024-10-17 17:59:35 UTC |
-|summary| Despite the remarkable success of Transformer-based Large Language ModelsLLMs across various domains understanding and enhancing their mathematicalcapabilities remains a significant challenge. In this paper we conduct arigorous theoretical analysis of LLMs mathematical abilities with a specificfocus on their arithmetic performances. We identify numerical precision as akey factor that influences their effectiveness in mathematical tasks. Ourresults show that Transformers operating with low numerical precision fail toaddress arithmetic tasks such as iterated addition and integer multiplicationunless the model size grows super-polynomially with respect to the inputlength. In contrast Transformers with standard numerical precision canefficiently handle these tasks with significantly smaller model sizes. Wefurther support our theoretical findings through empirical experiments thatexplore the impact of varying numerical precision on arithmetic tasksproviding valuable insights for improving the mathematical reasoningcapabilities of LLMs. |
+|idx| 2410.16267v1 |
+|title| xGen-MM-Vid (BLIP-3-Video): You Only Need 32 Tokens to Represent a Video Even in VLMs |
+|authors| Michael S. RyooHonglu ZhouShrikant KendreCan QinLe XueManli ShuSilvio SavareseRan XuCaiming XiongJuan Carlos Niebles
+|links| http://arxiv.org/abs/2410.16267v1 |
+|updated| 2024-10-21 17:59:11 UTC |
+|summary| We present xGen-MM-Vid BLIP-3-Video: a multimodal language model forvideos particularly designed to efficiently capture temporal information overmultiple frames. BLIP-3-Video takes advantage of the temporal encoder inaddition to the conventional visual tokenizer which maps a sequence of tokensover multiple frames into a compact set of visual tokens. This enablesBLIP3-Video to use much fewer visual tokens than its competing models e.g. 32vs. 4608 tokens. We explore different types of temporal encoders includinglearnable spatio-temporal pooling as well as sequential models like TokenTuring Machines. We experimentally confirm that BLIP-3-Video obtains videoquestion-answering accuracies comparable to much larger state-of-the-art modelse.g. 34B while being much smaller i.e. 4B and more efficient by usingfewer visual tokens. The project website is athttps://www.salesforceairesearch.com/opensource/xGen-MM-Vid/index.html |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13854v1 |
-|title| Can MLLMs Understand the Deep Implication Behind Chinese Images? |
-|authors| Chenhao ZhangXi FengYuelin BaiXinrun DuJinchang HouKaixin DengGuangzeng HanQinrui LiBingli WangJiaheng LiuXingwei QuYifei ZhangQixuan ZhaoYiming LiangZiqiang LiuFeiteng FangMin YangWenhao HuangChenghua LinGe ZhangShiwen Ni
-|links| http://arxiv.org/abs/2410.13854v1 |
-|updated| 2024-10-17 17:59:24 UTC |
-|summary| As the capabilities of Multimodal Large Language Models MLLMs continue toimprove the need for higher-order capability evaluation of MLLMs isincreasing. However there is a lack of work evaluating MLLM for higher-orderperception and understanding of Chinese visual content. To fill the gap weintroduce the Chinese Image Implication understandingBenchmark CII-Bench which aims to assess the higher-order perceptionand understanding capabilities of MLLMs for Chinese images. CII-Bench standsout in several ways compared to existing benchmarks. Firstly to ensure theauthenticity of the Chinese context images in CII-Bench are sourced from theChinese Internet and manually reviewed with corresponding answers alsomanually crafted. Additionally CII-Bench incorporates images that representChinese traditional culture such as famous Chinese traditional paintingswhich can deeply reflect the models understanding of Chinese traditionalculture. Through extensive experiments on CII-Bench across multiple MLLMs wehave made significant findings. Initially a substantial gap is observedbetween the performance of MLLMs and humans on CII-Bench. The highest accuracyof MLLMs attains 64.4 where as human accuracy averages 78.2 peaking at animpressive 81.0. Subsequently MLLMs perform worse on Chinese traditionalculture images suggesting limitations in their ability to understandhigh-level semantics and lack a deep knowledge base of Chinese traditionalculture. Finally it is observed that most models exhibit enhanced accuracywhen image emotion hints are incorporated into the prompts. We believe thatCII-Bench will enable MLLMs to gain a better understanding of Chinese semanticsand Chinese-specific images advancing the journey towards expert artificialgeneral intelligence AGI. Our project is publicly available athttps://cii-bench.github.io/. |
+|idx| 2410.16256v1 |
+|title| CompassJudger-1: All-in-one Judge Model Helps Model Evaluation and Evolution |
+|authors| Maosong CaoAlexander LamHaodong DuanHongwei LiuSongyang ZhangKai Chen
+|links| http://arxiv.org/abs/2410.16256v1 |
+|updated| 2024-10-21 17:56:51 UTC |
+|summary| Efficient and accurate evaluation is crucial for the continuous improvementof large language models LLMs. Among various assessment methods subjectiveevaluation has garnered significant attention due to its superior alignmentwith real-world usage scenarios and human preferences. However human-basedevaluations are costly and lack reproducibility making precise automatedevaluators judgers vital in this process. In this report we introducetextbfCompassJudger-1 the first open-source textbfall-in-one judge LLM.CompassJudger-1 is a general-purpose LLM that demonstrates remarkableversatility. It is capable of: 1. Performing unitary scoring and two-modelcomparisons as a reward model 2. Conducting evaluations according to specifiedformats 3. Generating critiques 4. Executing diverse tasks like a generalLLM. To assess the evaluation capabilities of different judge models under aunified setting we have also established textbfJudgerBench a new benchmarkthat encompasses various subjective evaluation tasks and covers a wide range oftopics. CompassJudger-1 offers a comprehensive solution for various evaluationtasks while maintaining the flexibility to adapt to diverse requirements. BothCompassJudger and JudgerBench are released and available to the researchcommunity athttps://github.com/open-compass/CompassJudger. We believe that byopen-sourcing these tools we can foster collaboration and accelerate progressin LLM evaluation methodologies. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13852v1 |
-|title| Retrospective Learning from Interactions |
-|authors| Zizhao ChenMustafa Omer GulYiwei ChenGloria GengAnne WuYoav Artzi
-|links| http://arxiv.org/abs/2410.13852v1 |
-|updated| 2024-10-17 17:59:03 UTC |
-|summary| Multi-turn interactions between large language models LLMs and usersnaturally include implicit feedback signals. If an LLM responds in anunexpected way to an instruction the user is likely to signal it by rephrasingthe request expressing frustration or pivoting to an alternative task. Suchsignals are task-independent and occupy a relatively constrained subspace oflanguage allowing the LLM to identify them even if it fails on the actualtask. This creates an avenue for continually learning from interactions withoutadditional annotations. We introduce ReSpect a method to learn from suchsignals in past interactions via retrospection. We deploy ReSpect in a newmultimodal interaction scenario where humans instruct an LLM to solve anabstract reasoning task with a combinatorial solution space. Through thousandsof interactions with humans we show how ReSpect gradually improves taskcompletion rate from 31 to 82 all without any external annotation. |
+|idx| 2410.16251v1 |
+|title| Can Knowledge Editing Really Correct Hallucinations? |
+|authors| Baixiang HuangCanyu ChenXiongxiao XuAli PayaniKai Shu
+|links| http://arxiv.org/abs/2410.16251v1 |
+|updated| 2024-10-21 17:55:54 UTC |
+|summary| Large Language Models LLMs suffer from hallucinations referring to thenon-factual information in generated content despite their superior capacitiesacross tasks. Meanwhile knowledge editing has been developed as a new popularparadigm to correct the erroneous factual knowledge encoded in LLMs with theadvantage of avoiding retraining from scratch. However one common issue ofexisting evaluation datasets for knowledge editing is that they do not ensureLLMs actually generate hallucinated answers to the evaluation questions beforeediting. When LLMs are evaluated on such datasets after being edited bydifferent techniques it is hard to directly adopt the performance to assessthe effectiveness of different knowledge editing methods in correctinghallucinations. Thus the fundamental question remains insufficientlyvalidated: Can knowledge editing really correct hallucinations in LLMs Weproposed HalluEditBench to holistically benchmark knowledge editing methods incorrecting real-world hallucinations. First we rigorously construct a massivehallucination dataset with 9 domains 26 topics and more than 6000hallucinations. Then we assess the performance of knowledge editing methods ina holistic way on five dimensions including Efficacy GeneralizationPortability Locality and Robustness. Through HalluEditBench we have providednew insights into the potentials and limitations of different knowledge editingmethods in correcting hallucinations which could inspire future improvementsand facilitate the progress in the field of knowledge editing. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13848v1 |
-|title| Janus: Decoupling Visual Encoding for Unified Multimodal Understanding and Generation |
-|authors| Chengyue WuXiaokang ChenZhiyu WuYiyang MaXingchao LiuZizheng PanWen LiuZhenda XieXingkai YuChong RuanPing Luo
-|links| http://arxiv.org/abs/2410.13848v1 |
-|updated| 2024-10-17 17:58:37 UTC |
-|summary| In this paper we introduce Janus an autoregressive framework that unifiesmultimodal understanding and generation. Prior research often relies on asingle visual encoder for both tasks such as Chameleon. However due to thediffering levels of information granularity required by multimodalunderstanding and generation this approach can lead to suboptimal performanceparticularly in multimodal understanding. To address this issue we decouplevisual encoding into separate pathways while still leveraging a singleunified transformer architecture for processing. The decoupling not onlyalleviates the conflict between the visual encoders roles in understanding andgeneration but also enhances the frameworks flexibility. For instance boththe multimodal understanding and generation components can independently selecttheir most suitable encoding methods. Experiments show that Janus surpassesprevious unified model and matches or exceeds the performance of task-specificmodels. The simplicity high flexibility and effectiveness of Janus make it astrong candidate for next-generation unified multimodal models. |
+|idx| 2410.16246v1 |
+|title| Analyzing Context Contributions in LLM-based Machine Translation |
+|authors| Emmanouil ZaranisNuno M. GuerreiroAndré F. T. Martins
+|links| http://arxiv.org/abs/2410.16246v1 |
+|updated| 2024-10-21 17:51:41 UTC |
+|summary| Large language models LLMs have achieved state-of-the-art performance inmachine translation MT and demonstrated the ability to leverage in-contextlearning through few-shot examples. However the mechanisms by which LLMs usedifferent parts of the input context remain largely unexplored. In this workwe provide a comprehensive analysis of context utilization in MT studying howLLMs use various context parts such as few-shot examples and the source textwhen generating translations. We highlight several key findings: 1 the sourcepart of few-shot examples appears to contribute more than its correspondingtargets irrespective of translation direction 2 finetuning LLMs withparallel data alters the contribution patterns of different context parts and3 there is a positional bias where earlier few-shot examples have highercontributions to the translated sequence. Finally we demonstrate thatinspecting anomalous context contributions can potentially uncover pathologicaltranslations such as hallucinations. Our findings shed light on the internalworkings of LLM-based MT which go beyond those known for standardencoder-decoder MT models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13846v1 |
-|title| SimLayerKV: A Simple Framework for Layer-Level KV Cache Reduction |
-|authors| Xuan ZhangCunxiao DuChao DuTianyu PangWei GaoMin Lin
-|links| http://arxiv.org/abs/2410.13846v1 |
-|updated| 2024-10-17 17:58:14 UTC |
-|summary| Recent advancements in large language models LLMs have extended theircapabilities to handle long contexts. However increasing the number of modellayers and the length of input sequences significantly escalates the memoryrequired to store key-value KV cache posing challenges for efficientinference. To mitigate this issue we present SimLayerKV a simple yeteffective method that reduces inter-layer KV cache redundancies by selectivelydropping cache in identified lazy layers. Our approach is based on theobservation that certain layers in long-context LLMs exhibit lazy behaviorcontributing less to modeling long-range dependencies compared to non-lazylayers. By analyzing attention weight patterns we find that the behavior ofthese lazy layers is consistent across tokens during generation for a giveninput. This insight motivates our SimLayerKV which identifies lazy layers andreduces their KV cache accordingly. SimLayerKV is training-free generalizableand can be implemented with only seven lines of code. We conduct extensiveexperiments on three representative LLMs e.g. LLaMA2-7B LLaMA3-8B andMistral-7B across 16 tasks from the LongBench benchmark. The resultsdemonstrate that SimLayerKV achieves a KV cache compression ratio of 5timeswith only a 1.2 performance drop when combined with 4-bit quantization. Ourcode is available at https://github.com/sail-sg/SimLayerKV. |
+|idx| 2410.16235v1 |
+|title| ToW: Thoughts of Words Improve Reasoning in Large Language Models |
+|authors| Zhikun XuMing ShenJacob DineenZhaonan LiXiao YeShijie LuAswin RRVChitta BaralBen Zhou
+|links| http://arxiv.org/abs/2410.16235v1 |
+|updated| 2024-10-21 17:41:11 UTC |
+|summary| We introduce thoughts of words ToW a novel training-time data-augmentationmethod for next-word prediction. ToW views next-word prediction as a corereasoning task and injects fine-grained thoughts explaining what the next wordshould be and how it is related to the previous contexts in pre-training texts.Our formulation addresses two fundamental drawbacks of existing next-wordprediction learning schemes: they induce factual hallucination and areinefficient for models to learn the implicit reasoning processes in raw texts.While there are many ways to acquire such thoughts of words we explore thefirst step of acquiring ToW annotations through distilling from larger models.After continual pre-training with only 70K ToW annotations we effectivelyimprove models reasoning performances by 7 to 9 on average and reduce modelhallucination by up to 10. At the same time ToW is entirely agnostic to tasksand applications introducing no additional biases on labels or semantics. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13857v1 |
-|title| How Numerical Precision Affects Mathematical Reasoning Capabilities of LLMs |
-|authors| Guhao FengKai YangYuntian GuXinyue AiShengjie LuoJiacheng SunDi HeZhenguo LiLiwei Wang
-|links| http://arxiv.org/abs/2410.13857v1 |
-|updated| 2024-10-17 17:59:35 UTC |
-|summary| Despite the remarkable success of Transformer-based Large Language ModelsLLMs across various domains understanding and enhancing their mathematicalcapabilities remains a significant challenge. In this paper we conduct arigorous theoretical analysis of LLMs mathematical abilities with a specificfocus on their arithmetic performances. We identify numerical precision as akey factor that influences their effectiveness in mathematical tasks. Ourresults show that Transformers operating with low numerical precision fail toaddress arithmetic tasks such as iterated addition and integer multiplicationunless the model size grows super-polynomially with respect to the inputlength. In contrast Transformers with standard numerical precision canefficiently handle these tasks with significantly smaller model sizes. Wefurther support our theoretical findings through empirical experiments thatexplore the impact of varying numerical precision on arithmetic tasksproviding valuable insights for improving the mathematical reasoningcapabilities of LLMs. |
+|idx| 2410.16270v1 |
+|title| Reflection-Bench: probing AI intelligence with reflection |
+|authors| Lingyu LiYixu WangHaiquan ZhaoShuqi KongYan TengChunbo LiYingchun Wang
+|links| http://arxiv.org/abs/2410.16270v1 |
+|updated| 2024-10-21 17:59:50 UTC |
+|summary| The ability to adapt beliefs or behaviors in response to unexpected outcomesreflection is fundamental to intelligent systems interaction with the world.From a cognitive science perspective this serves as a core principle ofintelligence applicable to both human and AI systems. To address the debate onthe intelligence of large language models LLMs we propose Reflection-Bencha comprehensive benchmark comprising 7 tasks spanning core cognitive functionscrucial for reflection including perception memory belief updatingdecision-making prediction counterfactual thinking and meta-reflection. Weevaluate the performances of 13 prominent LLMs such as OpenAI o1 GPT-4 Claude3.5 Sonnet etc. The results indicate that current LLMs still lack satisfactoryreflection ability. We discuss the underlying causes of these results andsuggest potential avenues for future research. In conclusion Reflection-Benchoffers both evaluation tools and inspiration for developing AI capable ofreliably interacting with the environment. Our data and code are available athttps://github.com/YabYum/ReflectionBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13854v1 |
-|title| Can MLLMs Understand the Deep Implication Behind Chinese Images? |
-|authors| Chenhao ZhangXi FengYuelin BaiXinrun DuJinchang HouKaixin DengGuangzeng HanQinrui LiBingli WangJiaheng LiuXingwei QuYifei ZhangQixuan ZhaoYiming LiangZiqiang LiuFeiteng FangMin YangWenhao HuangChenghua LinGe ZhangShiwen Ni
-|links| http://arxiv.org/abs/2410.13854v1 |
-|updated| 2024-10-17 17:59:24 UTC |
-|summary| As the capabilities of Multimodal Large Language Models MLLMs continue toimprove the need for higher-order capability evaluation of MLLMs isincreasing. However there is a lack of work evaluating MLLM for higher-orderperception and understanding of Chinese visual content. To fill the gap weintroduce the Chinese Image Implication understandingBenchmark CII-Bench which aims to assess the higher-order perceptionand understanding capabilities of MLLMs for Chinese images. CII-Bench standsout in several ways compared to existing benchmarks. Firstly to ensure theauthenticity of the Chinese context images in CII-Bench are sourced from theChinese Internet and manually reviewed with corresponding answers alsomanually crafted. Additionally CII-Bench incorporates images that representChinese traditional culture such as famous Chinese traditional paintingswhich can deeply reflect the models understanding of Chinese traditionalculture. Through extensive experiments on CII-Bench across multiple MLLMs wehave made significant findings. Initially a substantial gap is observedbetween the performance of MLLMs and humans on CII-Bench. The highest accuracyof MLLMs attains 64.4 where as human accuracy averages 78.2 peaking at animpressive 81.0. Subsequently MLLMs perform worse on Chinese traditionalculture images suggesting limitations in their ability to understandhigh-level semantics and lack a deep knowledge base of Chinese traditionalculture. Finally it is observed that most models exhibit enhanced accuracywhen image emotion hints are incorporated into the prompts. We believe thatCII-Bench will enable MLLMs to gain a better understanding of Chinese semanticsand Chinese-specific images advancing the journey towards expert artificialgeneral intelligence AGI. Our project is publicly available athttps://cii-bench.github.io/. |
+|idx| 2410.16267v1 |
+|title| xGen-MM-Vid (BLIP-3-Video): You Only Need 32 Tokens to Represent a Video Even in VLMs |
+|authors| Michael S. RyooHonglu ZhouShrikant KendreCan QinLe XueManli ShuSilvio SavareseRan XuCaiming XiongJuan Carlos Niebles
+|links| http://arxiv.org/abs/2410.16267v1 |
+|updated| 2024-10-21 17:59:11 UTC |
+|summary| We present xGen-MM-Vid BLIP-3-Video: a multimodal language model forvideos particularly designed to efficiently capture temporal information overmultiple frames. BLIP-3-Video takes advantage of the temporal encoder inaddition to the conventional visual tokenizer which maps a sequence of tokensover multiple frames into a compact set of visual tokens. This enablesBLIP3-Video to use much fewer visual tokens than its competing models e.g. 32vs. 4608 tokens. We explore different types of temporal encoders includinglearnable spatio-temporal pooling as well as sequential models like TokenTuring Machines. We experimentally confirm that BLIP-3-Video obtains videoquestion-answering accuracies comparable to much larger state-of-the-art modelse.g. 34B while being much smaller i.e. 4B and more efficient by usingfewer visual tokens. The project website is athttps://www.salesforceairesearch.com/opensource/xGen-MM-Vid/index.html |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13852v1 |
-|title| Retrospective Learning from Interactions |
-|authors| Zizhao ChenMustafa Omer GulYiwei ChenGloria GengAnne WuYoav Artzi
-|links| http://arxiv.org/abs/2410.13852v1 |
-|updated| 2024-10-17 17:59:03 UTC |
-|summary| Multi-turn interactions between large language models LLMs and usersnaturally include implicit feedback signals. If an LLM responds in anunexpected way to an instruction the user is likely to signal it by rephrasingthe request expressing frustration or pivoting to an alternative task. Suchsignals are task-independent and occupy a relatively constrained subspace oflanguage allowing the LLM to identify them even if it fails on the actualtask. This creates an avenue for continually learning from interactions withoutadditional annotations. We introduce ReSpect a method to learn from suchsignals in past interactions via retrospection. We deploy ReSpect in a newmultimodal interaction scenario where humans instruct an LLM to solve anabstract reasoning task with a combinatorial solution space. Through thousandsof interactions with humans we show how ReSpect gradually improves taskcompletion rate from 31 to 82 all without any external annotation. |
+|idx| 2410.16266v1 |
+|title| 3DGS-Enhancer: Enhancing Unbounded 3D Gaussian Splatting with View-consistent 2D Diffusion Priors |
+|authors| Xi LiuChaoyi ZhouSiyu Huang
+|links| http://arxiv.org/abs/2410.16266v1 |
+|updated| 2024-10-21 17:59:09 UTC |
+|summary| Novel-view synthesis aims to generate novel views of a scene from multipleinput images or videos and recent advancements like 3D Gaussian splatting3DGS have achieved notable success in producing photorealistic renderingswith efficient pipelines. However generating high-quality novel views underchallenging settings such as sparse input views remains difficult due toinsufficient information in under-sampled areas often resulting in noticeableartifacts. This paper presents 3DGS-Enhancer a novel pipeline for enhancingthe representation quality of 3DGS representations. We leverage 2D videodiffusion priors to address the challenging 3D view consistency problemreformulating it as achieving temporal consistency within a video generationprocess. 3DGS-Enhancer restores view-consistent latent features of renderednovel views and integrates them with the input views through a spatial-temporaldecoder. The enhanced views are then used to fine-tune the initial 3DGS modelsignificantly improving its rendering performance. Extensive experiments onlarge-scale datasets of unbounded scenes demonstrate that 3DGS-Enhancer yieldssuperior reconstruction performance and high-fidelity rendering resultscompared to state-of-the-art methods. The project webpage ishttps://xiliu8006.github.io/3DGS-Enhancer-project . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13850v1 |
-|title| Influence Functions for Scalable Data Attribution in Diffusion Models |
-|authors| Bruno MlodozeniecRuna EschenhagenJuhan BaeAlexander ImmerDavid KruegerRichard Turner
-|links| http://arxiv.org/abs/2410.13850v1 |
-|updated| 2024-10-17 17:59:02 UTC |
-|summary| Diffusion models have led to significant advancements in generativemodelling. Yet their widespread adoption poses challenges regarding dataattribution and interpretability. In this paper we aim to help address suchchallenges in diffusion models by developing an textitinfluence functionsframework. Influence function-based data attribution methods approximate how amodels output would have changed if some training data were removed. Insupervised learning this is usually used for predicting how the loss on aparticular example would change. For diffusion models we focus on predictingthe change in the probability of generating a particular example via severalproxy measurements. We show how to formulate influence functions for suchquantities and how previously proposed methods can be interpreted as particulardesign choices in our framework. To ensure scalability of the Hessiancomputations in influence functions we systematically develop K-FACapproximations based on generalised Gauss-Newton matrices specifically tailoredto diffusion models. We recast previously proposed methods as specific designchoices in our framework and show that our recommended method outperformsprevious data attribution approaches on common evaluations such as the LinearData-modelling Score LDS or retraining without top influences without theneed for method-specific hyperparameter tuning. |
+|idx| 2410.16256v1 |
+|title| CompassJudger-1: All-in-one Judge Model Helps Model Evaluation and Evolution |
+|authors| Maosong CaoAlexander LamHaodong DuanHongwei LiuSongyang ZhangKai Chen
+|links| http://arxiv.org/abs/2410.16256v1 |
+|updated| 2024-10-21 17:56:51 UTC |
+|summary| Efficient and accurate evaluation is crucial for the continuous improvementof large language models LLMs. Among various assessment methods subjectiveevaluation has garnered significant attention due to its superior alignmentwith real-world usage scenarios and human preferences. However human-basedevaluations are costly and lack reproducibility making precise automatedevaluators judgers vital in this process. In this report we introducetextbfCompassJudger-1 the first open-source textbfall-in-one judge LLM.CompassJudger-1 is a general-purpose LLM that demonstrates remarkableversatility. It is capable of: 1. Performing unitary scoring and two-modelcomparisons as a reward model 2. Conducting evaluations according to specifiedformats 3. Generating critiques 4. Executing diverse tasks like a generalLLM. To assess the evaluation capabilities of different judge models under aunified setting we have also established textbfJudgerBench a new benchmarkthat encompasses various subjective evaluation tasks and covers a wide range oftopics. CompassJudger-1 offers a comprehensive solution for various evaluationtasks while maintaining the flexibility to adapt to diverse requirements. BothCompassJudger and JudgerBench are released and available to the researchcommunity athttps://github.com/open-compass/CompassJudger. We believe that byopen-sourcing these tools we can foster collaboration and accelerate progressin LLM evaluation methodologies. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13848v1 |
-|title| Janus: Decoupling Visual Encoding for Unified Multimodal Understanding and Generation |
-|authors| Chengyue WuXiaokang ChenZhiyu WuYiyang MaXingchao LiuZizheng PanWen LiuZhenda XieXingkai YuChong RuanPing Luo
-|links| http://arxiv.org/abs/2410.13848v1 |
-|updated| 2024-10-17 17:58:37 UTC |
-|summary| In this paper we introduce Janus an autoregressive framework that unifiesmultimodal understanding and generation. Prior research often relies on asingle visual encoder for both tasks such as Chameleon. However due to thediffering levels of information granularity required by multimodalunderstanding and generation this approach can lead to suboptimal performanceparticularly in multimodal understanding. To address this issue we decouplevisual encoding into separate pathways while still leveraging a singleunified transformer architecture for processing. The decoupling not onlyalleviates the conflict between the visual encoders roles in understanding andgeneration but also enhances the frameworks flexibility. For instance boththe multimodal understanding and generation components can independently selecttheir most suitable encoding methods. Experiments show that Janus surpassesprevious unified model and matches or exceeds the performance of task-specificmodels. The simplicity high flexibility and effectiveness of Janus make it astrong candidate for next-generation unified multimodal models. |
+|idx| 2410.16239v1 |
+|title| MoRE: Multi-Modal Contrastive Pre-training with Transformers on X-Rays, ECGs, and Diagnostic Report |
+|authors| Samrajya ThapaKoushik HowladerSubhankar BhattacharjeeWei le
+|links| http://arxiv.org/abs/2410.16239v1 |
+|updated| 2024-10-21 17:42:41 UTC |
+|summary| In this paper we introduce a novel Multi-Modal Contrastive Pre-trainingFramework that synergistically combines X-rays electrocardiograms ECGs andradiology/cardiology reports. Our approach leverages transformers to encodethese diverse modalities into a unified representation space aiming to enhancediagnostic accuracy and facilitate comprehensive patient assessments. Weutilize LoRA-Peft to significantly reduce trainable parameters in the LLM andincorporate recent linear attention dropping strategy in the VisionTransformerViT for smoother attention. Furthermore we provide novelmultimodal attention explanations and retrieval for our model. To the best ofour knowledge we are the first to propose an integrated model that combinesX-ray ECG and Radiology/Cardiology Report with this approach. By utilizingcontrastive loss MoRE effectively aligns modality-specific features into acoherent embedding which supports various downstream tasks such as zero-shotclassification and multimodal retrieval. Employing our proposed methodology weachieve state-of-the-art SOTA on the Mimic-IV CheXpert Edema Severity andPtbXl downstream datasets surpassing existing multimodal approaches. Ourproposed framework shows significant improvements in capturing intricateinter-modal relationships and its robustness in medical diagnosis thatestablishes a framework for future research in multimodal learning in thehealthcare sector. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13863v1 |
-|title| Fluid: Scaling Autoregressive Text-to-image Generative Models with Continuous Tokens |
-|authors| Lijie FanTianhong LiSiyang QinYuanzhen LiChen SunMichael RubinsteinDeqing SunKaiming HeYonglong Tian
-|links| http://arxiv.org/abs/2410.13863v1 |
-|updated| 2024-10-17 17:59:59 UTC |
-|summary| Scaling up autoregressive models in vision has not proven as beneficial as inlarge language models. In this work we investigate this scaling problem in thecontext of text-to-image generation focusing on two critical factors: whethermodels use discrete or continuous tokens and whether tokens are generated in arandom or fixed raster order using BERT- or GPT-like transformer architectures.Our empirical results show that while all models scale effectively in terms ofvalidation loss their evaluation performance -- measured by FID GenEvalscore and visual quality -- follows different trends. Models based oncontinuous tokens achieve significantly better visual quality than those usingdiscrete tokens. Furthermore the generation order and attention mechanismssignificantly affect the GenEval score: random-order models achieve notablybetter GenEval scores compared to raster-order models. Inspired by thesefindings we train Fluid a random-order autoregressive model on continuoustokens. Fluid 10.5B model achieves a new state-of-the-art zero-shot FID of 6.16on MS-COCO 30K and 0.69 overall score on the GenEval benchmark. We hope ourfindings and results will encourage future efforts to further bridge thescaling gap between vision and language models. |
+|idx| 2410.16267v1 |
+|title| xGen-MM-Vid (BLIP-3-Video): You Only Need 32 Tokens to Represent a Video Even in VLMs |
+|authors| Michael S. RyooHonglu ZhouShrikant KendreCan QinLe XueManli ShuSilvio SavareseRan XuCaiming XiongJuan Carlos Niebles
+|links| http://arxiv.org/abs/2410.16267v1 |
+|updated| 2024-10-21 17:59:11 UTC |
+|summary| We present xGen-MM-Vid BLIP-3-Video: a multimodal language model forvideos particularly designed to efficiently capture temporal information overmultiple frames. BLIP-3-Video takes advantage of the temporal encoder inaddition to the conventional visual tokenizer which maps a sequence of tokensover multiple frames into a compact set of visual tokens. This enablesBLIP3-Video to use much fewer visual tokens than its competing models e.g. 32vs. 4608 tokens. We explore different types of temporal encoders includinglearnable spatio-temporal pooling as well as sequential models like TokenTuring Machines. We experimentally confirm that BLIP-3-Video obtains videoquestion-answering accuracies comparable to much larger state-of-the-art modelse.g. 34B while being much smaller i.e. 4B and more efficient by usingfewer visual tokens. The project website is athttps://www.salesforceairesearch.com/opensource/xGen-MM-Vid/index.html |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13857v1 |
-|title| How Numerical Precision Affects Mathematical Reasoning Capabilities of LLMs |
-|authors| Guhao FengKai YangYuntian GuXinyue AiShengjie LuoJiacheng SunDi HeZhenguo LiLiwei Wang
-|links| http://arxiv.org/abs/2410.13857v1 |
-|updated| 2024-10-17 17:59:35 UTC |
-|summary| Despite the remarkable success of Transformer-based Large Language ModelsLLMs across various domains understanding and enhancing their mathematicalcapabilities remains a significant challenge. In this paper we conduct arigorous theoretical analysis of LLMs mathematical abilities with a specificfocus on their arithmetic performances. We identify numerical precision as akey factor that influences their effectiveness in mathematical tasks. Ourresults show that Transformers operating with low numerical precision fail toaddress arithmetic tasks such as iterated addition and integer multiplicationunless the model size grows super-polynomially with respect to the inputlength. In contrast Transformers with standard numerical precision canefficiently handle these tasks with significantly smaller model sizes. Wefurther support our theoretical findings through empirical experiments thatexplore the impact of varying numerical precision on arithmetic tasksproviding valuable insights for improving the mathematical reasoningcapabilities of LLMs. |
+|idx| 2410.16255v1 |
+|title| Revisiting Deep Feature Reconstruction for Logical and Structural Industrial Anomaly Detection |
+|authors| Sukanya PatraSouhaib Ben Taieb
+|links| http://arxiv.org/abs/2410.16255v1 |
+|updated| 2024-10-21 17:56:47 UTC |
+|summary| Industrial anomaly detection is crucial for quality control and predictivemaintenance but it presents challenges due to limited training data diverseanomaly types and external factors that alter object appearances. Existingmethods commonly detect structural anomalies such as dents and scratches byleveraging multi-scale features from image patches extracted through deeppre-trained networks. However significant memory and computational demandsoften limit their practical application. Additionally detecting logicalanomalies-such as images with missing or excess elements-requires anunderstanding of spatial relationships that traditional patch-based methodsfail to capture. In this work we address these limitations by focusing on DeepFeature Reconstruction DFR a memory- and compute-efficient approach fordetecting structural anomalies. We further enhance DFR into a unifiedframework called ULSAD which is capable of detecting both structural andlogical anomalies. Specifically we refine the DFR training objective toimprove performance in structural anomaly detection while introducing anattention-based loss mechanism using a global autoencoder-like network tohandle logical anomaly detection. Our empirical evaluation across fivebenchmark datasets demonstrates the performance of ULSAD in detecting andlocalizing both structural and logical anomalies outperforming eightstate-of-the-art methods. An extensive ablation study further highlights thecontribution of each component to the overall performance improvement. Our codeis available at https://github.com/sukanyapatra1997/ULSAD-2024.git |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13855v1 |
-|title| Diffusing States and Matching Scores: A New Framework for Imitation Learning |
-|authors| Runzhe WuYiding ChenGokul SwamyKianté BrantleyWen Sun
-|links| http://arxiv.org/abs/2410.13855v1 |
-|updated| 2024-10-17 17:59:25 UTC |
-|summary| Adversarial Imitation Learning is traditionally framed as a two-playerzero-sum game between a learner and an adversarially chosen cost function andcan therefore be thought of as the sequential generalization of a GenerativeAdversarial Network GAN. A prominent example of this framework is GenerativeAdversarial Imitation Learning GAIL. However in recent years diffusionmodels have emerged as a non-adversarial alternative to GANs that merelyrequire training a score function via regression yet produce generations of ahigher quality. In response we investigate how to lift insights from diffusionmodeling to the sequential setting. We propose diffusing states and performingscore-matching along diffused states to measure the discrepancy between theexperts and learners states. Thus our approach only requires training scorefunctions to predict noises via standard regression making it significantlyeasier and more stable to train than adversarial methods. Theoretically weprove first- and second-order instance-dependent bounds with linear scaling inthe horizon proving that our approach avoids the compounding errors thatstymie offline approaches to imitation learning. Empirically we show ourapproach outperforms GAN-style imitation learning baselines across variouscontinuous control problems including complex tasks like controlling humanoidsto walk sit and crawl. |
+|idx| 2410.16253v1 |
+|title| Distribution Learning with Valid Outputs Beyond the Worst-Case |
+|authors| Nick RittlerKamalika Chaudhuri
+|links| http://arxiv.org/abs/2410.16253v1 |
+|updated| 2024-10-21 17:56:09 UTC |
+|summary| Generative models at times produce invalid outputs such as images withgeneration artifacts and unnatural sounds. Validity-constrained distributionlearning attempts to address this problem by requiring that the learneddistribution have a provably small fraction of its mass in invalid parts ofspace -- something which standard loss minimization does not always ensure. Tothis end a learner in this model can guide the learning via validityqueries which allow it to ascertain the validity of individual examples.Prior work on this problem takes a worst-case stance showing that properlearning requires an exponential number of validity queries and demonstratingan improper algorithm which -- while generating guarantees in a wide-range ofsettings -- makes an atypical polynomial number of validity queries. In thiswork we take a first step towards characterizing regimes where guaranteeingvalidity is easier than in the worst-case. We show that when the datadistribution lies in the model class and the log-loss is minimized the numberof samples required to ensure validity has a weak dependence on the validityrequirement. Additionally we show that when the validity region belongs to aVC-class a limited number of validity queries are often sufficient. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13853v1 |
-|title| AutoAL: Automated Active Learning with Differentiable Query Strategy Search |
-|authors| Yifeng WangXueying ZhanSiyu Huang
-|links| http://arxiv.org/abs/2410.13853v1 |
-|updated| 2024-10-17 17:59:09 UTC |
-|summary| As deep learning continues to evolve the need for data efficiency becomesincreasingly important. Considering labeling large datasets is bothtime-consuming and expensive active learning AL provides a promisingsolution to this challenge by iteratively selecting the most informativesubsets of examples to train deep neural networks thereby reducing thelabeling cost. However the effectiveness of different AL algorithms can varysignificantly across data scenarios and determining which AL algorithm bestfits a given task remains a challenging problem. This work presents the firstdifferentiable AL strategy search method named AutoAL which is designed ontop of existing AL sampling strategies. AutoAL consists of two neural netsnamed SearchNet and FitNet which are optimized concurrently under adifferentiable bi-level optimization framework. For any given task SearchNetand FitNet are iteratively co-optimized using the labeled data learning howwell a set of candidate AL algorithms perform on that task. With the optimal ALstrategies identified SearchNet selects a small subset from the unlabeled poolfor querying their annotations enabling efficient training of the task model.Experimental results demonstrate that AutoAL consistently achieves superioraccuracy compared to all candidate AL algorithms and other selective ALapproaches showcasing its potential for adapting and integrating multipleexisting AL methods across diverse tasks and domains. Code will be availableat: https://github.com/haizailache999/AutoAL. |
+|idx| 2410.16247v1 |
+|title| Implicit Regularization for Tubal Tensor Factorizations via Gradient Descent |
+|authors| Santhosh KarnikAnna VeselovskaMark IwenFelix Krahmer
+|links| http://arxiv.org/abs/2410.16247v1 |
+|updated| 2024-10-21 17:52:01 UTC |
+|summary| We provide a rigorous analysis of implicit regularization in anoverparametrized tensor factorization problem beyond the lazy training regime.For matrix factorization problems this phenomenon has been studied in a numberof works. A particular challenge has been to design universal initializationstrategies which provably lead to implicit regularization in gradient-descentmethods. At the same time it has been argued by Cohen et. al. 2016 that moregeneral classes of neural networks can be captured by considering tensorfactorizations. However in the tensor case implicit regularization has onlybeen rigorously established for gradient flow or in the lazy training regime.In this paper we prove the first tensor result of its kind for gradientdescent rather than gradient flow. We focus on the tubal tensor product and theassociated notion of low tubal rank encouraged by the relevance of this modelfor image data. We establish that gradient descent in an overparametrizedtensor factorization model with a small random initialization exhibits animplicit bias towards solutions of low tubal rank. Our theoretical findings areillustrated in an extensive set of numerical simulations show-casing thedynamics predicted by our theory as well as the crucial role of using a smallrandom initialization. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13852v1 |
-|title| Retrospective Learning from Interactions |
-|authors| Zizhao ChenMustafa Omer GulYiwei ChenGloria GengAnne WuYoav Artzi
-|links| http://arxiv.org/abs/2410.13852v1 |
-|updated| 2024-10-17 17:59:03 UTC |
-|summary| Multi-turn interactions between large language models LLMs and usersnaturally include implicit feedback signals. If an LLM responds in anunexpected way to an instruction the user is likely to signal it by rephrasingthe request expressing frustration or pivoting to an alternative task. Suchsignals are task-independent and occupy a relatively constrained subspace oflanguage allowing the LLM to identify them even if it fails on the actualtask. This creates an avenue for continually learning from interactions withoutadditional annotations. We introduce ReSpect a method to learn from suchsignals in past interactions via retrospection. We deploy ReSpect in a newmultimodal interaction scenario where humans instruct an LLM to solve anabstract reasoning task with a combinatorial solution space. Through thousandsof interactions with humans we show how ReSpect gradually improves taskcompletion rate from 31 to 82 all without any external annotation. |
+|idx| 2410.16239v1 |
+|title| MoRE: Multi-Modal Contrastive Pre-training with Transformers on X-Rays, ECGs, and Diagnostic Report |
+|authors| Samrajya ThapaKoushik HowladerSubhankar BhattacharjeeWei le
+|links| http://arxiv.org/abs/2410.16239v1 |
+|updated| 2024-10-21 17:42:41 UTC |
+|summary| In this paper we introduce a novel Multi-Modal Contrastive Pre-trainingFramework that synergistically combines X-rays electrocardiograms ECGs andradiology/cardiology reports. Our approach leverages transformers to encodethese diverse modalities into a unified representation space aiming to enhancediagnostic accuracy and facilitate comprehensive patient assessments. Weutilize LoRA-Peft to significantly reduce trainable parameters in the LLM andincorporate recent linear attention dropping strategy in the VisionTransformerViT for smoother attention. Furthermore we provide novelmultimodal attention explanations and retrieval for our model. To the best ofour knowledge we are the first to propose an integrated model that combinesX-ray ECG and Radiology/Cardiology Report with this approach. By utilizingcontrastive loss MoRE effectively aligns modality-specific features into acoherent embedding which supports various downstream tasks such as zero-shotclassification and multimodal retrieval. Employing our proposed methodology weachieve state-of-the-art SOTA on the Mimic-IV CheXpert Edema Severity andPtbXl downstream datasets surpassing existing multimodal approaches. Ourproposed framework shows significant improvements in capturing intricateinter-modal relationships and its robustness in medical diagnosis thatestablishes a framework for future research in multimodal learning in thehealthcare sector. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13863v1 |
-|title| Fluid: Scaling Autoregressive Text-to-image Generative Models with Continuous Tokens |
-|authors| Lijie FanTianhong LiSiyang QinYuanzhen LiChen SunMichael RubinsteinDeqing SunKaiming HeYonglong Tian
-|links| http://arxiv.org/abs/2410.13863v1 |
-|updated| 2024-10-17 17:59:59 UTC |
-|summary| Scaling up autoregressive models in vision has not proven as beneficial as inlarge language models. In this work we investigate this scaling problem in thecontext of text-to-image generation focusing on two critical factors: whethermodels use discrete or continuous tokens and whether tokens are generated in arandom or fixed raster order using BERT- or GPT-like transformer architectures.Our empirical results show that while all models scale effectively in terms ofvalidation loss their evaluation performance -- measured by FID GenEvalscore and visual quality -- follows different trends. Models based oncontinuous tokens achieve significantly better visual quality than those usingdiscrete tokens. Furthermore the generation order and attention mechanismssignificantly affect the GenEval score: random-order models achieve notablybetter GenEval scores compared to raster-order models. Inspired by thesefindings we train Fluid a random-order autoregressive model on continuoustokens. Fluid 10.5B model achieves a new state-of-the-art zero-shot FID of 6.16on MS-COCO 30K and 0.69 overall score on the GenEval benchmark. We hope ourfindings and results will encourage future efforts to further bridge thescaling gap between vision and language models. |
+|idx| 2410.16271v1 |
+|title| FrugalNeRF: Fast Convergence for Few-shot Novel View Synthesis without Learned Priors |
+|authors| Chin-Yang LinChung-Ho WuChang-Han YehShih-Han YenCheng SunYu-Lun Liu
+|links| http://arxiv.org/abs/2410.16271v1 |
+|updated| 2024-10-21 17:59:53 UTC |
+|summary| Neural Radiance Fields NeRF face significant challenges in few-shotscenarios primarily due to overfitting and long training times forhigh-fidelity rendering. Existing methods such as FreeNeRF and SparseNeRF usefrequency regularization or pre-trained priors but struggle with complexscheduling and bias. We introduce FrugalNeRF a novel few-shot NeRF frameworkthat leverages weight-sharing voxels across multiple scales to efficientlyrepresent scene details. Our key contribution is a cross-scale geometricadaptation scheme that selects pseudo ground truth depth based on reprojectionerrors across scales. This guides training without relying on externallylearned priors enabling full utilization of the training data. It can alsointegrate pre-trained priors enhancing quality without slowing convergence.Experiments on LLFF DTU and RealEstate-10K show that FrugalNeRF outperformsother few-shot NeRF methods while significantly reducing training time makingit a practical solution for efficient and accurate 3D scene reconstruction. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13864v1 |
-|title| UniDrive: Towards Universal Driving Perception Across Camera Configurations |
-|authors| Ye LiWenzhao ZhengXiaonan HuangKurt Keutzer
-|links| http://arxiv.org/abs/2410.13864v1 |
-|updated| 2024-10-17 17:59:59 UTC |
-|summary| Vision-centric autonomous driving has demonstrated excellent performance witheconomical sensors. As the fundamental step 3D perception aims to infer 3Dinformation from 2D images based on 3D-2D projection. This makes drivingperception models susceptible to sensor configuration e.g. camera intrinsicsand extrinsics variations. However generalizing across camera configurationsis important for deploying autonomous driving models on different car models.In this paper we present UniDrive a novel framework for vision-centricautonomous driving to achieve universal perception across cameraconfigurations. We deploy a set of unified virtual cameras and propose aground-aware projection method to effectively transform the original imagesinto these unified virtual views. We further propose a virtual configurationoptimization method by minimizing the expected projection error betweenoriginal cameras and virtual cameras. The proposed virtual camera projectioncan be applied to existing 3D perception methods as a plug-and-play module tomitigate the challenges posed by camera parameter variability resulting inmore adaptable and reliable driving perception models. To evaluate theeffectiveness of our framework we collect a dataset on Carla by driving thesame routes while only modifying the camera configurations. Experimentalresults demonstrate that our method trained on one specific cameraconfiguration can generalize to varying configurations with minor performancedegradation. |
+|idx| 2410.16272v1 |
+|title| MvDrag3D: Drag-based Creative 3D Editing via Multi-view Generation-Reconstruction Priors |
+|authors| Honghua ChenYushi LanYongwei ChenYifan ZhouXingang Pan
+|links| http://arxiv.org/abs/2410.16272v1 |
+|updated| 2024-10-21 17:59:53 UTC |
+|summary| Drag-based editing has become popular in 2D content creation driven by thecapabilities of image generative models. However extending this technique to3D remains a challenge. Existing 3D drag-based editing methods whetheremploying explicit spatial transformations or relying on implicit latentoptimization within limited-capacity 3D generative models fall short inhandling significant topology changes or generating new textures across diverseobject categories. To overcome these limitations we introduce MVDrag3D anovel framework for more flexible and creative drag-based 3D editing thatleverages multi-view generation and reconstruction priors. At the core of ourapproach is the usage of a multi-view diffusion model as a strong generativeprior to perform consistent drag editing over multiple rendered views which isfollowed by a reconstruction model that reconstructs 3D Gaussians of the editedobject. While the initial 3D Gaussians may suffer from misalignment betweendifferent views we address this via view-specific deformation networks thatadjust the position of Gaussians to be well aligned. In addition we propose amulti-view score function that distills generative priors from multiple viewsto further enhance the view consistency and visual quality. Extensiveexperiments demonstrate that MVDrag3D provides a precise generative andflexible solution for 3D drag-based editing supporting more versatile editingeffects across various object categories and 3D representations. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13862v1 |
-|title| DepthSplat: Connecting Gaussian Splatting and Depth |
-|authors| Haofei XuSongyou PengFangjinhua WangHermann BlumDaniel BarathAndreas GeigerMarc Pollefeys
-|links| http://arxiv.org/abs/2410.13862v1 |
-|updated| 2024-10-17 17:59:58 UTC |
-|summary| Gaussian splatting and single/multi-view depth estimation are typicallystudied in isolation. In this paper we present DepthSplat to connect Gaussiansplatting and depth estimation and study their interactions. More specificallywe first contribute a robust multi-view depth model by leveraging pre-trainedmonocular depth features leading to high-quality feed-forward 3D Gaussiansplatting reconstructions. We also show that Gaussian splatting can serve as anunsupervised pre-training objective for learning powerful depth models fromlarge-scale unlabelled datasets. We validate the synergy between Gaussiansplatting and depth estimation through extensive ablation and cross-tasktransfer experiments. Our DepthSplat achieves state-of-the-art performance onScanNet RealEstate10K and DL3DV datasets in terms of both depth estimation andnovel view synthesis demonstrating the mutual benefits of connecting bothtasks. Our code models and video results are available athttps://haofeixu.github.io/depthsplat/. |
+|idx| 2410.16268v1 |
+|title| SAM2Long: Enhancing SAM 2 for Long Video Segmentation with a Training-Free Memory Tree |
+|authors| Shuangrui DingRui QianXiaoyi DongPan ZhangYuhang ZangYuhang CaoYuwei GuoDahua LinJiaqi Wang
+|links| http://arxiv.org/abs/2410.16268v1 |
+|updated| 2024-10-21 17:59:19 UTC |
+|summary| The Segment Anything Model 2 SAM 2 has emerged as a powerful foundationmodel for object segmentation in both images and videos paving the way forvarious downstream video applications. The crucial design of SAM 2 for videosegmentation is its memory module which prompts object-aware memories fromprevious frames for current frame prediction. However its greedy-selectionmemory design suffers from the error accumulation problem where an erroredor missed mask will cascade and influence the segmentation of the subsequentframes which limits the performance of SAM 2 toward complex long-term videos.To this end we introduce SAM2Long an improved training-free video objectsegmentation strategy which considers the segmentation uncertainty within eachframe and chooses the video-level optimal results from multiple segmentationpathways in a constrained tree search manner. In practice we maintain a fixednumber of segmentation pathways throughout the video. For each frame multiplemasks are proposed based on the existing pathways creating various candidatebranches. We then select the same fixed number of branches with highercumulative scores as the new pathways for the next frame. After processing thefinal frame the pathway with the highest cumulative score is chosen as thefinal segmentation result. Benefiting from its heuristic search designSAM2Long is robust toward occlusions and object reappearances and caneffectively segment and track objects for complex long-term videos. NotablySAM2Long achieves an average improvement of 3.0 points across all 24head-to-head comparisons with gains of up to 5.3 points in JF on long-termvideo object segmentation benchmarks such as SA-V and LVOS. The code isreleased at https://github.com/Mark12Ding/SAM2Long. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13861v1 |
-|title| PUMA: Empowering Unified MLLM with Multi-granular Visual Generation |
-|authors| Rongyao FangChengqi DuanKun WangHao LiHao TianXingyu ZengRui ZhaoJifeng DaiHongsheng LiXihui Liu
-|links| http://arxiv.org/abs/2410.13861v1 |
-|updated| 2024-10-17 17:59:57 UTC |
-|summary| Recent advancements in multimodal foundation models have yielded significantprogress in vision-language understanding. Initial attempts have also exploredthe potential of multimodal large language models MLLMs for visual contentgeneration. However existing works have insufficiently addressed the varyinggranularity demands of different image generation tasks within a unified MLLMparadigm - from the diversity required in text-to-image generation to theprecise controllability needed in image manipulation. In this work we proposePUMA emPowering Unified MLLM with Multi-grAnular visual generation. PUMAunifies multi-granular visual features as both inputs and outputs of MLLMselegantly addressing the different granularity requirements of various imagegeneration tasks within a unified MLLM framework. Following multimodalpretraining and task-specific instruction tuning PUMA demonstrates proficiencyin a wide range of multimodal tasks. This work represents a significant steptowards a truly unified MLLM capable of adapting to the granularity demands ofvarious visual tasks. The code and model will be released inhttps://github.com/rongyaofang/PUMA. |
+|idx| 2410.16267v1 |
+|title| xGen-MM-Vid (BLIP-3-Video): You Only Need 32 Tokens to Represent a Video Even in VLMs |
+|authors| Michael S. RyooHonglu ZhouShrikant KendreCan QinLe XueManli ShuSilvio SavareseRan XuCaiming XiongJuan Carlos Niebles
+|links| http://arxiv.org/abs/2410.16267v1 |
+|updated| 2024-10-21 17:59:11 UTC |
+|summary| We present xGen-MM-Vid BLIP-3-Video: a multimodal language model forvideos particularly designed to efficiently capture temporal information overmultiple frames. BLIP-3-Video takes advantage of the temporal encoder inaddition to the conventional visual tokenizer which maps a sequence of tokensover multiple frames into a compact set of visual tokens. This enablesBLIP3-Video to use much fewer visual tokens than its competing models e.g. 32vs. 4608 tokens. We explore different types of temporal encoders includinglearnable spatio-temporal pooling as well as sequential models like TokenTuring Machines. We experimentally confirm that BLIP-3-Video obtains videoquestion-answering accuracies comparable to much larger state-of-the-art modelse.g. 34B while being much smaller i.e. 4B and more efficient by usingfewer visual tokens. The project website is athttps://www.salesforceairesearch.com/opensource/xGen-MM-Vid/index.html |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13860v1 |
-|title| VLM-Grounder: A VLM Agent for Zero-Shot 3D Visual Grounding |
-|authors| Runsen XuZhiwei HuangTai WangYilun ChenJiangmiao PangDahua Lin
-|links| http://arxiv.org/abs/2410.13860v1 |
-|updated| 2024-10-17 17:59:55 UTC |
-|summary| 3D visual grounding is crucial for robots requiring integration of naturallanguage and 3D scene understanding. Traditional methods depending onsupervised learning with 3D point clouds are limited by scarce datasets.Recently zero-shot methods leveraging LLMs have been proposed to address thedata issue. While effective these methods only use object-centric informationlimiting their ability to handle complex queries. In this work we presentVLM-Grounder a novel framework using vision-language models VLMs forzero-shot 3D visual grounding based solely on 2D images. VLM-Grounderdynamically stitches image sequences employs a grounding and feedback schemeto find the target object and uses a multi-view ensemble projection toaccurately estimate 3D bounding boxes. Experiments on ScanRefer and Nr3Ddatasets show VLM-Grounder outperforms previous zero-shot methods achieving51.6 Acc0.25 on ScanRefer and 48.0 Acc on Nr3D without relying on 3Dgeometry or object priors. Codes are available athttps://github.com/OpenRobotLab/VLM-Grounder . |
+|idx| 2410.16266v1 |
+|title| 3DGS-Enhancer: Enhancing Unbounded 3D Gaussian Splatting with View-consistent 2D Diffusion Priors |
+|authors| Xi LiuChaoyi ZhouSiyu Huang
+|links| http://arxiv.org/abs/2410.16266v1 |
+|updated| 2024-10-21 17:59:09 UTC |
+|summary| Novel-view synthesis aims to generate novel views of a scene from multipleinput images or videos and recent advancements like 3D Gaussian splatting3DGS have achieved notable success in producing photorealistic renderingswith efficient pipelines. However generating high-quality novel views underchallenging settings such as sparse input views remains difficult due toinsufficient information in under-sampled areas often resulting in noticeableartifacts. This paper presents 3DGS-Enhancer a novel pipeline for enhancingthe representation quality of 3DGS representations. We leverage 2D videodiffusion priors to address the challenging 3D view consistency problemreformulating it as achieving temporal consistency within a video generationprocess. 3DGS-Enhancer restores view-consistent latent features of renderednovel views and integrates them with the input views through a spatial-temporaldecoder. The enhanced views are then used to fine-tune the initial 3DGS modelsignificantly improving its rendering performance. Extensive experiments onlarge-scale datasets of unbounded scenes demonstrate that 3DGS-Enhancer yieldssuperior reconstruction performance and high-fidelity rendering resultscompared to state-of-the-art methods. The project webpage ishttps://xiliu8006.github.io/3DGS-Enhancer-project . |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13857v1 |
-|title| How Numerical Precision Affects Mathematical Reasoning Capabilities of LLMs |
-|authors| Guhao FengKai YangYuntian GuXinyue AiShengjie LuoJiacheng SunDi HeZhenguo LiLiwei Wang
-|links| http://arxiv.org/abs/2410.13857v1 |
-|updated| 2024-10-17 17:59:35 UTC |
-|summary| Despite the remarkable success of Transformer-based Large Language ModelsLLMs across various domains understanding and enhancing their mathematicalcapabilities remains a significant challenge. In this paper we conduct arigorous theoretical analysis of LLMs mathematical abilities with a specificfocus on their arithmetic performances. We identify numerical precision as akey factor that influences their effectiveness in mathematical tasks. Ourresults show that Transformers operating with low numerical precision fail toaddress arithmetic tasks such as iterated addition and integer multiplicationunless the model size grows super-polynomially with respect to the inputlength. In contrast Transformers with standard numerical precision canefficiently handle these tasks with significantly smaller model sizes. Wefurther support our theoretical findings through empirical experiments thatexplore the impact of varying numerical precision on arithmetic tasksproviding valuable insights for improving the mathematical reasoningcapabilities of LLMs. |
+|idx| 2410.16247v1 |
+|title| Implicit Regularization for Tubal Tensor Factorizations via Gradient Descent |
+|authors| Santhosh KarnikAnna VeselovskaMark IwenFelix Krahmer
+|links| http://arxiv.org/abs/2410.16247v1 |
+|updated| 2024-10-21 17:52:01 UTC |
+|summary| We provide a rigorous analysis of implicit regularization in anoverparametrized tensor factorization problem beyond the lazy training regime.For matrix factorization problems this phenomenon has been studied in a numberof works. A particular challenge has been to design universal initializationstrategies which provably lead to implicit regularization in gradient-descentmethods. At the same time it has been argued by Cohen et. al. 2016 that moregeneral classes of neural networks can be captured by considering tensorfactorizations. However in the tensor case implicit regularization has onlybeen rigorously established for gradient flow or in the lazy training regime.In this paper we prove the first tensor result of its kind for gradientdescent rather than gradient flow. We focus on the tubal tensor product and theassociated notion of low tubal rank encouraged by the relevance of this modelfor image data. We establish that gradient descent in an overparametrizedtensor factorization model with a small random initialization exhibits animplicit bias towards solutions of low tubal rank. Our theoretical findings areillustrated in an extensive set of numerical simulations show-casing thedynamics predicted by our theory as well as the crucial role of using a smallrandom initialization. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13849v1 |
-|title| From Gradient Clipping to Normalization for Heavy Tailed SGD |
-|authors| Florian HüblerIlyas FatkhullinNiao He
-|links| http://arxiv.org/abs/2410.13849v1 |
-|updated| 2024-10-17 17:59:01 UTC |
-|summary| Recent empirical evidence indicates that many machine learning applicationsinvolve heavy-tailed gradient noise which challenges the standard assumptionsof bounded variance in stochastic optimization. Gradient clipping has emergedas a popular tool to handle this heavy-tailed noise as it achieves goodperformance in this setting both theoretically and practically. However ourcurrent theoretical understanding of non-convex gradient clipping has threemain shortcomings. First the theory hinges on large increasing clippingthresholds which are in stark contrast to the small constant clippingthresholds employed in practice. Second clipping thresholds require knowledgeof problem-dependent parameters to guarantee convergence. Lastly even withthis knowledge current sampling complexity upper bounds for the method aresub-optimal in nearly all parameters. To address these issues we studyconvergence of Normalized SGD NSGD. First we establish a parameter-freesample complexity for NSGD ofmathcalOleftvarepsilon-frac2pp-1right to find anvarepsilon-stationary point. Furthermore we prove tightness of this resultby providing a matching algorithm-specific lower bound. In the setting whereall problem parameters are known we show this complexity is improved tomathcalOleftvarepsilon-frac3p-2p-1right matching thepreviously known lower bound for all first-order methods in all problemdependent parameters. Finally we establish high-probability convergence ofNSGD with a mild logarithmic dependence on the failure probability. Our workcomplements the studies of gradient clipping under heavy tailed noise improvingthe sample complexities of existing algorithms and offering an alternativemechanism to achieve high probability convergence. |
+|idx| 2410.16214v1 |
+|title| Asymmetries in Financial Spillovers |
+|authors| Florian HuberKarin KlieberMassimiliano MarcellinoLuca OnoranteMichael Pfarrhofer
+|links| http://arxiv.org/abs/2410.16214v1 |
+|updated| 2024-10-21 17:14:58 UTC |
+|summary| This paper analyzes nonlinearities in the international transmission offinancial shocks originating in the US. To do so we develop a flexiblenonlinear multi-country model. Our framework is capable of producingasymmetries in the responses to financial shocks for shock size and sign andover time. We show that international reactions to US-based financial shocksare asymmetric along these dimensions. Particularly we find that adverseshocks trigger stronger declines in output inflation and stock markets thanbenign shocks. Further we investigate time variation in the estimated dynamiceffects and characterize the responsiveness of three major central banks tofinancial shocks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13821v1 |
-|title| Artificial Kuramoto Oscillatory Neurons |
-|authors| Takeru MiyatoSindy LöweAndreas GeigerMax Welling
-|links| http://arxiv.org/abs/2410.13821v1 |
-|updated| 2024-10-17 17:47:54 UTC |
-|summary| It has long been known in both neuroscience and AI that binding betweenneurons leads to a form of competitive learning where representations arecompressed in order to represent more abstract concepts in deeper layers of thenetwork. More recently it was also hypothesized that dynamic spatiotemporalrepresentations play an important role in both neuroscience and AI. Building onthese ideas we introduce Artificial Kuramoto Oscillatory Neurons AKOrN as adynamical alternative to threshold units which can be combined with arbitraryconnectivity designs such as fully connected convolutional or attentivemechanisms. Our generalized Kuramoto updates bind neurons together throughtheir synchronization dynamics. We show that this idea provides performanceimprovements across a wide spectrum of tasks such as unsupervised objectdiscovery adversarial robustness calibrated uncertainty quantification andreasoning. We believe that these empirical results show the importance ofrethinking our assumptions at the most basic neuronal level of neuralrepresentation and in particular show the importance of dynamicalrepresentations. |
+|idx| 2410.16201v1 |
+|title| Theoretical Limitations of Ensembles in the Age of Overparameterization |
+|authors| Niclas DernJohn P. CunninghamGeoff Pleiss
+|links| http://arxiv.org/abs/2410.16201v1 |
+|updated| 2024-10-21 17:03:20 UTC |
+|summary| Classic tree-based ensembles generalize better than any single decision tree.In contrast recent empirical studies find that modern ensembles ofoverparameterized neural networks may not provide any inherent generalizationadvantage over single but larger neural networks. This paper clarifies howmodern overparameterized ensembles differ from their classic underparameterizedcounterparts using ensembles of random feature RF regressors as a basis fordeveloping theory. In contrast to the underparameterized regime whereensembling typically induces regularization and increases generalization weprove that infinite ensembles of overparameterized RF regressors becomepointwise equivalent to single infinite-width RF regressors. Thisequivalence which is exact for ridgeless models and approximate for smallridge penalties implies that overparameterized ensembles and single largemodels exhibit nearly identical generalization. As a consequence we cancharacterize the predictive variance amongst ensemble members and demonstratethat it quantifies the expected effects of increasing capacity rather thancapturing any conventional notion of uncertainty. Our results challenge commonassumptions about the advantages of ensembles in overparameterized settingsprompting a reconsideration of how well intuitions from underparameterizedensembles transfer to deep ensembles and the overparameterized regime. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13800v1 |
-|title| Discrete distributions are learnable from metastable samples |
-|authors| Abhijith JayakumarAndrey Y. LokhovSidhant MisraMarc Vuffray
-|links| http://arxiv.org/abs/2410.13800v1 |
-|updated| 2024-10-17 17:38:44 UTC |
-|summary| Markov chain samplers designed to sample from multi-variable distributionsoften undesirably get stuck in specific regions of their state space. Thiscauses such samplers to approximately sample from a metastable distributionwhich is usually quite different from the desired stationary distribution ofthe chain. We show that single-variable conditionals of metastabledistributions of reversible Markov chain samplers that satisfy a strongmetastability condition are on average very close to those of the truedistribution. This holds even when the metastable distribution is far away fromthe true model in terms of global metrics like Kullback-Leibler divergence ortotal variation distance. This property allows us to learn the true model usinga conditional likelihood based estimator even when the samples come from ametastable distribution concentrated in a small region of the state space.Explicit examples of such metastable states can be constructed from regionsthat effectively bottleneck the probability flow and cause poor mixing of theMarkov chain. For specific cases of binary pairwise undirected graphicalmodels we extend our results to further rigorously show that data coming frommetastable states can be used to learn the parameters of the energy functionand recover the structure of the model. |
+|idx| 2410.16195v1 |
+|title| A Trust-Region Method for Graphical Stein Variational Inference |
+|authors| Liam PavlovicDavid M. Rosen
+|links| http://arxiv.org/abs/2410.16195v1 |
+|updated| 2024-10-21 16:59:01 UTC |
+|summary| Stein variational inference SVI is a sample-based approximate Bayesianinference technique that generates a sample set by jointly optimizing thesamples locations to minimize an information-theoretic measure of discrepancywith the target probability distribution. SVI thus provides a fast andsignificantly more sample-efficient approach to Bayesian inference thantraditional random-sampling-based alternatives. However the optimizationtechniques employed in existing SVI methods struggle to address problems inwhich the target distribution is high-dimensional poorly-conditioned ornon-convex which severely limits the range of their practical applicability.In this paper we propose a novel trust-region optimization approach for SVIthat successfully addresses each of these challenges. Our method builds uponprior work in SVI by leveraging conditional independences in the targetdistribution to achieve high-dimensional scaling and second-order informationto address poor conditioning while additionally providing an effectiveadaptive step control procedure which is essential for ensuring convergence onchallenging non-convex optimization problems. Experimental results show ourmethod achieves superior numerical performance both in convergence rate andsample accuracy and scales better in high-dimensional distributions thanprevious SVI techniques. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13778v1 |
-|title| Change Detection in Multivariate data streams: Online Analysis with Kernel-QuantTree |
-|authors| Michelangelo Olmo Nogara NotarianniFilippo LeveniDiego StucchiLuca FrittoliGiacomo Boracchi
-|links| http://arxiv.org/abs/2410.13778v1 |
-|updated| 2024-10-17 17:17:38 UTC |
-|summary| We present Kernel-QuantTree Exponentially Weighted Moving Average KQT-EWMAa non-parametric change-detection algorithm that combines the Kernel-QuantTreeKQT histogram and the EWMA statistic to monitor multivariate data streamsonline. The resulting monitoring scheme is very flexible since histograms canbe used to model any stationary distribution and practical since thedistribution of test statistics does not depend on the distribution ofdatastream in stationary conditions non-parametric monitoring. KQT-EWMAenables controlling false alarms by operating at a pre-determined Average RunLength ARL_0 which measures the expected number of stationary samples tobe monitored before triggering a false alarm. The latter peculiarity is incontrast with most non-parametric change-detection tests which rarely cancontrol the ARL_0 a priori. Our experiments on synthetic and real-worlddatasets demonstrate that KQT-EWMA can control ARL_0 while achievingdetection delays comparable to or lower than state-of-the-art methods designedto work in the same conditions. |
+|idx| 2410.16138v1 |
+|title| Theoretical Insights into Line Graph Transformation on Graph Learning |
+|authors| Fan YangXingyue Huang
+|links| http://arxiv.org/abs/2410.16138v1 |
+|updated| 2024-10-21 16:04:50 UTC |
+|summary| Line graph transformation has been widely studied in graph theory where eachnode in a line graph corresponds to an edge in the original graph. This hasinspired a series of graph neural networks GNNs applied to transformed linegraphs which have proven effective in various graph representation learningtasks. However there is limited theoretical study on how line graphtransformation affects the expressivity of GNN models. In this study we focuson two types of graphs known to be challenging to the Weisfeiler-Leman WLtests: Cai-Furer-Immerman CFI graphs and strongly regular graphs and showthat applying line graph transformation helps exclude these challenging graphproperties thus potentially assist WL tests in distinguishing these graphs. Weempirically validate our findings by conducting a series of experiments thatcompare the accuracy and efficiency of graph isomorphism tests and GNNs on bothline-transformed and original graphs across these graph structure types. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13757v1 |
-|title| MobA: A Two-Level Agent System for Efficient Mobile Task Automation |
-|authors| Zichen ZhuHao TangYansi LiKunyao LanYixuan JiangHao ZhouYixiao WangSituo ZhangLiangtai SunLu ChenKai Yu
-|links| http://arxiv.org/abs/2410.13757v1 |
-|updated| 2024-10-17 16:53:50 UTC |
-|summary| Current mobile assistants are limited by dependence on system APIs orstruggle with complex user instructions and diverse interfaces due torestricted comprehension and decision-making abilities. To address thesechallenges we propose MobA a novel Mobile phone Agent powered by multimodallarge language models that enhances comprehension and planning capabilitiesthrough a sophisticated two-level agent architecture. The high-level GlobalAgent GA is responsible for understanding user commands tracking historymemories and planning tasks. The low-level Local Agent LA predicts detailedactions in the form of function calls guided by sub-tasks and memory from theGA. Integrating a Reflection Module allows for efficient task completion andenables the system to handle previously unseen complex tasks. MobA demonstratessignificant improvements in task execution efficiency and completion rate inreal-life evaluations underscoring the potential of MLLM-empowered mobileassistants. |
+|idx| 2410.16211v1 |
+|title| CiteClick: A Browser Extension for Real-Time Scholar Citation Tracking |
+|authors| Nishat Raihan
+|links| http://arxiv.org/abs/2410.16211v1 |
+|updated| 2024-10-21 17:11:31 UTC |
+|summary| This technical report presents CiteClick a browser extension designed tomonitor and track Google Scholar citation counts for multiple researchers inreal-time. We discuss the motivation behind the tool its key featuresimplementation details and potential impact on the academic community. Thereport covers installation procedures usage guidelines and customizationoptions concluding with a discussion on future work and potentialimprovements. By automating the process of citation tracking CiteClick aims toenhance research evaluation processes and facilitate more informeddecision-making in academic contexts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13638v1 |
-|title| Scaling Wearable Foundation Models |
-|authors| Girish NarayanswamyXin LiuKumar AyushYuzhe YangXuhai XuShun LiaoJake GarrisonShyam TailorJake SunshineYun LiuTim AlthoffShrikanth NarayananPushmeet KohliJiening ZhanMark MalhotraShwetak PatelSamy Abdel-GhaffarDaniel McDuff
-|links| http://arxiv.org/abs/2410.13638v1 |
-|updated| 2024-10-17 15:08:21 UTC |
-|summary| Wearable sensors have become ubiquitous thanks to a variety of healthtracking features. The resulting continuous and longitudinal measurements fromeveryday life generate large volumes of data however making sense of theseobservations for scientific and actionable insights is non-trivial. Inspired bythe empirical success of generative modeling where large neural networks learnpowerful representations from vast amounts of text image video or audiodata we investigate the scaling properties of sensor foundation models acrosscompute data and model size. Using a dataset of up to 40 million hours ofin-situ heart rate heart rate variability electrodermal activityaccelerometer skin temperature and altimeter per-minute data from over165000 people we create LSM a multimodal foundation model built on thelargest wearable-signals dataset with the most extensive range of sensormodalities to date. Our results establish the scaling laws of LSM for taskssuch as imputation interpolation and extrapolation both across time andsensor modalities. Moreover we highlight how LSM enables sample-efficientdownstream learning for tasks like exercise and activity recognition. |
+|idx| 2410.16202v1 |
+|title| Musinger: Communication of Music over a Distance with Wearable Haptic Display and Touch Sensitive Surface |
+|authors| Miguel Altamirano CabreraMuhammad Haris KhanAli AlabbasLuis MorenoIssatay TokmurziyevDzmitry Tsetserukou
+|links| http://arxiv.org/abs/2410.16202v1 |
+|updated| 2024-10-21 17:04:28 UTC |
+|summary| This study explores the integration of auditory and tactile experiences inmusical haptics focusing on enhancing sensory dimensions of music throughtouch. Addressing the gap in translating auditory signals to meaningful tactilefeedback our research introduces a novel method involving a touch-sensitiverecorder and a wearable haptic display that captures musical interactions viaforce sensors and converts these into tactile sensations. Previous studies haveshown the potential of haptic feedback to enhance musical expressivity yetchallenges remain in conveying complex musical nuances. Our method aims toexpand music accessibility for individuals with hearing impairments and deependigital musical interactions. Experimental results reveal high accuracy 98without noise 93 with white noise in melody recognition through tactilefeedback demonstrating effective transmission and perception of musicalinformation. The findings highlight the potential of haptic technology tobridge sensory gaps offering significant implications for music therapyeducation and remote musical collaboration advancing the field of musicalhaptics and multi-sensory technology applications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13623v1 |
-|title| Neural Correlates of Augmented Reality Safety Warnings: EEG Analysis of Situational Awareness and Cognitive Performance in Roadway Work Zones |
-|authors| Fatemeh Banani ArdecaniAmit KumarSepehr SabetiOmidreza Shoghli
-|links| http://arxiv.org/abs/2410.13623v1 |
-|updated| 2024-10-17 14:56:44 UTC |
-|summary| Despite the research and implementation efforts involving various safetystrategies protocols and technologies work zone crashes and fatalitiescontinue to occur at an alarming rate each year. This study investigates theneurophysiological responses to Augmented Reality safety warnings in roadwaywork zones under varying workload conditions. Using electroencephalogram EEGtechnology we objectively assessed situational awareness attention andcognitive load in simulated low-intensity LA and moderate-intensity MA workactivities. The research analyzed key EEG indicators including beta gammaalpha and theta waves as well as various combined wave ratios. Resultsrevealed that AR warnings effectively triggered neurological responsesassociated with increased situational awareness and attention across bothworkload conditions. However significant differences were observed in thetiming and intensity of these responses. In the LA condition peak responsesoccurred earlier within 125 ms post-warning and were more pronouncedsuggesting a more robust cognitive response when physical demands were lower.Conversely the MA condition showed delayed peak responses 125-250 mspost-warning and more gradual changes indicating a potential impact ofincreased physical activity on cognitive processing speed. These findingsunderscore the importance of considering physical workload when designingAR-based safety systems for roadway work zones. The research contributes to theunderstanding of how AR can enhance worker safety and provides insights fordeveloping more effective context-aware safety interventions in high-risk workenvironments. |
+|idx| 2410.16137v1 |
+|title| Privacy as Social Norm: Systematically Reducing Dysfunctional Privacy Concerns on Social Media |
+|authors| JaeWon KimSoobin ChoRobert WolfeJishnu Hari NairAlexis Hiniker
+|links| http://arxiv.org/abs/2410.16137v1 |
+|updated| 2024-10-21 16:03:18 UTC |
+|summary| Privacy is essential to fully enjoying the benefits of social media. Whilefear around privacy risks can sometimes motivate privacy management thenegative impact of such fear particularly when it is perceived asunaddressable i.e. dysfunctional fear can significantly harm teenwell-being. In a co-design study with 136 participants aged 13-18 we exploredhow teens can protect their privacy without experiencing heightened fear. Weidentified seven different sources of dysfunctional fear such as fear of ahostile environment and fear of overstepping privacy norms. We alsoevaluated ten designs co-created with teen participants that address thesefears. Our findings suggest that social media platforms can mitigatedysfunctional fear without compromising privacy by creating a culture whereprivacy protection is the norm through default privacy-protective features.However we also found that even the most effective privacy features are notlikely to be adopted unless they balance the multifaceted and diverse needs ofteens. Individual teens have different needs -- for example public and privateaccount users have different needs -- and teens often want to enjoy thebenefits they get from slightly reducing privacy and widening their socialreach. Given these considerations augmenting default privacy features byallowing them to be toggled on and off will allow individual users to choosetheir own balance while still maintaining a privacy-focused norm. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13556v1 |
-|title| Co-creation and evaluation of an app to support reminiscence therapy interventions for older people with dementia |
-|authors| Iván De-Rosende-CeleiroVirginia Francisco-GilmartínSusana Bautista-BlascoAdriana Ávila-Álvarez
-|links| http://dx.doi.org/10.1177/20552076241261849 |
-|updated| 2024-10-17 13:55:32 UTC |
-|summary| Objective: The objectives encompassed 1 the creation of Recuerdame adigital app specifically designed for occupational therapists aiming tosupport these professionals in the processes of planning organizingdeveloping and documenting reminiscence therapies for older people withdementia and 2 the evaluation of the designed prototype through aparticipatory and user-centered design approach exploring the perceptions ofend-users. Methods: This exploratory research used a mixed-methods design. Theapp was developed in two phases. In the first phase the research teamidentified the requirements and designed a prototype. In the second phaseexperienced occupational therapists evaluated the prototype. Results: Theresearch team determined the apps required functionalities grouped into eightmajor themes: register related persons and caregivers record the patientslife story memories prepare a reminiscence therapy session conduct a sessionend a session assess the patient automatically generate a life story otherrequirements. The first phase ended with the development of a prototype. In thesecond phase eight occupational therapists performed a series of tasks usingall the applications functionalities. Most of these tasks were very easySingle Ease Question. The level of usability was considered excellent SystemUsability Scale. Participants believed that the app would save practitionerstime enrich therapy sessions and improve their effectiveness. The qualitativeresults were summarized in two broad themes: a acceptability of the app andb areas for improvement.ConclusionsParticipating occupational therapistsgenerally agreed that the co-designed app appears to be a versatile tool thatempowers these professionals to manage reminiscence interventions. |
+|idx| 2410.16061v1 |
+|title| Virtual Reality Games: Extending Unity Learn Games to VR |
+|authors| Ryan P. McMahanNayan N. ChawlaChristian S. CassellChristopher Peerapon Lee
+|links| http://arxiv.org/abs/2410.16061v1 |
+|updated| 2024-10-21 14:39:44 UTC |
+|summary| Research involving virtual reality VR has dramatically increased since theintroduction of consumer VR systems. In turn research on VR games has gainedpopularity within several fields. However most VR games are closed sourcewhich limits research opportunities. Some VR games are open source but most ofthem are either very basic or too complex to be easily used in research. Inthis paper we present two source-available VR games developed from freelyavailable Unity Learn games: a kart racing game and a 3D adventure game. Ourhope is that other researchers find them easy to use for VR studies as UnityTechnologies developed the games for beginners and has provided tutorials onusing them. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13412v1 |
-|title| RAMPA: Robotic Augmented Reality for Machine Programming and Automation |
-|authors| Fatih DogangunSerdar BaharYigit YildirimBora Toprak TemirEmre UgurMustafa Doga Dogan
-|links| http://arxiv.org/abs/2410.13412v1 |
-|updated| 2024-10-17 10:21:28 UTC |
-|summary| As robotics continue to enter various sectors beyond traditional industrialapplications the need for intuitive robot training and interaction systemsbecomes increasingly more important. This paper introduces Robotic AugmentedReality for Machine Programming RAMPA a system that utilizes thecapabilities of state-of-the-art and commercially available AR headsets e.g.Meta Quest 3 to facilitate the application of Programming from DemonstrationPfD approaches on industrial robotic arms such as Universal Robots UR10. Ourapproach enables in-situ data recording visualization and fine-tuning ofskill demonstrations directly within the users physical environment. RAMPAaddresses critical challenges of PfD such as safety concerns programmingbarriers and the inefficiency of collecting demonstrations on the actualhardware. The performance of our system is evaluated against the traditionalmethod of kinesthetic control in teaching three different robotic manipulationtasks and analyzed with quantitative metrics measuring task performance andcompletion time trajectory smoothness system usability user experience andtask load using standardized surveys. Our findings indicate a substantialadvancement in how robotic tasks are taught and refined promising improvementsin operational safety efficiency and user engagement in robotic programming. |
+|idx| 2410.15929v1 |
+|title| Yeah, Un, Oh: Continuous and Real-time Backchannel Prediction with Fine-tuning of Voice Activity Projection |
+|authors| Koji InoueDivesh LalaGabriel SkantzeTatsuya Kawahara
+|links| http://arxiv.org/abs/2410.15929v1 |
+|updated| 2024-10-21 11:57:56 UTC |
+|summary| In human conversations short backchannel utterances such as yeah and ohplay a crucial role in facilitating smooth and engaging dialogue. Thesebackchannels signal attentiveness and understanding without interrupting thespeaker making their accurate prediction essential for creating more naturalconversational agents. This paper proposes a novel method for real-timecontinuous backchannel prediction using a fine-tuned Voice Activity ProjectionVAP model. While existing approaches have relied on turn-based orartificially balanced datasets our approach predicts both the timing and typeof backchannels in a continuous and frame-wise manner on unbalanced real-worlddatasets. We first pre-train the VAP model on a general dialogue corpus tocapture conversational dynamics and then fine-tune it on a specialized datasetfocused on backchannel behavior. Experimental results demonstrate that ourmodel outperforms baseline methods in both timing and type prediction tasksachieving robust performance in real-time environments. This research offers apromising step toward more responsive and human-like dialogue systems withimplications for interactive spoken dialogue applications such as virtualassistants and robots. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13769v1 |
-|title| Transformer Guided Coevolution: Improved Team Formation in Multiagent Adversarial Games |
-|authors| Pranav RajbhandariPrithviraj DasguptaDonald Sofge
-|links| http://arxiv.org/abs/2410.13769v1 |
-|updated| 2024-10-17 17:06:41 UTC |
-|summary| We consider the problem of team formation within multiagent adversarialgames. We propose BERTeam a novel algorithm that uses a transformer-based deepneural network with Masked Language Model training to select the best team ofplayers from a trained population. We integrate this with coevolutionary deepreinforcement learning which trains a diverse set of individual players tochoose teams from. We test our algorithm in the multiagent adversarial gameMarine Capture-The-Flag and we find that BERTeam learns non-trivial teamcompositions that perform well against unseen opponents. For this game we findthat BERTeam outperforms MCAA an algorithm that similarly optimizes teamformation. |
+|idx| 2410.16237v1 |
+|title| IBGP: Imperfect Byzantine Generals Problem for Zero-Shot Robustness in Communicative Multi-Agent Systems |
+|authors| Yihuan MaoYipeng KangPeilun LiNing ZhangWei XuChongjie Zhang
+|links| http://arxiv.org/abs/2410.16237v1 |
+|updated| 2024-10-21 17:41:42 UTC |
+|summary| As large language model LLM agents increasingly integrate into ourinfrastructure their robust coordination and message synchronization becomevital. The Byzantine Generals Problem BGP is a critical model forconstructing resilient multi-agent systems MAS under adversarial attacks. Itdescribes a scenario where malicious agents with unknown identities exist inthe system-situations that in our context could result from LLM agentshallucinations or external attacks. In BGP the objective of the entire systemis to reach a consensus on the action to be taken. Traditional BGP requiresglobal consensus among all agents however in practical scenarios globalconsensus is not always necessary and can even be inefficient. Therefore thereis a pressing need to explore a refined version of BGP that aligns with thelocal coordination patterns observed in MAS. We refer to this refined versionas Imperfect BGP IBGP in our research aiming to address this discrepancy. Totackle this issue we propose a framework that leverages consensus protocolswithin general MAS settings providing provable resilience againstcommunication attacks and adaptability to changing environments as validatedby empirical results. Additionally we present a case study in a sensor networkenvironment to illustrate the practical application of our protocol. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13768v1 |
-|title| Rapid and Automated Alloy Design with Graph Neural Network-Powered LLM-Driven Multi-Agent Systems |
-|authors| Alireza GhafarollahiMarkus J. Buehler
-|links| http://arxiv.org/abs/2410.13768v1 |
-|updated| 2024-10-17 17:06:26 UTC |
-|summary| A multi-agent AI model is used to automate the discovery of new metallicalloys integrating multimodal data and external knowledge including insightsfrom physics via atomistic simulations. Our multi-agent system features threekey components: a a suite of LLMs responsible for tasks such as reasoning andplanning b a group of AI agents with distinct roles and expertise thatdynamically collaborate and c a newly developed graph neural network GNNmodel for rapid retrieval of key physical properties. A set of LLM-driven AIagents collaborate to automate the exploration of the vast design space ofMPEAs guided by predictions from the GNN. We focus on the NbMoTa family ofbody-centered cubic bcc alloys modeled using an ML-based interatomicpotential and target two key properties: the Peierls barrier and solute/screwdislocation interaction energy. Our GNN model accurately predicts theseatomic-scale properties providing a faster alternative to costly brute-forcecalculations and reducing the computational burden on multi-agent systems forphysics retrieval. This AI system revolutionizes materials discovery byreducing reliance on human expertise and overcoming the limitations of directall-atom simulations. By synergizing the predictive power of GNNs with thedynamic collaboration of LLM-based agents the system autonomously navigatesvast alloy design spaces identifying trends in atomic-scale materialproperties and predicting macro-scale mechanical strength as demonstrated byseveral computational experiments. This approach accelerates the discovery ofadvanced alloys and holds promise for broader applications in other complexsystems marking a significant step forward in automated materials design. |
+|idx| 2410.16197v1 |
+|title| LASER: Script Execution by Autonomous Agents for On-demand Traffic Simulation |
+|authors| Hao GaoJingyue WangWenyang FangJingwei XuYunpeng HuangTaolue ChenXiaoxing Ma
+|links| http://arxiv.org/abs/2410.16197v1 |
+|updated| 2024-10-21 17:00:03 UTC |
+|summary| Autonomous Driving Systems ADS require diverse and safety-critical trafficscenarios for effective training and testing but the existing data generationmethods struggle to provide flexibility and scalability. We propose LASER anovel frame-work that leverage large language models LLMs to conduct trafficsimulations based on natural language inputs. The framework operates in twostages: it first generates scripts from user-provided descriptions and thenexecutes them using autonomous agents in real time. Validated in the CARLAsimulator LASER successfully generates complex on-demand driving scenariossignificantly improving ADS training and testing data generation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13757v1 |
-|title| MobA: A Two-Level Agent System for Efficient Mobile Task Automation |
-|authors| Zichen ZhuHao TangYansi LiKunyao LanYixuan JiangHao ZhouYixiao WangSituo ZhangLiangtai SunLu ChenKai Yu
-|links| http://arxiv.org/abs/2410.13757v1 |
-|updated| 2024-10-17 16:53:50 UTC |
-|summary| Current mobile assistants are limited by dependence on system APIs orstruggle with complex user instructions and diverse interfaces due torestricted comprehension and decision-making abilities. To address thesechallenges we propose MobA a novel Mobile phone Agent powered by multimodallarge language models that enhances comprehension and planning capabilitiesthrough a sophisticated two-level agent architecture. The high-level GlobalAgent GA is responsible for understanding user commands tracking historymemories and planning tasks. The low-level Local Agent LA predicts detailedactions in the form of function calls guided by sub-tasks and memory from theGA. Integrating a Reflection Module allows for efficient task completion andenables the system to handle previously unseen complex tasks. MobA demonstratessignificant improvements in task execution efficiency and completion rate inreal-life evaluations underscoring the potential of MLLM-empowered mobileassistants. |
+|idx| 2410.16175v1 |
+|title| Spiking Neural Networks as a Controller for Emergent Swarm Agents |
+|authors| Kevin ZhuConnor MattsonShay SnyderRicardo VegaDaniel S. BrownMaryam ParsaCameron Nowzari
+|links| http://arxiv.org/abs/2410.16175v1 |
+|updated| 2024-10-21 16:41:35 UTC |
+|summary| Drones which can swarm and loiter in a certain area cost hundreds of dollarsbut mosquitos can do the same and are essentially worthless. To control swarmsof low-cost robots researchers may end up spending countless hoursbrainstorming robot configurations and policies to organically createbehaviors which do not need expensive sensors and perception. Existing researchexplores the possible emergent behaviors in swarms of robots with only a binarysensor and a simple but hand-picked controller structure. Even agents in thishighly limited sensing actuation and computational capability class canexhibit relatively complex global behaviors such as aggregation milling anddispersal but finding the local interaction rules that enable more collectivebehaviors remains a significant challenge. This paper investigates thefeasibility of training spiking neural networks to find those local interactionrules that result in particular emergent behaviors. In this paper we focus onsimulating a specific milling behavior already known to be producible usingvery simple binary sensing and acting agents. To do this we use evolutionaryalgorithms to evolve not only the parameters the weights biases and delaysof a spiking neural network but also its structure. To create a baseline wealso show an evolutionary search strategy over the parameters for the incumbenthand-picked binary controller structure. Our simulations show that spikingneural networks can be evolved in binary sensing agents to form a mill. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13580v1 |
-|title| EFX Exists for Three Types of Agents |
-|authors| Vishwa Prakash H. V.Pratik GhosalPrajakta NimbhorkarNithin Varma
-|links| http://arxiv.org/abs/2410.13580v1 |
-|updated| 2024-10-17 14:15:08 UTC |
-|summary| In this paper we study the problem of finding an envy-free allocation ofindivisible goods among multiple agents. EFX which stands for envy-freeness upto any good is a well-studied relaxation of the envy-free allocation problemand has been shown to exist for specific scenarios. For instance EFX is knownto exist when there are only three agents Chaudhury et al EC 2020 and forany number of agents when there are only two types of valuations MaharaDiscret. Appl. Math 2023.  We show that EFX allocations exist for any number of agents when there are atmost three types of additive valuations. |
+|idx| 2410.16029v1 |
+|title| Natural GaLore: Accelerating GaLore for memory-efficient LLM Training and Fine-tuning |
+|authors| Arijit Das
+|links| http://arxiv.org/abs/2410.16029v1 |
+|updated| 2024-10-21 14:05:06 UTC |
+|summary| Training LLMs presents significant memory challenges due to growing size ofdata weights and optimizer states. Techniques such as data and modelparallelism gradient checkpointing and offloading strategies address thisissue but are often infeasible due to hardware constraints. To mitigate memoryusage alternative methods like Parameter-Efficient-Fine-Tuning PEFT andGaLore approximate weights or optimizer states. PEFT methods such as LoRAhave gained popularity for fine-tuning LLMs though they require a full-rankwarm start. In contrast GaLore allows full-parameter learning while being morememory-efficient. This work introduces Natural GaLore a simple drop inreplacement for AdamW which efficiently applies the inverse Empirical FisherInformation Matrix to low-rank gradients using Woodburys Identity. Wedemonstrate that incorporating second-order information speeds up optimizationsignificantly especially when the iteration budget is limited. Empiricalpretraining on 60M 130M 350M and 1.1B parameter Llama models on C4 datademonstrate significantly lower perplexity over GaLore without additionalmemory overhead. By fine-tuning RoBERTa on the GLUE benchmark using NaturalGaLore we demonstrate significant reduction in gap 86.05 vs 86.28 forfull-finetuning. Furthermore fine-tuning the TinyLlama 1.1B model for functioncalling using the TinyAgent framework shows that Natural GaLore achieving83.09 accuracy on the TinyAgent dataset significantly outperforms 16-bit LoRAat 80.06 and even surpasses GPT4-Turbo by 4 all while using 30 less memory.  All code to reproduce the results are available at:https://github.com/selfsupervised-ai/Natural-GaLore.git |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.13454v1 |
-|title| Byzantine-Resilient Output Optimization of Multiagent via Self-Triggered Hybrid Detection Approach |
-|authors| Chenhang YanLiping YanYuezu LvBolei DongYuanqing Xia
-|links| http://arxiv.org/abs/2410.13454v1 |
-|updated| 2024-10-17 11:31:22 UTC |
-|summary| How to achieve precise distributed optimization despite unknown attacksespecially the Byzantine attacks is one of the critical challenges formultiagent systems. This paper addresses a distributed resilient optimizationfor linear heterogeneous multi-agent systems faced with adversarial threats. Weestablish a framework aimed at realizing resilient optimization forcontinuous-time systems by incorporating a novel self-triggered hybriddetection approach. The proposed hybrid detection approach is able to identifyattacks on neighbors using both error thresholds and triggering intervalsthereby optimizing the balance between effective attack detection and thereduction of excessive communication triggers. Through using an edge-basedadaptive self-triggered approach each agent can receive its neighborsinformation and determine whether these information is valid. If any neighborprove invalid each normal agent will isolate that neighbor by disconnectingcommunication along that specific edge. Importantly our adaptive algorithmguarantees the accuracy of the optimization solution even when an agent isisolated by its neighbors. |
+|idx| 2410.15987v1 |
+|title| Analyzing Closed-loop Training Techniques for Realistic Traffic Agent Models in Autonomous Highway Driving Simulations |
+|authors| Matthias BitzerReinis CimursBenjamin CoorsJohannes GothSebastian ZieschePhilipp GeigerMaximilian Naumann
+|links| http://arxiv.org/abs/2410.15987v1 |
+|updated| 2024-10-21 13:16:58 UTC |
+|summary| Simulation plays a crucial role in the rapid development and safe deploymentof autonomous vehicles. Realistic traffic agent models are indispensable forbridging the gap between simulation and the real world. Many existingapproaches for imitating human behavior are based on learning fromdemonstration. However these approaches are often constrained by focusing onindividual training strategies. Therefore to foster a broader understanding ofrealistic traffic agent modeling in this paper we provide an extensivecomparative analysis of different training principles with a focus onclosed-loop methods for highway driving simulation. We experimentally comparei open-loop vs. closed-loop multi-agent training ii adversarial vs.deterministic supervised training iii the impact of reinforcement lossesand iv the impact of training alongside log-replayed agents to identifysuitable training techniques for realistic agent modeling. Furthermore weidentify promising combinations of different closed-loop training methods. |
 
 
