@@ -324,11 +324,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.16197v1 |
+|idx| 2410.16197v2 |
 |title| LASER: Script Execution by Autonomous Agents for On-demand Traffic Simulation |
 |authors| Hao GaoJingyue WangWenyang FangJingwei XuYunpeng HuangTaolue ChenXiaoxing Ma
-|links| http://arxiv.org/abs/2410.16197v1 |
-|updated| 2024-10-21 17:00:03 UTC |
+|links| http://arxiv.org/abs/2410.16197v2 |
+|updated| 2024-10-22 07:14:11 UTC |
 |summary| Autonomous Driving Systems ADS require diverse and safety-critical trafficscenarios for effective training and testing but the existing data generationmethods struggle to provide flexibility and scalability. We propose LASER anovel frame-work that leverage large language models LLMs to conduct trafficsimulations based on natural language inputs. The framework operates in twostages: it first generates scripts from user-provided descriptions and thenexecutes them using autonomous agents in real time. Validated in the CARLAsimulator LASER successfully generates complex on-demand driving scenariossignificantly improving ADS training and testing data generation. |
 
 
