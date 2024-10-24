@@ -1,0 +1,753 @@
+LVSM: A LARGE VIEW SYNTHESIS MODEL WITH
+MINIMAL 3D INDUCTIVE BIAS
+HaianJin1∗ HanwenJiang2 HaoTan3 KaiZhang3 SaiBi3 TianyuanZhang4
+FujunLuan3 NoahSnavely1 ZexiangXu3
+1CornellUniversity 2TheUniversityofTexasatAustin
+3AdobeResearch 4MassachusettsInstituteofTechnology
+ABSTRACT
+WeproposetheLargeViewSynthesisModel(LVSM),anoveltransformer-based
+approachforscalableandgeneralizablenovelviewsynthesisfromsparse-view
+inputs. We introduce two architectures: (1) an encoder-decoder LVSM, which
+encodes input image tokens into a fixed number of 1D latent tokens, function-
+ingasafullylearnedscenerepresentation,anddecodesnovel-viewimagesfrom
+them;and(2)adecoder-onlyLVSM,whichdirectlymapsinputimagestonovel-
+view outputs, completely eliminating intermediate scene representations. Both
+modelsbypassthe3Dinductivebiasesusedinpreviousmethods—from3Drep-
+resentations (e.g., NeRF, 3DGS) to network designs (e.g., epipolar projections,
+planesweeps)—addressingnovelviewsynthesiswithafullydata-drivenapproach.
+Whiletheencoder-decodermodeloffersfasterinferenceduetoitsindependent
+latentrepresentation,thedecoder-onlyLVSMachievessuperiorquality,scalabil-
+ity, and zero-shot generalization, outperforming previous state-of-the-art meth-
+odsby1.5to3.5dBPSNR.Comprehensiveevaluationsacrossmultipledatasets
+demonstratethatbothLVSMvariantsachievestate-of-the-artnovelviewsynthesis
+quality. Notably, our models surpass all previous methods even with reduced
+computational resources (1-2 GPUs). Please see our website for more details:
+https://haian-jin.github.io/projects/LVSM/.
+1 INTRODUCTION
+Novelviewsynthesisisalong-standingchallengeinvisionandgraphics.Fordecades,thecommunity
+hasgenerallyreliedonvarious3Dinductivebiases,incorporating3Dpriorsandhandcraftedstructures
+tosimplifythetaskandimprovesynthesisquality. Recently,NeRF,3DGaussianSplatting(3DGS),
+and their variants (Mildenhall et al., 2020; Barron et al., 2021; Müller et al., 2022; Chen et al.,
+2022;Xuetal.,2022;Kerbletal.,2023;Yuetal.,2024)havesignificantlyadvancedthefieldby
+introducingnewinductivebiasesthroughcarefullydesigned3Drepresentations(e.g.,continuous
+volumetricfieldsandGaussianprimitives)andrenderingequations(e.g.,raymarchingandsplatting
+with alpha blending), reframing view synthesis as the optimization of the representations using
+rendering losses on a per-scene basis. Other methods have also built generalizable networks to
+estimate these representations or directly generate novel-view images in a feed-forward manner,
+oftenincorporatingadditional3Dinductivebiases,suchasprojectiveepipolarlinesorplane-sweep
+volumes,intheirarchitecturedesigns(Wangetal.,2021a;Yuetal.,2021;Chenetal.,2021;Suhail
+etal.,2022b;Charatanetal.,2024;Chenetal.,2024).
+While effective, these 3D inductive biases inherently limit model flexibility, constraining their
+adaptability to more diverse and complex scenarios that do not align with predefined priors or
+handcraftedstructures. Recentlargereconstructionmodels(LRMs)(Hongetal.,2024;Lietal.,2023;
+Weietal.,2024;Zhangetal.,2024)havemadenotableprogressinremovingarchitecture-levelbiases
+byleveraginglargetransformerswithoutrelyingonepipolarprojectionsorplane-sweepvolumes,
+achievingstate-of-the-artnovelviewsynthesisquality. However,despitetheseadvances,LRMsstill
+relyonrepresentation-levelbiases—suchasNeRFs,meshes,or3DGS,alongwiththeirrespective
+renderingequations—thatlimittheirpotentialgeneralizationandscalability.
+∗ThisworkwasdonewhenHaianJin,HanwenJiang,andTianyuanZhangwereinternsatAdobeResearch.
+1
+4202
+tcO
+22
+]VC.sc[
+1v24271.0142:viXraScene Level View Synthesis Object Level View Synthesis
+Input Images GS-LRM Ours Ground truth
+Single image input Our rendered novel views Input Images Our rendered novel views
+Figure1: LVSMsupportsfeed-forwardnovelviewsynthesisfromsparseposedimageinputs(even
+fromasingleview)onbothobjectsandscenes. LVSMachievessignificantqualityimprovements
+comparedwiththepreviousSOTAmethod,i.e.,GS-LRM(Zhangetal.,2024). (Pleasezoominfor
+moredetails.)
+Inthiswork,weaimtominimize3Dinductivebiasesandpushtheboundariesofnovelviewsynthesis
+withafullydata-drivenapproach. WeproposetheLargeViewSynthesisModel(LVSM),anovel
+transformer-basedframeworkthatsynthesizesnovel-viewimagesfromposedsparse-viewinputs
+withoutpredefinedrenderingequationsor3Dstructures,enablingaccurate,efficient,andscalable
+novelviewsynthesiswithphoto-realisticquality(seeFig.1forvisualexamples).
+Tothisend,wefirstintroduceanencoder-decoderLVSM,removinghandcrafted3Drepresentations
+andtheirrenderingequations.Weuseanencodertransformertomaptheinput(patchified)multi-view
+imagetokensintoafixednumberof1Dlatenttokens,independentofthenumberofinputviews.
+Theselatenttokensarethenprocessedbyadecodertransformer,whichusestarget-viewPlücker
+raysaspositionalembeddingstogeneratethetargetview’simagetokens,ultimatelyregressingthe
+outputpixelcolorsfromafinallinearlayer. Theencoder-decoderLVSMjointlylearnsareconstructor
+(encoder),ascenerepresentation(latenttokens),andarenderer(decoder)directlyfromdata. By
+removing the need for predefined inductive biases in rendering and representation, LVSM offers
+improvedgeneralizationandachieveshigherqualitycomparedtoNeRF-andGS-basedapproaches.
+However,theencoder-decoderLVSMstillretainsakeybias: theneedforanintermediate,albeitfully
+learned,scenerepresentation. Tofurtherpushtheboundaries,weproposeadecoder-onlyLVSM,
+whichadoptsasingle-streamtransformertodirectlyconverttheinputmulti-viewtokensintotarget
+viewtokens,bypassinganyintermediaterepresentations. Thedecoder-onlyLVSMintegratesthe
+novelviewsynthesisprocessintoaholisticdata-drivenframework,achievingscenereconstruction
+andrenderingsimultaneouslyinafullyimplicitmannerwithminimal3Dinductivebias.
+WepresentacomprehensiveevaluationofvariantsofbothLVSMarchitectures. Notably,ourmodels,
+trainedon2-4inputviews,demonstratestrongzero-shotgeneralizationtoanunseennumberofviews,
+rangingfromasingleinputtomorethan10. Thankstominimalinductivebiases,ourdecoder-only
+model consistently outperforms the encoder-decoder variant in terms of quality, scalability, and
+zero-shotcapabilitywithvaryingnumbersofinputviews. Ontheotherhand,theencoder-decoder
+modelachievesmuchfasterinferencespeedduetoitsuseofafixed-lengthlatentscenerepresentation.
+Bothmodels,benefitingfromreduced3Dinductivebiases,outperformpreviousmethods,achieving
+state-of-the-artnovelviewsynthesisqualityacrossmultipleobject-levelandscene-levelbenchmark
+datasets. Specifically,ourdecoder-onlyLVSMsurpassespreviousstate-of-the-artmethods,such
+asGS-LRM,byasubstantialmarginof1.5to3.5dBPSNR.Ourfinalmodelsweretrainedon
+64A100GPUsfor3-7days,dependingonthedatatypeandmodelarchitecture,butwefoundthat
+evenwithjust1–2A100GPUsfortraining,ourmodel(withadecreasedmodelandbatchsize)still
+outperformsallpreviousmethodstrainedwithequalorevenmorecomputeresources.
+22 RELATED WORK
+ViewSynthesis. Novelviewsynthesis(NVS)hasbeenstudiedfordecades. Image-basedrendering
+(IBR)methodsperformviewsynthesisbyweightedblendingofinputreferenceimagesusingproxy
+geometry(Debevecetal.,1996;Heigletal.,1999;Sinhaetal.,2009). Lightfieldmethodsbuilda
+sliceofthe4Dplenopticfunctionfromdenseviewinputs(Gortleretal.,1996;Levoy&Hanrahan,
+1996;Davisetal.,2012). Recentlearning-basedIBRmethodsincorporateconvolutionalnetworksto
+predictblendingweights(Hedmanetal.,2018;Zhouetal.,2016;2018)orusingpredicteddepth
+maps(Choietal.,2019). However,therenderableregionisusuallyconstrainedtobeneartheinput
+viewpoints. Otherworkleveragesmultiview-stereoreconstructionstoenablerenderingunderlarger
+viewpointchanges(Jancosek&Pajdla,2011;Chaurasiaetal.,2013;Penner&Zhang,2017). In
+contrast,weusemorescalablenetworkdesignstolearngeneralizablepriorsfromlarger,real-world
+data. Moreover,weperformrenderingattheimagepatchlevel,achievingbettermodelefficiency,
+andrenderingquality.
+Optimizing3DRepresentations. NeRF(Mildenhalletal.,2020)introducedaneuralvolumetric
+3D representation with differentiable volume rendering, enabling neural scene reconstruction by
+minimizingrenderinglossesandsettinganewstandardinnovelviewsynthesis. Laterworkimproved
+NeRFwithbetterrenderingquality(Barronetal.,2021;Verbinetal.,2022;Barronetal.,2023),faster
+optimizationorrenderingspeed(Reiseretal.,2021;Hedmanetal.,2021;Reiseretal.,2023),and
+looserrequirementsontheinputviews(Niemeyeretal.,2022;Martin-Bruallaetal.,2021;Wangetal.,
+2021b). OtherworkhasexploredhybridrepresentationsthatcombineimplicitNeRFcontentwith
+explicit3Dinformation,e.g.,intheformofvoxels,asinDVGO(Sunetal.,2022). Spatialcomplexity
+canbefurtherdecreasedbyusingsparsevoxels(Liuetal.,2020;Fridovich-Keiletal.,2022),volume
+decomposition(Chanetal.,2022;Chenetal.,2022;2023),andhashingtechniques(Mülleretal.,
+2022). Anotherlineofworksinvestigatesexplicitpoint-basedrepresentations(Xuetal.,2022;Zhang
+etal.,2022;Fengetal.,2022). GaussianSplatting(Kerbletal.,2023)extendsthese3Dpointsto3D
+Gaussians,improvingbothrenderingqualityandspeed. Incontrast,weperformnovelviewsynthesis
+usinglargetransformermodels(optionallywithalearnedlatentscenerepresentation)withoutthe
+needofanyinductivebiasofusingprior3Drepresentationsoranyper-sceneoptimizationprocess.
+GeneralizableFeed-forwardMethods. GeneralizablemethodsenablefastNVSinferencebyusing
+neuralnetworks,trainedacrossscenes,topredictthenovelviewsoranunderlying3Drepresentation
+inafeed-forwardmanner. Forexample,PixelNeRF(Yuetal.,2021),MVSNeRF(Chenetal.,2021)
+andIBRNet(Wangetal.,2021a)predictvolumetric3Drepresentationsfrominputviews,utilizing3D-
+specificpriorslikeepipolarlinesorplanesweepcostvolumes. Latermethodsimproveperformance
+under(unposed)sparseviews(Liuetal.,2022;Joharietal.,2022;Jiangetal.,2024;2023),while
+otherworkextendsto3DGSrepresentationsCharatanetal.(2024);Chenetal.(2024);Tangetal.
+(2024). Ontheotherhand,approachesthatattempttodirectlylearnarenderingfunction(Suhail
+etal.,2022a;Sajjadietal.,2022;Sitzmannetal.,2021;Rombachetal.,2021)haveprovennottobe
+scalableandlackmodelcapacity,preventingthemfromcapturinghigh-frequencydetails.Specifically,
+SRT(Sajjadietal.,2022)intendstoremovetheuseofhandcrafted3Drepresentationsandlearna
+latentrepresentationinstead,similartoourencoder-decodermodel. However,itutilizesCNNfeature
+extractionandadoptsacross-attentiontransformerwithnon-scalablemodelandrenderingdesigns.
+In contrast, our models are fully transformer-based with self-attention, and we introduce a more
+scalabledecoder-onlyarchitecturethatcaneffectivelylearnthenovelviewsynthesisfunctionwith
+minimal3Dinductivebias,withoutanintermediatelatentrepresentation.
+Recently,3Dlargereconstructionmodels(LRMs)haveemerged(Hongetal.,2024;Lietal.,2023;
+Wangetal.,2023;Xuetal.,2023;Weietal.,2024;Zhangetal.,2024;Xieetal.,2024),utilizing
+scalabletransformerarchitectures(Vaswanietal.,2023)trainedonlargedatasetstolearngeneric3D
+priors. Whilethesemethodsavoidusingepipolarprojectionorcostvolumesintheirarchitectures,
+theystillrelyonexisting3Drepresentationsliketri-planeNeRFs,meshes,or3DGS,alongwiththeir
+correspondingrenderingequations,limitingtheirpotential. Incontrast,ourapproacheliminatesthese
+3Dinductivebiases, aimingtolearnarenderingfunction(andoptionallyascenerepresentation)
+directlyfromdata. Thisleadstomorescalablemodelsandsignificantlyimprovedrenderingquality.
+3 METHOD
+WefirstprovideanoverviewofourmethodinSec.3.1,thendescribetwodifferenttransformer-based
+modelvariantsinSec.3.2.
+3Decoder-only Architecture Encoder-Decoder Architecture
+Input Views &
+Plücker Rays Synthesized
+Target View
+… …
+Encoder
+… … … Transformer
+Decoder-only
+Transformer
+Latent Decoder
+Tokens
+Transformer
+Linear & Unpatchify
+Target View
+Plücker Rays
+Figure2: LVSMmodelarchitecture. LVSMfirstpatchifiestheposedinputimagesintotokens.
+ThetargetviewtobesynthesizedisrepresentedbyitsPlückerrayembeddingsandisalsotokenized.
+Theinputviewandtargettokensaresenttoafulltransformer-basedmodeltopredictthetokens
+thatareusedtoregressthetargetviewpixels. WestudytwoLVSMtransformerarchitectures,asa
+Decoder-onlyarchitecture(left)andaEncoder-Decoderarchitecture(right).
+3.1 OVERVIEW
+GivenN sparseinputimageswithknowncameraposesandintrinsics,denotedas{(I ,E ,K )|i=
+i i i
+1,...,N},LVSMsynthesizestargetimageItwithnoveltargetcameraextrinsicsEtandintrinsics
+Kt. EachinputimagehasshapeRH×W×3,whereH andW aretheimageheightandwidth(and
+thereare3colorchannels).
+Framework. As shown in Fig. 2, our LVSM method uses an end-to-end transformer model to
+directlyrenderthetargetimage. LVSMstartsbytokenizingtheinputimages. Wefirstcomputea
+pixel-wisePlückerrayembedding(Plucker,1865)foreachinputviewusingthecameraposesand
+intrinsics. WedenotethesePlückerrayembeddingsas{P ∈RH×W×6|i=1,...,N}. Wepatchify
+i
+theRGBimagesandPlückerrayembeddingsintonon-overlappingpatches,followingtheimage
+tokenization layer of ViT (Dosovitskiy, 2020). We denote the image and Plücker ray patches of
+inputimageI as{I ∈ Rp×p×3|j = 1,...,HW/p2}and{P ∈ Rp×p×6|j = 1,...,HW/p2},
+i ij ij
+respectively,wherepisthepatchsize. Foreachpatch,weconcatenateitsimagepatchandPlücker
+rayembeddingpatch,reshapethemintoa1Dvector,andusealinearlayertomapitintoaninput
+patchtokenx :
+ij
+x =Linear ([I ,P ])∈Rd, (1)
+ij input ij ij
+wheredisthelatentsize,and[·,·]meansconcatenation.
+Similarly,LVSMrepresentsthetargetposetobesynthesizedasitsPlückerrayembeddingsPt ∈
+RH×W×6,computedfromthegiventargetextrinsicsEtandintrinsicsKt. Weusethesamepatchify
+methodandanotherlinearlayertomapittothePlückerraytokensofthetargetview,denotedas:
+q =Linear (Pt)∈Rd, (2)
+j target j
+wherePt isthePlückerrayembeddingofthejthpatchinthetargetview.
+j
+Weflattentheinputtokensintoa1Dtokensequence,denotedasx ,...,x ,wherel =NHW/p2
+1 lx x
+isthesequencelengthoftheinputimagetokens. Wealsoflattenthetargetquerytokensasq ,...,q
+1 lq
+fromtherayembeddings,withl =HW/p2asthesequencelength.
+q
+LVSMthensynthesizesnovelviewbyconditioningontheinputviewtokensusingafulltransformer
+modelM:
+y ,...,y =M(q ,...,q |x ,...,x ). (3)
+1 lq 1 lq 1 lx
+Specifically,theoutputtokeny isanupdatedversionofq ,containingtheinformationtopredictthe
+j j
+pixelRGBvaluesofthejth patchofthetargetview. TheimplementationdetailsofmodelM are
+describedinSec.3.2next.
+4Werecoverthespatialstructureofoutputtokensusingtheinverseoperationoftheflattenoperation.
+ToregressRGBvaluesofthetargetpatch,weemployalinearlayerfollowedbyaSigmoidfunction:
+ˆIt =Sigmoid(Linear (y ))∈R3p2 . (4)
+j out j
+WereshapethepredictedRGBvaluesbacktothe2DpatchinRp×p×3,andthenwegetthesynthesized
+novelviewˆItbyperformingthesameoperationonalltargetpatchesindependently.
+LossFunction. Followingpriorworks(Zhangetal.,2024;Hongetal.,2024),wetrainLVSMwith
+photometricnovelviewrenderinglosses:
+L=MSE(ˆIt,It)+λ·Perceptual(ˆIt,It), (5)
+whereλistheweightforbalancingtheperceptualloss(Johnsonetal.,2016).
+3.2 TRANSFORMER-BASEDMODELARCHITECTURE
+Inthissubsection,wepresentthetwoLVSMarchitectures—encoder-decoderanddecoder-only—
+both designed to minimize 3D inductive biases. Following their name, ‘encoder-decoder’ first
+converts input images to a latent representation before decoding the final image colors, whereas
+‘decoder-only’directlyoutputsthesynthesizedtargetviewwithoutanintermediaterepresentation,
+furtherminimizinginductivebiasesinitsdesign.
+To better illustrate the two models, we draw an analogy between them and their counterparts in
+thelargelanguagemodel(LLM)domain. Indetail,theencoder-decodermodelisinspiredbythe
+encoder-decoderframeworkintheoriginalTransformermodel(Vaswanietal.,2023)andPerceiver-
+IO(Jaegleetal.,2021)thoughwithdifferentmodeldetails,e.g. moredecoderlayersandremovalof
+cross-attentionlayers. Andthedecoder-onlymodelresemblesaGPT-likedecoder-onlyarchitecture
+butwithoutadoptingacausalattentionmask(Radfordetal.,2019).
+Importantly, we clarify that the naming of ‘encoder’ and ‘decoder’ are based on their output
+characteristics—i.e., the encoder outputs the latent while the decoder outputs the target—rather
+than being strictly tied to the transformer architecture they utilize. For instance, in the encoder-
+decodermodel,thedecoderconsistsofmultipletransformerlayerswithself-attention(referredtoas
+TransformerEncoderlayersintheoriginaltransformerpaper). However,wedesignateitasadecoder
+becauseitsprimaryfunctionistooutputresults. Theseterminologiesalignwithconventionsusedin
+LLMs(Vaswanietal.,2023;Radfordetal.,2019;Devlin,2018). Notably,weapplyself-attentionto
+alltokensineverytransformerblockofbothmodels,withoutintroducingspecialattentionmasksor
+otherarchitecturalbiases,inlinewithourphilosophyofminimizinginductivebias.
+Encoder-DecoderArchitecture. Theencoder-decoderLVSMcomeswithalearnedlatentscene
+representationforviewsynthesis,avoidingtheuseofNeRF,3DGS,andotherrepresentations. The
+encoderfirstmapstheinputtokenstoanintermediate1Darrayoflatenttokens(functioningasa
+latentscenerepresentation). Thenthedecoderpredictstheoutputs,conditioningonthelatenttokens
+andtargetpose.
+Similar to the triplane tokens in LRMs (Hong et al., 2024; Wei et al., 2024), we use l learnable
+latenttokens{e ∈Rd|k =1,...,l}toaggragateinformationfrominputtokens{x }. Theencoder,
+k i
+denotedasTransformer ,usesmultipletransformerlayerswithself-attention. Weconcatenate
+Enc
+{x }and{e }astheinputofTransformer ,whichperformsinformationaggregationbetween
+i k Enc
+themtoupdate{e }. Theoutputtokensthatcorrespondtothelatenttokens,denotedas{z },are
+k k
+usedastheintermediatelatentscenerepresentation. Theothertokens(updatedfrom{x },denoted
+i
+as{x′})areunusedanddiscarded.
+i
+The decoder uses multiple transformer layers with self-attention. In detail, the inputs are the
+concatenationofthelatenttokens{z }andthetargetviewquerytokens{q }. Byapplyingself-
+k j
+attention transformer layers over the input tokens, we get output tokens with the same sequence
+lengthastheinput. Theoutputtokensthatcorrespondstothetargettokensq ,...,q aretreatedas
+1 lq
+finaloutputsy ,...,y ,andtheothertokens(updatedfrom{z },denotedas{z′})areunused. This
+1 lq i i
+architecturecanbeformulatedas:
+x′,...,x′ ,z ,...,z =Transformer (x ,...,x ,e ,...,e ) (6)
+1 lx 1 l Enc 1 lx 1 l
+z′,...,z′,y ,...,y =Transformer (z ,...,z ,q ,...,q ). (7)
+1 l 1 lq Dec 1 l 1 lq
+5Decoder-OnlyArchitecture. Ouralternate,decoder-onlymodelfurthereliminatestheneedfor
+anintermediatescenerepresentation. Itsarchitectureissimilartothedecoderinencoder-decoder
+architecturebutdiffersininputsandmodelsize. Weconcatenatethetwosequencesofinputtokens
+{x }andtargettokens{q }. Thefinaloutput{y }isthedecoder’scorrespondingoutputforthe
+i j j
+targettokens{q }. Theothertokens(updatedfrom{x },denotedas{x′})areunusedanddiscarded.
+j i i
+Thisarchitecturecanbeformulatedas:
+x′ 1,...,x′ lx,y 1,...,y
+lq
+=Transformer Dec-only(x 1,...,x lx,q 1,...,q lq) (8)
+HeretheTransformer Dec-only hasmultiplefullself-attentiontransformerlayers.
+4 EXPERIMENTS
+4.1 DATASETS
+Wetrain(andevaluate)LVSMonobject-levelandscene-leveldatasetsseparately.
+Object-levelDatasets. WeusetheObjaversedataset(Deitkeetal.,2023)totrainLVSM.Wefollow
+therenderingsettingsinGS-LRM(Zhangetal.,2024)andrender32randomviewsfor730Kobjects.
+Wetestontwoobject-leveldatasets,i.e.,GoogleScannedObjects(Downsetal.,2022)(GSO)and
+AmazonBerkeleyObjects(Collinsetal.,2022b)(ABO).Indetail,GSOandABOcontain1099and
+1000objects,respectively. FollowingInstant3D(Lietal.,2023)andGS-LRM(Zhangetal.,2024),
+wehave4sparseviewsastestinginputsandanother10viewsastargetimages.
+Scene-levelDatasets. WeusetheRealEstate10Kdataset(Zhouetal.,2018),whichcontains80K
+videoclips curatedfrom 10KYoutubevideosof bothindoor andoutdoor scenes. We follow the
+train/testdatasplitusedinpixelSplat(Charatanetal.,2024).
+4.2 TRAININGDETAILS
+ImprovingTrainingStability. WeobservethatthetrainingofLVSMcrasheswithplaintransformer
+layers (Vaswani et al., 2023) due to exploding gradients. We empirically find that using QK-
+Norm(Henryetal.,2020)inthetransformerlayersstabilizestraining. Thisobservationisconsistent
+withBruceetal.(2024)andEsseretal.(2024). Wealsoskipoptimizationstepswithgradientnorm>
+5.0besidesthestandard1.0gradientclipping.
+EfficientTrainingTechniques. WeuseFlashAttention-v2(Dao,2023)inthexFormers(Lefaudeux
+etal.,2022),gradientcheckpointing(Chenetal.,2016),andmixed-precisiontrainingwithBfloat16
+datatypetoacceleratetraining.
+OtherDetails. WetrainLVSMwith64A100GPUsusingabatchsizeof8perGPU.Weusea
+cosinelearningrateschedulewithapeaklearningrateof4e-4andawarmupof2500iterations. We
+trainLVSMfor80kiterationsontheobjectand100konscenedata. LVSMusesaimagepatchsize
+ofp=8andtokendimensiond=768. ThedetailsoftransformerlayersfollowGS-LRM(Zhang
+etal.,2024)withanadditionalQK-Norm. Unlessnoted,allmodelshave24transformerlayers,the
+sameasGS-LRM.Theencoder-decoderLVSMhas12encoderlayersand12decoderlayers. Note
+thatourmodelsizeissmallerthanGS-LRM,asGS-LRMusesatokendimensionof1024.
+Forobject-levelexperiments,weuse4inputviewsand8targetviewsforeachtrainingexampleby
+default. Wefirsttrainwitharesolutionof256,whichtakes4daysfortheencoder-decodermodel
+and7daysforthedecoder-onlymodel. Thenwefinetunethemodelwitharesolutionof512for
+10kiterationswithasmallerlearningrateof4e-5andasmallertotalbatchsizeof128,whichtakes
+2.5days. Forscene-levelexperimentsWeuse2inputviewsand6targetviewsforeachtraining
+example. Wefirsttrainwitharesolutionof256,whichtakesabout3daysforbothencoder-decoder
+anddecoder-onlymodels. Thenwefinetunethemodelwitharesolutionof512for20kiterationswith
+asmallerlearningrateof1e-4andatotalbatchsizeof128for3days. Forbothobjectandscene-level
+experiments,theviewselectiondetailsandcameraposenormalizationmethodsfollowGS-LRM.We
+useaperceptuallossweightλas0.5and1.0onscene-levelandobject-levelexperiments,respectively.
+4.3 EVALUATIONAGAINSTBASELINES
+In this section, we describe our experimental setup and datasets (Sec. 4.1), introduce our model
+trainingdetails(Sec.4.2),reportevaluationresults(Sec.4.3)andperformanablationstudy(Sec.4.4).
+6Table1: Quantitativecomparisonsonobject-level(left)andscene-level(right)viewsynthesis.
+Fortheobject-levelcomparison,wematchedthebaselinesettingswithGS-LRM(Zhangetal.,2024)
+inbothinputandrenderingunderbothresolutionof256(Res-256)andresolutionof512(Res-512).
+Forthescene-levelcomparison,weusethesamevalidationdatasetusedbypixelSplat(Charatan
+etal.,2024),whichhas256resolution.
+ABO(Collinsetal.,2022a) GSO(Downsetal.,2022) RealEstate10k(Zhouetal.,2018)
+PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓
+Triplane-LRM(Lietal.,2023)(Res-512) 27.50 0.896 0.093 26.54 0.893 0.064 pixelNeRF(Yuetal.,2021) 20.43 0.589 0.550
+GS-LRM(Zhangetal.,2024)(Res-512) 29.09 0.925 0.085 30.52 0.952 0.050 GPNR(Suhailetal.,2022a) 24.11 0.793 0.255
+OursEncoder-Decoder(Res-512) 29.81 0.913 0.065 29.32 0.933 0.052 Duet.al(Duetal.,2023) 24.78 0.820 0.213
+OursDecoder-Only(Res-512) 32.10 0.938 0.045 32.36 0.962 0.028 pixelSplat(Charatanetal.,2024) 26.09 0.863 0.136
+LGM(Tangetal.,2024)(Res-256) 20.79 0.813 0.158 21.44 0.832 0.122 MVSplat(Chenetal.,2024) 26.39 0.869 0.128
+GS-LRM(Zhangetal.,2024)(Res-256) 28.98 0.926 0.074 29.59 0.944 0.051 GS-LRM(Zhangetal.,2024) 28.10 0.892 0.114
+OursEncoder-Decoder(Res-256) 30.35 0.923 0.052 29.19 0.932 0.046 OursEncoder-Decoder 28.58 0.893 0.114
+OursDecoder-Only(Res-256) 32.47 0.944 0.037 31.71 0.957 0.027 OursDecoder-Only 29.67 0.906 0.098
+Input images Triplane-LRM GS-LRM Ours Encoder-Decoder Ours Decoder-Only Ground truth
+Figure3: Object-levelvisualcomparisonat512resolution. Given4sparseinputposedimages
+(leftmost column), we compare our high-res object-level novel-view rendering results with two
+baselines: Instant3D’sTriplane-LRM(Lietal.,2023)andGS-LRM(Res-512)(Zhangetal.,2024).
+BothourEncoder-DecoderandDecoder-Onlymodelsexhibitfewerfloaters(firstexample)andfewer
+blurryartifacts(secondexample),comparedtothebaselines. OurDecoder-Onlymodeleffectively
+handlescomplexgeometry,includingsmallholes(thirdexample)andthinstructures(fourthexample).
+Additionally,itpreservesthedetailsofhigh-frequencytexture(lastexample).
+Object-Level Results. We compare with Instant3D’s Triplane-LRM (Li et al., 2023) and GS-
+LRM(Zhangetal.,2024)ataresolutionof512. AsshownontheleftsideofTable1,ourLVSM
+achievesthebestperformanceagainstallpriorworks. Inparticular,at512resolution,ourdecoder-
+onlyLVSMachievesa3dBand2.8dBPSNRgainagainstthebestpriormethodGS-LRMonABO
+andGSO,respectively;ourencoder-decoderLVSMachievesperformancecomparabletoGS-LRM.
+WealsocomparewithLGM(Tangetal.,2024)attheresolutionof256,astheofficialLGMmodelis
+trainedwithaninputresolutionof256.Wealsoreporttheperformanceofmodelstrainedonresolution
+of256. ComparedwiththebestpriorworkGS-LRM,ourdecoder-onlyLVSMdemonstratesa3.5dB
+and2.2dBPSNRgainonABOandGSO,respectively;ourencoder-decoderLVSMshowsaslightly
+betterperformancethanGS-LRM.
+7Input images pixelSplat MVSplat GS-LRM Ours Encoder-Decoder Ours Decoder-Only Ground truth
+Figure4:Scene-levelvisualcomparison.Weevaluateourencoder-decoderanddecoder-onlymodels
+onscene-levelviewsynthesis,comparingthemagainstthepriorleadingbaselinemethods,namely
+pixelSplat(Charatanetal.,2024),MVSplat(Chenetal.,2024),andGS-LRM(Zhangetal.,2024).
+Our methods exhibit fewer texture and geometric artifacts, generate more accurate and realistic
+specularreflections,andareclosertothegroundtruthimages.
+Thesesignificantperformancegainsvalidatetheeffectivenessofourdesigntargetofremoving3D
+inductivebias. Moreinterestingly,thelargerperformancegainonABOshowsthatourmethodcan
+handlechallengingmaterials,whicharedifficultforcurrenthandcrafted3Drepresentations. The
+qualitativeresultsinFig.3andFig.7alsovalidatethehighdegreeofrealismofLVSM,especially
+forexampleswithspecularmaterials,detailedtextures,andthin,complexgeometry.
+Scene-LevelResults. WecomparewithpriorworkspixelNeRF(Yuetal.,2021),GPNR(Suhail
+etal.,2022a), Duetal.(2023),pixelSplat(Charatanetal.,2024),MVSplat(Chenetal.,2024)and
+GS-LRM(Zhangetal.,2024). AsshownontherightsideofTable1,ourdecoder-onlyLVSMshows
+a1.6dBPSNRgaincomparedwiththebestpriorworkGS-LRM.Ourencoder-decoderLVSMalso
+demonstratescomparableresultstoGS-LRM.Theseimprovementscanbeobservedqualitatively
+inFig.4,whereLVSMhasfewerfloatersandbetterperformanceonthinstructuresandspecular
+materials,consistentwiththeobject-levelresults. Theseoutcomesagainvalidatetheefficacyofour
+designofusingminimal3Dinductivebias.
+LVSMTrainedwithOnly1GPU.Limitedcomputingisakeybottleneckforacademicresearch.
+To show the potential of LVSM using academic-level resources, we train LVSM on the scene-
+level dataset (Zhou et al., 2018) following the setting of pixelSplat (Charatan et al., 2024) and
+MVSplat(Chenetal.,2024),withonlyasingleA10080GGPUfor7days. Inthisexperiment,we
+useasmallerdecoder-onlymodel(denotedLVSM-small)with6transformerlayersandasmaller
+batch size of 64 (in contrast to the default one with 24 layers and batch size 512). Our decoder-
+onlyLVSM-smallshowsaperformanceof27.66dBPSNR,0.870SSIM,and0.129LPIPS.This
+performancesurpassesthepriorbest1-GPU-trainedmodelMVSplat,witha1.3dBPSNRgain. We
+alsotrainthedecoder-onlyLVSM(12transformerlayers,batchsize64)with2GPUsfor7days,
+exhibitingaperformanceof28.56dBPSNR,0.889SSIM,and0.112LPIPS.Thisperformanceis
+8Table2:Ablationsstudiesonmodelsizes.The Table3: Ablationsstudiesonmodelattention
+followingexperimentsarerunwith8GPUs. architecture. TheGSOexperimentsbeloware
+runwith32GPUsandasmallbatchsize. The
+RealEstate10k(Zhouetal.,2018) othersarerunwith64GPUs.
+PSNR↑ SSIM↑ LPIPS↓
+GSO(Downsetal.,2022)
+OursEncoder-Decoder(6+18) 28.32 0.888 0.117 PSNR↑ SSIM↑ LPIPS↓
+OursEncoder-Decoder(12+12) 27.39 0.869 0.137
+OursEncoder-Decoder(18+6) 26.80 0.855 0.152 OursEncoder-Decoder 28.07 0.920 0.053
+Oursw/olatents’self-updating 26.61 0.903 0.061
+OursDecoder-Only(24layers) 28.89 0.894 0.108
+OursDecoder-Only(18layers) 28.77 0.892 0.109 RealEstate10k(Zhouetal.,2018)
+OursDecoder-Only(12layers) 28.61 0.890 0.111 PSNR↑ SSIM↑ LPIPS↓
+OursDecoder-Only(6layers) 27.62 0.869 0.129 OursDecoder-Only 29.67 0.906 0.098
+Oursw/per-patchprediction 28.98 0.897 0.103
+evenbetterthanGS-LRMwith24transformerlayerstrainedon64GPUs. Theseresultsshowthe
+promisingpotentialofLVSMforacademicresearch.
+4.4 ABLATIONSTUDIES
+ModelSize. AsshowninTable2,weablatethemodelsizedesignsofbothLVSMvariants. For
+theencoder-decoderLVSM,wemaintainthetotalnumberoftransformerlayerswhileallocatinga
+differentnumberoflayerstotheencoderanddecoder. Weobservethatusingmoredecoderlayers
+helpstheperformancewhileusingmoreencoderlayersharmstheperformance. Weconjecturethe
+reason is that the encoder uses the latent representation as the compression of input images and
+this compression process is hard to learn from data using more encoder layers, leading to more
+compressionerrors. Thisisaninterestingobservationshowingthatusingtheinductivebiasofthe
+encoderandintermediatelatentrepresentationmaynotbeoptimal.
+Forthedecoder-onlyLVSM,weexperimentwithusingdifferentnumbersoftransformerlayersinthe
+decoder. Theexperimentverifiesthatdecoder-onlyLVSMdemonstratesanincreasingperformance
+whenusingmoretransformerlayers. Thisphenomenonvalidatesthescalabilityofthedecoder-only
+LVSM.Wealsoprovidethedecoder-onlymodelscalingresultsonobject-levelreconstructionin
+Table4ofAppendix,wherethelargermodelsperformrelativelybetter.
+Model Architecture. We evaluate the effectiveness of our design objective, which emphasizes
+minimal inductive bias at the model architecture level. To do this, we replace the self-attention
+transformerlayerswithvariantsthatincorporatehuman-designedpriors.
+Wefirstablatetheimportanceofupdatinglatentrepresentationinthedecoderoftheencoder-decoder
+LVSM.Wedesignavariant,wheretheinputforeachtransformerlayerofthedecoderarethetarget
+tokensandrawlatenttokenspredictedbytheencoder,ratherthantheupdatedlatenttokensoutputted
+fromtheprevioustransformerlayer. Thus,weusefixedlatenttokensinthedecoderwithoutupdating.
+Weperformexperimentsattheobjectlevel. AsshownonthetoppartofTable3,thisvariantshowsa
+degradedperformancewith2dBlessPSNR.Thisresultcanbeexplainedbythatthetransformer
+themselvesisapartofthelatentrepresentation,astheyareusedtoupdatethelatentrepresentationin
+thedecoder.
+Wethenablatetheimportanceofjointpredictionoftargetimagepatchesinthedecoder-onlyLVSM.
+Wedesignavariantwherethecolorsofeachtargetposepatcharepredictedindependently,without
+applyingself-attentionacrossothertargetposepatches. Weachievethisbylettingeachtransformer’s
+layer’skeyandvaluematricesonlyconsistoftheupdatedinputimagetokens,whileboththeupdated
+inputimagetokensandtargetposetokensformthequerymatrices. Asshownonthebottompart
+ofTable3,thisvariantshowsaworseperformancewitha0.7dBPSNRdegradation. Thisresult
+demonstratestheimportanceofusingbothinputandtargettokensasthecontextofeachotherfor
+informationpropagationusingthesimplestfullself-attentiontransformer,inlinewithourphilosophy
+ofreducinginductivebias.
+4.5 DISCUSSIONS
+Zero-shotGeneralizationtoMoreInputViews. WecompareourLVSMwithGS-LRMbytaking
+differentnumbersofinputviewstothetraining. Wereporttheresultsontheobjectlevel. Notethat
+thesemodelsaretrainedonlywith4inputviewsandtestonotherinputviewnumbersinazero-shot
+manner. AsshowninFig.5,ourdecoder-onlyLVSMshowsincreasinglybetterperformancewhen
+9Figure 5: Zero-shot generalization to dif- Figure6: RenderingFPSwithdifferentnum-
+ferent number of input images on the GSO berofinputimages. Werefertorenderingas
+dataset (Downs et al., 2022). We note that all thedecodingprocess,whichsynthesizesnovel
+modelsaretrainedwithjust4inputviews. viewsfromlatenttokensorinputimages.
+using more input views, verifying the scalability of our model design at test time. Our encoder-
+decoderLVSMshowsasimilarperformancepatternwithGS-LRM,i.e.,exhibitingaperformance
+drop when using more than 8 input views. We conjecture the reason is the inductive bias of the
+encoder-decoderdesign,i.e. usingintermediaterepresentationasacompressionofinputinformation,
+limitstheperformance.Inaddition,oursingle-inputresult(inputviewnumber=1)iscompetitiveand
+evenbeatssomeofourbaselinewhichtakes4imagesasinput. Theseperformancepatternsvalidate
+ourdesigntargetofusingminimal3Dinductivebiasforlearningafullydata-drivenrenderingmodel
+andcoherewithourdiscussioninSec.3.2.
+Encoder-Decoder versus Decoder-Only. As we mentioned in Sec. 3, the decoder-only and
+encoder-decoderarchitecturesexhibitdifferenttrade-offsinspeed,quality,andpotential.
+Theencoder-decodermodeltransforms2Dimageinputsintoafixed-lengthsetof1Dlatenttokens,
+whichserveasacompressedrepresentationofthe3Dscene. Thisapproachsimplifiesthedecoder,
+reducingitsmodelsize. Furthermore,duringtherendering/decodingprocess,thedecoderalways
+receivesafixednumberoftokens,regardlessofthenumberofinputimages,ensuringaconsistent
+renderingspeed. Asaresult,thismodeloffersimprovedrenderingefficiency,asshowninFig.6.
+Additionally,theuseof1Dlatenttokensasthelatentrepresentationforthe3Dsceneopensupthe
+possibilityofintegratingthismodelwithgenerativeapproachesfor3Dcontentgenerationonits1D
+latentspace. Nonetheless,thecompressionprocesscanresultininformationloss,asthefixedlatent
+tokenslengthisusuallysmallerthantheoriginalimagetokenslength,whichimposesanupperbound
+onperformance. Thischaracteristicoftheencoder-decoderLVSMmirrorspriorencoder-decoder
+LRMs,whereasourLVSMdoesnothaveanexplicit3Dstructure.
+Incontrast,thedecoder-onlymodellearnsadirectmappingfromtheinputimagetothetargetnovel
+view,showcasingbetterscalability. Forexample,asthenumberofinputimagesincreases,themodel
+canleverageallavailableinformation,resultinginimprovednovelviewsynthesisquality. However,
+thispropertyalsoleadstoalinearincreaseininputimagetokens,causingthecomputationalcostto
+growquadraticallyandlimitingtherenderingspeed.
+SingleInputImage. Asshowninourprojectpage,Fig.1andFig.5,weobservethatourLVSM
+alsoworkswithasingleinputviewformanycases,eventhoughthemodelistrainedwithmulti-view
+imagesduringtraining. ThisobservationshowsthecapabilityofLVSMtounderstandthe3Dworld,
+e.g. understandingdepth,ratherthanperformingpurelypixel-levelviewinterpolation.
+5 CONCLUSIONS
+Inthiswork,wepresentedtheLargeViewSynthesisModel(LVSM),atransformer-basedapproach
+designed to minimize 3D inductive biases for scalable and generalizable novel view synthesis.
+Ourtwoarchitectures—encoder-decoderanddecoder-only—bypassphysical-rendering-based3D
+representationslikeNeRFand3DGaussianSplatting,allowingthemodeltolearnpriorsdirectly
+fromdata,leadingtomoreflexibleandscalablenovelviewsynthesis. Thedecoder-onlyLVSM,with
+itsminimalinductivebiases,excelsinscalability,zero-shotgeneralization,andrenderingquality,
+while the encoder-decoder LVSM achieves faster inference due to its fully learned latent scene
+representation. Bothmodelsdemonstratesuperiorperformanceacrossdiversebenchmarksandmark
+animportantsteptowardsgeneralandscalablenovelviewsynthesisincomplex,real-worldscenarios.
+10Acknowledgements. WethankKalyanSunkavalliforhelpfuldiscussionsandsupport. Thiswork
+was done when Haian Jin, Hanwen Jiang, and Tianyuan Zhang were research interns at Adobe
+Research. This work was also partly funded by the National Science Foundation (IIS-2211259,
+IIS-2212084).
+REFERENCES
+JonathanT.Barron,BenMildenhall,MatthewTancik,PeterHedman,RicardoMartin-Brualla,and
+PratulP.Srinivasan. Mip-nerf: Amultiscalerepresentationforanti-aliasingneuralradiancefields.
+ICCV,2021.
+JonathanT.Barron,BenMildenhall,DorVerbin,PratulP.Srinivasan,andPeterHedman. Zip-nerf:
+Anti-aliasedgrid-basedneuralradiancefields. ICCV,2023.
+JakeBruce,MichaelDDennis,AshleyEdwards,JackParker-Holder,YugeShi,EdwardHughes,
+Matthew Lai, Aditi Mavalankar, Richie Steigerwald, Chris Apps, et al. Genie: Generative
+interactiveenvironments. InForty-firstInternationalConferenceonMachineLearning,2024.
+EricRChan,ConnorZLin,MatthewAChan,KokiNagano,BoxiaoPan,ShaliniDeMello,Orazio
+Gallo,LeonidasJGuibas,JonathanTremblay,SamehKhamis,etal. Efficientgeometry-aware3d
+generativeadversarialnetworks. InProceedingsoftheIEEE/CVFconferenceoncomputervision
+andpatternrecognition,pp.16123–16133,2022.
+DavidCharatan,SizheLesterLi,AndreaTagliasacchi,andVincentSitzmann. pixelsplat: 3dgaussian
+splats from image pairs for scalable generalizable 3d reconstruction. In Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.19457–19467,2024.
+GauravChaurasia,SylvainDuchene,OlgaSorkine-Hornung,andGeorgeDrettakis. Depthsynthesis
+andlocalwarpsforplausibleimage-basednavigation. ACMtransactionsongraphics(TOG),32
+(3):1–12,2013.
+AnpeiChen,ZexiangXu,FuqiangZhao,XiaoshuaiZhang,FanboXiang,JingyiYu,andHaoSu.
+Mvsnerf: Fast generalizable radiance field reconstruction from multi-view stereo, 2021. URL
+https://arxiv.org/abs/2103.15595.
+AnpeiChen,ZexiangXu,AndreasGeiger,JingyiYu,andHaoSu. Tensorf: Tensorialradiancefields.
+InEuropeanconferenceoncomputervision,pp.333–350.Springer,2022.
+AnpeiChen,ZexiangXu,XinyueWei,SiyuTang,HaoSu,andAndreasGeiger. Factorfields: A
+unifiedframeworkforneuralfieldsandbeyond. arXivpreprintarXiv:2302.01226,2023.
+Tianqi Chen, Bing Xu, Chiyuan Zhang, and Carlos Guestrin. Training deep nets with sublinear
+memorycost. arXivpreprintarXiv:1604.06174,2016.
+YuedongChen,HaofeiXu,ChuanxiaZheng,BohanZhuang,MarcPollefeys,AndreasGeiger,Tat-Jen
+Cham,andJianfeiCai. Mvsplat: Efficient3dgaussiansplattingfromsparsemulti-viewimages,
+2024. URLhttps://arxiv.org/abs/2403.14627.
+InchangChoi,OrazioGallo,AlejandroTroccoli,MinHKim,andJanKautz. Extremeviewsynthesis.
+InProceedingsoftheIEEE/CVFInternationalConferenceonComputerVision,pp.7781–7790,
+2019.
+Jasmine Collins, Shubham Goel, Kenan Deng, Achleshwar Luthra, Leon Xu, Erhan Gundogdu,
+XiZhang,TomasF.YagoVicente,ThomasDideriksen,HimanshuArora,MatthieuGuillaumin,
+andJitendraMalik. Abo: Datasetandbenchmarksforreal-world3dobjectunderstanding,2022a.
+URLhttps://arxiv.org/abs/2110.06199.
+Jasmine Collins, Shubham Goel, Kenan Deng, Achleshwar Luthra, Leon Xu, Erhan Gundogdu,
+XiZhang,TomasFYagoVicente,ThomasDideriksen,HimanshuArora,etal. Abo: Datasetand
+benchmarksforreal-world3dobjectunderstanding. InProceedingsoftheIEEE/CVFconference
+oncomputervisionandpatternrecognition,pp.21126–21136,2022b.
+11Tri Dao. Flashattention-2: Faster attention with better parallelism and work partitioning. arXiv
+preprintarXiv:2307.08691,2023.
+AbeDavis,MarcLevoy,andFredoDurand. Unstructuredlightfields. InComputerGraphicsForum,
+pp.305–314,2012.
+PaulE.Debevec, CamilloJoseTaylor, andJitendraMalik. Modelingandrenderingarchitecture
+fromphotographs: Ahybridgeometry-andimage-basedapproach. SeminalGraphicsPapers:
+PushingtheBoundaries,Volume2,1996. URLhttps://api.semanticscholar.org/
+CorpusID:2609415.
+MattDeitke,DustinSchwenk,JordiSalvador,LucaWeihs,OscarMichel,EliVanderBilt,Ludwig
+Schmidt,KianaEhsani,AniruddhaKembhavi,andAliFarhadi. Objaverse: Auniverseofanno-
+tated3dobjects. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pp.13142–13153,2023.
+JacobDevlin. Bert:Pre-trainingofdeepbidirectionaltransformersforlanguageunderstanding. arXiv
+preprintarXiv:1810.04805,2018.
+AlexeyDosovitskiy. Animageisworth16x16words: Transformersforimagerecognitionatscale.
+arXivpreprintarXiv:2010.11929,2020.
+LauraDowns,AnthonyFrancis,NateKoenig,BrandonKinman,RyanHickman,KristaReymann,
+ThomasB.McHugh,andVincentVanhoucke. Googlescannedobjects: Ahigh-qualitydatasetof
+3dscannedhouseholditems,2022. URLhttps://arxiv.org/abs/2204.11918.
+YilunDu,CameronSmith,AyushTewari,andVincentSitzmann. Learningtorendernovelviews
+fromwide-baselinestereopairs,2023. URLhttps://arxiv.org/abs/2304.08463.
+PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,Yam
+Levi,DominikLorenz,AxelSauer,FredericBoesel,etal. Scalingrectifiedflowtransformersfor
+high-resolutionimagesynthesis. InForty-firstInternationalConferenceonMachineLearning,
+2024.
+WanquanFeng,JinLi,HongruiCai,XiaonanLuo,andJuyongZhang. Neuralpoints: Pointcloud
+representation with neural fields for arbitrary upsampling. In Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pp.18633–18642,2022.
+Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong Chen, Benjamin Recht, and Angjoo
+Kanazawa. Plenoxels: Radiancefieldswithoutneuralnetworks. InProceedingsoftheIEEE/CVF
+conferenceoncomputervisionandpatternrecognition,pp.5501–5510,2022.
+Steven J. Gortler, Radek Grzeszczuk, Richard Szeliski, and Michael F. Cohen. The lumigraph.
+Proceedingsofthe23rdannualconferenceonComputergraphicsandinteractivetechniques,1996.
+URLhttps://api.semanticscholar.org/CorpusID:2036193.
+PeterHedman,JulienPhilip,TruePrice,Jan-MichaelFrahm,GeorgeDrettakis,andGabrielBrostow.
+Deepblendingforfree-viewpointimage-basedrendering. ACMTransactionsonGraphics(ToG),
+37(6):1–15,2018.
+PeterHedman,PratulPSrinivasan,BenMildenhall,JonathanTBarron,andPaulDebevec. Baking
+neuralradiancefieldsforreal-timeviewsynthesis. InProceedingsoftheIEEE/CVFinternational
+conferenceoncomputervision,pp.5875–5884,2021.
+Benno Heigl, Reinhard Koch, Marc Pollefeys, Joachim Denzler, and Luc Van Gool. Plenoptic
+modelingandrenderingfromimagesequencestakenbyahand-heldcamera. InMustererkennung
+1999: 21.DAGM-SymposiumBonn,15.–17.September1999,pp.94–101.Springer,1999.
+AlexHenry,PrudhviRajDachapally,ShubhamPawar,andYuxuanChen. Query-keynormalization
+fortransformers. arXivpreprintarXiv:2010.04245,2020.
+YicongHong,KaiZhang,JiuxiangGu,SaiBi,YangZhou,DifanLiu,FengLiu,KalyanSunkavalli,
+TrungBui,andHaoTan. Lrm: Largereconstructionmodelforsingleimageto3d,2024. URL
+https://arxiv.org/abs/2311.04400.
+12AndrewJaegle,SebastianBorgeaud,Jean-BaptisteAlayrac,CarlDoersch,CatalinIonescu,David
+Ding, Skanda Koppula, Daniel Zoran, Andrew Brock, Evan Shelhamer, et al. Perceiver io: A
+generalarchitectureforstructuredinputs&outputs. arXivpreprintarXiv:2107.14795,2021.
+MichalJancosekandTomasPajdla. Multi-viewreconstructionpreservingweakly-supportedsurfaces.
+InCVPR2011,pp.3121–3128.IEEE,2011.
+HanwenJiang,ZhenyuJiang,YueZhao,andQixingHuang. Leap: Liberatesparse-view3dmodeling
+fromcameraposes. arXivpreprintarXiv:2310.01410,2023.
+HanwenJiang,ZhenyuJiang,KristenGrauman,andYukeZhu. Few-viewobjectreconstructionwith
+unknowncategoriesandcameraposes. In2024InternationalConferenceon3DVision(3DV),pp.
+31–41.IEEE,2024.
+MohammadMahdiJohari,YannLepoittevin,andFrançoisFleuret. Geonerf: Generalizingnerfwith
+geometrypriors,2022. URLhttps://arxiv.org/abs/2111.13539.
+JustinJohnson,AlexandreAlahi,andLiFei-Fei. Perceptuallossesforreal-timestyletransferand
+super-resolution. InComputerVision–ECCV2016: 14thEuropeanConference,Amsterdam,The
+Netherlands,October11-14,2016,Proceedings,PartII14,pp.694–711.Springer,2016.
+BernhardKerbl,GeorgiosKopanas,ThomasLeimkühler,andGeorgeDrettakis. 3dgaussiansplatting
+forreal-timeradiancefieldrendering. ACMTransactionsonGraphics,42(4),July2023. URL
+https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/.
+DiederikPKingma. Adam: Amethodforstochasticoptimization. arXivpreprintarXiv:1412.6980,
+2014.
+BenjaminLefaudeux,FranciscoMassa,DianaLiskovich,WenhanXiong,VittorioCaggiano,Sean
+Naren,MinXu,JieruHu,MartaTintore,SusanZhang,etal. xformers: Amodularandhackable
+transformermodellinglibrary,2022.
+Marc Levoy and Pat Hanrahan. Light field rendering. Proceedings of the 23rd annual con-
+ference on Computer graphics and interactive techniques, 1996. URL https://api.
+semanticscholar.org/CorpusID:1363510.
+Jiahao Li, Hao Tan, Kai Zhang, Zexiang Xu, Fujun Luan, Yinghao Xu, Yicong Hong, Kalyan
+Sunkavalli,GregShakhnarovich,andSaiBi.Instant3d:Fasttext-to-3dwithsparse-viewgeneration
+andlargereconstructionmodel,2023. URLhttps://arxiv.org/abs/2311.06214.
+LingjieLiu,JiataoGu,KyawZawLin,Tat-SengChua,andChristianTheobalt. Neuralsparsevoxel
+fields. AdvancesinNeuralInformationProcessingSystems,33:15651–15663,2020.
+YuanLiu,SidaPeng,LingjieLiu,QianqianWang,PengWang,ChristianTheobalt,XiaoweiZhou,
+andWenpingWang. Neuralraysforocclusion-awareimage-basedrendering. InProceedingsof
+theIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.7824–7833,2022.
+RicardoMartin-Brualla,NohaRadwan,MehdiSMSajjadi,JonathanTBarron,AlexeyDosovitskiy,
+andDanielDuckworth.Nerfinthewild:Neuralradiancefieldsforunconstrainedphotocollections.
+InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,pp.7210–
+7219,2021.
+BenMildenhall,PratulP.Srinivasan,MatthewTancik,JonathanT.Barron,RaviRamamoorthi,and
+Ren Ng. Nerf: Representing scenes as neural radiance fields for view synthesis, 2020. URL
+https://arxiv.org/abs/2003.08934.
+Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. Instant neural graphics
+primitiveswithamultiresolutionhashencoding. ACMTransactionsonGraphics,41(4):1–15,July
+2022. ISSN1557-7368. doi: 10.1145/3528223.3530127. URLhttp://dx.doi.org/10.
+1145/3528223.3530127.
+MichaelNiemeyer,JonathanTBarron,BenMildenhall,MehdiSMSajjadi,AndreasGeiger,and
+NohaRadwan. Regnerf: Regularizingneuralradiancefieldsforviewsynthesisfromsparseinputs.
+InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.
+5480–5490,2022.
+13EricPennerandLiZhang. Soft3dreconstructionforviewsynthesis. ACMTransactionsonGraphics
+(TOG),36(6):1–11,2017.
+JuliusPlucker. Xvii.onanewgeometryofspace. PhilosophicalTransactionsoftheRoyalSocietyof
+London,pp.725–791,1865.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal. Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+Christian Reiser, Songyou Peng, Yiyi Liao, and Andreas Geiger. Kilonerf: Speeding up neural
+radiance fields with thousands of tiny mlps. In Proceedings of the IEEE/CVF international
+conferenceoncomputervision,pp.14335–14345,2021.
+ChristianReiser,RickSzeliski,DorVerbin,PratulSrinivasan,BenMildenhall,AndreasGeiger,Jon
+Barron,andPeterHedman. Merf: Memory-efficientradiancefieldsforreal-timeviewsynthesisin
+unboundedscenes. ACMTransactionsonGraphics(TOG),42(4):1–12,2023.
+RobinRombach,PatrickEsser,andBjörnOmmer. Geometry-freeviewsynthesis: Transformersand
+no3dpriors. InProceedingsoftheIEEE/CVFInternationalConferenceonComputerVision,pp.
+14356–14366,2021.
+MehdiSMSajjadi,HenningMeyer,EtiennePot,UrsBergmann,KlausGreff,NohaRadwan,Suhani
+Vora,MarioLucˇic´,DanielDuckworth,AlexeyDosovitskiy,etal. Scenerepresentationtransformer:
+Geometry-freenovelviewsynthesisthroughset-latentscenerepresentations. InProceedingsof
+theIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.6229–6238,2022.
+SudiptaSinha,DrewSteedly,andRickSzeliski. Piecewiseplanarstereoforimage-basedrendering.
+In2009InternationalConferenceonComputerVision,pp.1881–1888,2009.
+VincentSitzmann,SemonRezchikov,BillFreeman,JoshTenenbaum,andFredoDurand. Lightfield
+networks: Neuralscene representations withsingle-evaluation rendering. Advancesin Neural
+InformationProcessingSystems,34:19313–19325,2021.
+MohammedSuhail,CarlosEsteves,LeonidSigal,andAmeeshMakadia. Generalizablepatch-based
+neuralrendering. InEuropeanConferenceonComputerVision,pp.156–174.Springer,2022a.
+MohammedSuhail,CarlosEsteves,LeonidSigal,andAmeeshMakadia. Lightfieldneuralrendering,
+2022b. URLhttps://arxiv.org/abs/2112.09687.
+ChengSun,MinSun,andHwann-TzongChen. Directvoxelgridoptimization: Super-fastconver-
+genceforradiancefieldsreconstruction. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pp.5459–5469,2022.
+Jiaxiang Tang, Zhaoxi Chen, Xiaokang Chen, Tengfei Wang, Gang Zeng, and Ziwei Liu. Lgm:
+Large multi-view gaussian model for high-resolution 3d content creation. arXiv preprint
+arXiv:2402.05054,2024.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.Gomez,Lukasz
+Kaiser, andIlliaPolosukhin. Attentionisallyouneed, 2023. URLhttps://arxiv.org/
+abs/1706.03762.
+DorVerbin,PeterHedman,BenMildenhall,ToddZickler,JonathanT.Barron,andPratulP.Srinivasan.
+Ref-NeRF:Structuredview-dependentappearanceforneuralradiancefields. CVPR,2022.
+PengWang,HaoTan,SaiBi,YinghaoXu,FujunLuan,KalyanSunkavalli,WenpingWang,Zexiang
+Xu, and Kai Zhang. Pf-lrm: Pose-free large reconstruction model for joint pose and shape
+prediction. arXivpreprintarXiv:2311.12024,2023.
+QianqianWang,ZhichengWang,KyleGenova,PratulSrinivasan,HowardZhou,JonathanT.Barron,
+RicardoMartin-Brualla,NoahSnavely,andThomasFunkhouser. Ibrnet: Learningmulti-view
+image-basedrendering,2021a. URLhttps://arxiv.org/abs/2102.13090.
+Zirui Wang, Shangzhe Wu, Weidi Xie, Min Chen, and Victor Adrian Prisacariu. Nerf–: Neural
+radiancefieldswithoutknowncameraparameters. arXivpreprintarXiv:2102.07064,2021b.
+14XinyueWei,KaiZhang,SaiBi,HaoTan,FujunLuan,ValentinDeschaintre,KalyanSunkavalli,Hao
+Su,andZexiangXu. Meshlrm: Largereconstructionmodelforhigh-qualitymesh. arXivpreprint
+arXiv:2404.12385,2024.
+DesaiXie,SaiBi,ZhixinShu,KaiZhang,ZexiangXu,YiZhou,SörenPirk,ArieKaufman,Xin
+Sun,andHaoTan. Lrm-zero: Traininglargereconstructionmodelswithsynthesizeddata. arXiv
+preprintarXiv:2406.09371,2024.
+QiangengXu,ZexiangXu,JulienPhilip,SaiBi,ZhixinShu,KalyanSunkavalli,andUlrichNeumann.
+Point-nerf: Point-basedneuralradiancefields. InProceedingsoftheIEEE/CVFconferenceon
+computervisionandpatternrecognition,pp.5438–5448,2022.
+YinghaoXu, HaoTan, FujunLuan, SaiBi, PengWang, JiahaoLi, ZifanShi, KalyanSunkavalli,
+GordonWetzstein,ZexiangXu,andKaiZhang. Dmv3d: Denoisingmulti-viewdiffusionusing3d
+largereconstructionmodel,2023.
+AlexYu,VickieYe,MatthewTancik,andAngjooKanazawa. pixelnerf: Neuralradiancefieldsfrom
+oneorfewimages,2021. URLhttps://arxiv.org/abs/2012.02190.
+ZehaoYu,AnpeiChen,BinbinHuang,TorstenSattler,andAndreasGeiger. Mip-splatting: Alias-free
+3d gaussian splatting. In Proceedings of the IEEE/CVF Conference on Computer Vision and
+PatternRecognition,pp.19447–19456,2024.
+KaiZhang,SaiBi,HaoTan,YuanboXiangli,NanxuanZhao,KalyanSunkavalli,andZexiangXu.
+Gs-lrm: Largereconstructionmodelfor3dgaussiansplatting,2024. URLhttps://arxiv.
+org/abs/2404.19702.
+QiangZhang,Seung-HwanBaek,SzymonRusinkiewicz,andFelixHeide. Differentiablepoint-based
+radiancefieldsforefficientviewsynthesis. InSIGGRAPHAsia2022ConferencePapers,pp.1–12,
+2022.
+TinghuiZhou,ShubhamTulsiani,WeilunSun,JitendraMalik,andAlexeiAEfros. Viewsynthesis
+byappearanceflow. InComputerVision–ECCV2016: 14thEuropeanConference,Amsterdam,
+TheNetherlands,October11–14,2016,Proceedings,PartIV14,pp.286–301.Springer,2016.
+TinghuiZhou,RichardTucker,JohnFlynn,GrahamFyffe,andNoahSnavely. Stereomagnification:
+Learningviewsynthesisusingmultiplaneimages. InSIGGRAPH,2018.
+15A APPENDIX
+Weincludeadditionalresults,ablations,andmodeldetails.
+A.1 ADDITIONALIMPLEMENTATIONDETAILS
+Wedonotusebiastermsinourmodel,forbothLinearandLayerNormlayers.Weinitializethemodel
+weightswithanormaldistributionofzero-meanandstandarddeviationof0.02/(2∗(idx+1))∗∗0.5,
+whereidxmeanstransformlayerindex.
+WetrainourmodelwithAdamWoptimizer(Kingma,2014). Theβ ,andβ aresetto0.9and0.95
+1 2
+respectively,followingGS-LRM.Weuseaweightdecayof0.05onallparametersexcepttheweights
+ofLayerNormlayers.
+A.2 DISCUSSIONONZERO-SHOTGENERALIZATION
+WenoticethatLVSMhastheproblemofgeneralizing(zero-shot)toinputimageswithaspectratios
+thataredifferentfromtrainingdata,e.g.,trainingwith512×512imagesandinferringon512×960
+inputimages. Weobservehigh-qualitynovelviewsynthesisqualityatthecenterofsynthesizednovel
+viewsbutalsoobserveblurredregionsatthehorizontalboundariesthatexceedthetrainingimage
+aspectratio. Weconjecturethereasonisthatourmodelistrainedwithcenter-croppedimagesinour
+implementation. Indetail,asthePlückerraywillhaveasmallerdensityattheboundaryofthelong
+sideofimages,andourmodelisnottrainedwiththesedata,itcannotgeneralizewelltothem.
+A.3 ADDITIONALVISUALRESULTS
+WeshowthevisualizationofLVSMattheobjectlevelwith256resolutioninFig.7. Consistentwith
+thefindingsoftheexperimentwith512resolution(Fig.3),LVSMperformsbetterthanthebaselines
+ontexturedetails,specularmaterial,andconcavegeometry.
+Input images LGM GS-LRM Ours Encoder-Decoder Ours Decoder-Only Ground truth
+Figure7: Object-levelvisualcomparisonat256resolution. Comparingwiththetwobaselines:
+LGM(Tangetal.,2024)andGS-LRM(Res-256)(Zhangetal.,2024),bothourEncoder-Decoderand
+Decoder-Onlymodelshavefewerfloaterartifacts(lastexample),andcangeneratemoreaccurate
+view-dependenteffects(thirdexample). OurDecoder-Onlymodelcanbetterpreservethetexture
+details(firsttwoexamples).
+16Table 4: Model size ablation studies on the
+object-levelreconstruction. Thefollowingex-
+perimentsarerunwith8GPUs.
+GSO(Downsetal.,2022)
+PSNR↑ SSIM↑ LPIPS↓
+OursDecoder-Only(24layers) 27.04 0.910 0.055
+OursDecoder-Only(18layers) 26.81 0.907 0.057
+OursDecoder-Only(12layers) 26.11 0.896 0.065
+OursDecoder-Only(6layers) 24.15 0.865 0.092
+A.4 ADDITIONALABLATIONRESULTS
+Additionally,weablateourdecoder-onlyLVSMontheobject-leveldataset. AsshowninTable4,
+decoder-onlyLVSMdemonstratesbetterperformancewithmoretransformerlayers,similartoour
+observationinTable2. Interestingly,wefindthatdecoder-onlyLVSMscalesbetter,i.e.,exhibits
+moreperformancegainwithmoretransformerlayers,comparedwithscene-levelresultsinTable2.
+Weconjecturethereasonisthattheinputviewsoftheobject-leveldatahavelarger-baselinecameras,
+in contrast with smaller-baseline cameras in the scene-level dataset RealEstate10K (Zhou et al.,
+2018). Thus,thenovelviewsynthesistaskonthescene-levelRealEstate10Kdatasetiseasierandthe
+performancesaturatesbeyondthecertainnumberoftransformerlayers.
+17

@@ -1,0 +1,885 @@
+Preprint. Underreview
+BREAKING THE MEMORY BARRIER: NEAR INFINITE
+BATCH SIZE SCALING FOR CONTRASTIVE LOSS
+ZesenCheng2∗,HangZhang1,2∗(cid:0),KehanLi2∗,SicongLeng2,3,ZhiqiangHu2,
+FeiWu1,DeliZhao2,XinLi2(cid:0),LidongBing2
+1ZhejiangUniversity,2DAMOAcademy,AlibabaGroup,3NanyangTechnologicalUniversity,
+*EqualContribution (cid:0)CorrespondingAuthor
+https://github.com/DAMO-NLP-SG/Inf-CLIP
+CLIP OpenCLIP Inf-CL (Ours)
+130
+104
+100 103
+A800 Bottleneck
+80
+78× 102 A800 Bottleneck
+60
+40 101 281×
+20 100
+0
+64128 256 512 1024 1 8 16 32 64 128
+Batch Size (k) Number of GPUs
+Figure1: GPUmemoryusagecomparisonbetweenInf-CLandpreviousmethods(CLIP,Open-
+CLIP).ThedashedlinemarksthecommonGPUmemorylimit. Memorycostsexceedingthebot-
+tleneckof80GA800areestimatedbycurvefitting. ❶Left: With8×A800,CLIPandOpenCLIP’s
+memoryconsumptionincreasesquadratically,whileInf-CLachieveslineargrowth,reducingmem-
+orycostsby78×atabatchsizeof256k. ❷Right: Atabatchsizeof1024k,evenwith128GPUs,
+previousmethodsexceedmemorylimits,whereasInf-CLreducesmemorydemandby281×.
+ABSTRACT
+Contrastivelossisapowerfulapproachforrepresentationlearning, wherelarger
+batch sizes enhance performance by providing more negative samples to better
+distinguish between similar and dissimilar data. However, scaling batch sizes is
+constrainedbythequadraticgrowthinGPUmemoryconsumption,primarilydue
+to the full instantiation of the similarity matrix. To address this, we propose a
+tile-based computation strategy that partitions the contrastive loss calculation to
+arbitrarysmallblocks,avoidingfullmaterializationofthesimilaritymatrix. Fur-
+thermore, we introduce a multi-level tiling strategy to leverage the hierarchical
+structureofdistributedsystems,employingring-basedcommunicationattheGPU
+leveltooptimizesynchronizationandfusedkernelsattheCUDAcoreleveltore-
+duce I/O overhead. Experimental results show that the proposed method scales
+batch sizes to unprecedented levels. For instance, it enables contrastive training
+of a CLIP-ViT-L/14 model with a batch size of 4M or 12M using 8 or 32 A800
+80GB without sacrificing any accuracy. Compared to SOTA memory-efficient
+solutions,itachievesatwo-order-of-magnitudereductioninmemorywhilemain-
+tainingcomparablespeed. Thecodewillbemadepubliclyavailable.
+1 INTRODUCTION
+Contrastivelearningservesasafoundationaltechniqueacrossvariousapplications, suchasmulti-
+modality retrieval (Radford et al., 2021; Luo et al., 2022; Girdhar et al., 2023), self-supervised
+representation learning (Chen et al., 2020a; He et al., 2020; Gao et al., 2022), and dense text re-
+trieval(Wangetal.,2022). Itlearnsanembeddingspaceinwhichsimilardatapairsstayclosewhile
+1
+4202
+tcO
+22
+]VC.sc[
+1v34271.0142:viXra
+)BG(
+yromeM
+UPG
+)BG(
+yromeM
+UPGPreprint. Underreview
+(a) Vanilla Implementation Aggregate across all devices (b) Ours Exchange between devices
+AA AC AC AaC AaCt aCt at Cattat EnT ce ox dt er Cross Entropy LSE Loss
+··· ··· ···
+Image
+Encoder
+All Similarity 𝓞(𝒃𝟐) Block Similarity & LSE 𝓞(𝒃/𝒏𝟐)
+8.26GB Memory Usage (ViT-B/16, 64k) 66.21GB In-memory local variables Memory of a device
+Model forward/backward Loss forward/backward Unloaded local variables Memory of all devices
+Figure2:(a)Vanillaimplementationofcontrastivelossgathersfeaturestoalldevicestocalculate
+allsimilaritysimultaneously,wherethesimilaritywithsquaredcomplexityarerepeatedlystoredin
+all devices, causing huge memory costs for loss calculation when batch size increases. (b) Our
+Inf-CLsignificantdecreasesthememorycostbyserialanddistributedtile-wisecomputation.
+dissimilaronesarefarapart(Hadselletal.,2006;Oordetal.,2018;Weng,2021). Largebatchsizes
+are critical to the success of contrastive learning due to their reliance on in-batch negatives (Chen
+et al., 2020a; Radford et al., 2021). Specifically, larger batches provide a diverse set of negative
+samples,enhancingthemodel’sabilitytolearndiscriminativerepresentations(Phametal.,2021).
+Despite the above benefits, scaling batch size in contrastive learning is severely limited by GPU
+memory.Thememoryneededforcomputingandstoringimage-textsimilaritymatrices(Figure2(a))
+growsquadraticallywithbatchsize, makingfurtherscalingimpracticalandlimitingpotentialper-
+formance gains, even with advanced hardware. Several methods have been proposed to mitigate
+memory limitations when scaling batch sizes in contrastive learning. Gradient-Cache (Gao et al.,
+2021)reducesmemoryusagebydecouplingmodelandlosscomputations,butthememorycostof
+thelossstillposesasignificantbottleneck. OpenCLIP(Ilharcoetal.,2021)andDisCo-CLIP(Chen
+etal.,2023)enhanceefficiencybydistributingcontrastivelosscomputationacrossnGPUs,reduc-
+ingmemoryconsumptionbyafactorofn. Despiteadvancesinmemory-efficienttechniques,most
+studies are limited to a batch size of 128k, restricting the potential of contrastive learning and the
+scalingdemandsofmodernmodelsanddatasets(Chenetal.,2022;Kaplanetal.,2020).
+In this paper, we introduce Inf-CL, a novel approach to mitigate the quadratic memory cost in
+contrastivelearning, whichiscausedbythefullinstantiationofthesimilaritymatrixforlog-sum-
+exp(LSE)computation. Insteadofstoringtheentirematrix,Inf-CLpartitionstheLSEcalculation
+intosmaller,sequentiallycomputedtiles,leveragingthecumulativepropertyofLSE.Thisconfines
+memory usage to the tile size and the number of parallel tiles, allowing for a trade-off between
+memory and computational efficiency. To enhance practical efficiency, we propose a multi-level
+tiling strategy. At a coarse-grained level, image and text batches are distributed across multiple
+GPUs,witheachGPUperformingserialLSEcomputationsonmultiplerows.Ascomputationspro-
+ceed,asynchronouscolumn-wisedataexchangeminimizescommunicationoverhead,asillustrated
+inFigure2(b). Atafine-grainedlevel,row-wisecomputationsareparallelizedacrossCUDAcores
+withineachGPU,consolidatingiterationsintoasinglekerneltoreduceI/Ooverhead.Theoretically,
+Inf-CL can compute contrastive loss with nearly infinite batch sizes using a small tile size, albeit
+with reducedspeed. The multi-level tilingstrategy is crucial to achievingpractical scalability and
+efficiency,balancingmemoryreductionwithcomputationspeed.
+We evaluate Inf-CL on the image-text contrastive learning task. As shown in Figure 1, Inf-CL
+reduces space complexity from quadratic (e.g., O(b2) for CLIP, O(b2/n) for OpenCLIP) to lin-
+ear(O(b/n2)forInf-CL),wherebandnarethebatchsizeandthenumberofGPUs.Thissubstantial
+reductioninmemoryusageallowsefficienttrainingwithlargebatchsizes. Forinstance,traininga
+ViT-L/14CLIPmodelwithabatchsizeover10Mon32A800GPUs(80GBeach)requiresonly1.44
+GBofmemoryperGPU—overa30×improvementoverpreviousmethods.Moreover,Inf-CLmain-
+tainsprecisionconsistentwithexistingapproaches. Intermsofcomputationtime,Inf-CLmatches
+theperformanceofpriormethods,takingapproximately59hourstoprocessa64kbatchsizeon8
+A800GPUs. Thetimecostscalesnearlylinearlywithbatchsize, asdemonstratedbyabatchsize
+increasefrom64kto256kresultinginaroughly4×growthintrainingtime(220.3/49.4≈4).
+2
+secived
+lla
+ssorca
+etagerggA
+secived
+ot
+etubirtsiDPreprint. Underreview
+Insummary,ourcontributionsinclude:
+• We propose a tile-based contrastive loss implementation that iteratively accumulates the
+LSEterm, removingtheneedtoinstantiatethefullsimilaritymatrixandsignificantlyre-
+ducingmemoryoverhead. Thisapproachtheoreticallyallowstrainingwithnearlyinfinite
+batchsizesusingsufficientlysmalltiles.
+• Weproposeamulti-leveltilingstrategyforadistributedtrainingsystem,whichreasonably
+leveragesparallelismtoachieveabalancebetweenmemoryandcomputationalefficiency.
+• OurexperimentsdemonstratethatInf-CLscalesbatchsizestounprecedentedlevels(e.g.,
+12MforCLIP-ViT-L/14on32A80080GBGPUs)whilemaintainingaccuracyandcom-
+parabletrainingspeedtostate-of-the-artmethods.
+2 PRELIMINARIES
+2.1 DISTRIBUTEDTRAININGSYSTEM
+Cross-GPU Communication: For scaling batch size, training across multiple GPUs is crucial to
+handle memory and computational demands. However, communication overhead between GPUs
+can limit performance. Techniques like hierarchical all-reduce and ring-based communication al-
+leviatesuchoverheadbyoptimizingsynchronizationbetweenGPUs(Liuetal.,2023). Blockwise
+parallelism,asemployedinmethodslikeringattention,furtherimprovesefficiencybyoverlapping
+computationandcommunication.
+GPU Memory and Execution: The performance of modern deep learning models relies heavily
+on hardware resources, particularly GPU memory and execution capabilities. GPUs, like A100s,
+typicallyhavetwodifferenttypesofmemory: HBM(HighBandwidthMemory)andSRAM(Static
+RandomAccessMemory). HBMservesastheprimarymemorywithacapacityofupto80GB.In
+contrast, SRAM is much smaller (usually measured in megabytes) but offers a significantly faster
+accessspeed,actingasavitalcacheforfrequentlyaccesseddataandenablingrapidcomputations.
+Techniques like FlashAttention (Dao et al., 2022) show that fine-grained control over the memory
+accessofHBMandthefusetheoperationscanachievefastertrainingandlessmemoryusage.
+2.2 VANILLAIMPLEMENTATIONOFCONTRASTIVELOSS
+Incontrastivelearning,theobjectiveistolearnanembeddingspacewheresimilarsamples(positive
+pairs) are pulled closer, while dissimilar samples (negative pairs) are pushed away. A typical im-
+plementation, exemplifiedbyCLIP(Radfordetal.,2021), isdepictedinFigure2. Theimageand
+textencodersaretrainedwithcontrastivelossafterextractingfeatures. Forbrevity,weonlydiscuss
+image-to-textcontrastivelossasanexampleinthefollowingsections,sincetheimplementationof
+text-to-image loss is symmetric. Specifically, given a batch size of b, the in-batch c-dimensional
+visualfeatureI ∈Rb×c,andtextualfeatureT ∈Rb×c,thecontrastivelossisdefinedas
+1(cid:88)b exi,i
+L =− log , (1)
+I b (cid:80)b exi,j
+i=1 j=1
+where x = I ·T is the scaled cosine similarity between the i-th image and j-th text, and x
+i,j i j i,i
+representsthepositivepair. Here,weomittedthetemperaturefactorforsimplicity.
+ThevanillaimplementationfirstcomputesthesimilaritymatrixX ∈ Rb×b = I ·T′ andstoresit
+inhigh-bandwidthmemory(HBM).Afterward,softmaxnormalizationfollowedbythecalculation
+ofnegativelog-likelihoodisappliedtothesimilaritymatrix. ThememoryrequiredtostoreX and
+its normalized results scales as O(b2), which can occupy a substantial amount of GPU memory
+when b is large. Figure 2 gives an example of training ViT-B/16 with a batch size of 64k, using
+model memory optimization techniques such as Gradient Cache (Gao et al., 2021; Pham et al.,
+2021). Ascanbeseen,theGPUmemoryfootprintofthemodelitselfisonly5.24GBwhiletheloss
+calculationstillrequires66GB.Thisindicatesthat,withbatchsizescaling,thememorybottleneck
+duringtrainingliesinthelosscalculation. Althoughlargebatchsizesarenecessaryforimproving
+modelperformance(Saunshietal.,2019;Chenetal.,2022),thetraditionalimplementationstruggles
+tosupportthemduetoexcessivememoryconsumptioninthelosscalculation.
+3Preprint. Underreview
+3 METHOD
+3.1 TILE-WISECONTRASTIVELEARNING
+AsdiscussedinSection2.2,therootcauseofthequadraticmemorygrowthinthevanillaimplemen-
+tationisthefullmaterializationofthesimilaritymatrixX. Toeliminatethememorycost,wefirst
+decomposetheoperationsrelatedtoX fromthelossfunction:
+b b b b b
+1(cid:88) (cid:88) 1(cid:88) 1(cid:88) (cid:88)
+L =− (x −log exi,j)=− x + log exi,j, (2)
+I b i,i b i,i b
+i=1 j=1 i=1 i=1 j=1
+where the spatial complexity of the first part is O(b), and for the second log-sum-exp (LSE) part,
+it is O(b2). Based on this formulation, we introduce a tile-wise contrastive learning method that
+avoidsthefullmaterializationofX byiterativeaccumulationbetweentiles. Thefollowingsections
+provideadetailedformulationoftheforwardandbackwardprocesses.
+Tile-WiseForward.ToreducethedependencyonstoringXentirely,weadoptatile-wiseapproach
+forcalculatingl. Theprocessisshowasbelow:
+ X1,1 ··· X1,nc   l1,1 ··· l1,nc   l1
+
+
+. .
+.
+... . .
+.
+ →
+
+. .
+.
+... . .
+.
+ →
+
+. .
+.
+ =l (3)
+Xnr,1 ··· Xnr,nc lnr,1 ··· lnr,nc lnr
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+TiledcomputationofX MergedseriallyviaEq.4
+where n and n represent the number of tiles along the rows and columns, respectively. The
+r c
+computationproceedsbydividingX intomultipletiles,denotedasXi,j,andthencalculatingthe
+intermediate LSE values li,j = LSE(Xi,j) within each tile. The resulting LSE values from each
+columnoftilesarethenmergedseriallyalongtherowstoobtainthefinalglobalLSEvectorl.
+Topreventnumericalinstabilityandoverflowduringthemergingprocess,thefollowingnumerically
+stableoperationisperformed:
+li ←li+log(1+eli,j−li ), j =1,...,n , (4)
+c
+wheretheinitialvalueofli is0. Ineachiteration,theintermediatevalueli,j ismergedwithli,and
+afterprocessingalln tiles,theglobalLSEvectorlisobtained.
+c
+During the computation of LSE(Xi,j), direct exponentiation can lead to numerical overflow. To
+addressthis,wecomputeli,j usingthefollowingstabilizedformulation:
+li,j =log(cid:88) eX :i ,, kj =mi,j +log(cid:88) eX :i ,, kj−mi,j , (5)
+k k
+where mi,j = max Xi,j is a vector, with each element representing the maximum value of the
+k :,k
+correspondingrowinXi,j.Thisvectoractsasanormalizationfactor,ensuringthatthevaluesinside
+theexponentialfunctionremainnumericallystable.
+This tile-wise approach significantly reduces the memory requirement by allowing each GPU to
+compute and store only a subset of the similarity matrix at any given time, rather than the entire
+b×bmatrix. Additionally,thismethodfacilitatesscalingtolargerbatchsizesbyenablingparallel
+computationofthetilesonmultipleGPUsoracrossdifferentnodesinadistributedsystem.
+Tile-WiseBackward. Accordingtothechainrule,thegradientsw.r.t. I andT are
+i j
+∂L I =(cid:88) ∂L I · ∂x i,j, ∂L I =(cid:88) ∂L I · ∂x i,j. (6)
+∂I ∂x ∂I ∂T ∂x ∂T
+i i,j i j i,j j
+j i
+Takingthegradientsw.r.t. I asanexample,accordingtoEquation2,thecompleteformulationis
+i
+∂L
+I
+=−1(cid:88) (∂L
+I ·
+∂x
+i,i ·
+∂x
+i,j −
+∂L
+I ·
+∂l
+i ·
+∂x
+i,j)
+∂I b ∂x ∂x ∂I ∂l ∂x ∂I
+i i,i i,j i i i,j i
+j
+(7)
+1 1(cid:88)
+=− ·T + exi,j−li ·T .
+b i b j
+j
+4Preprint. Underreview
+Cross-GPU
+AA AC AC AaC AaCt aCt at Cattat EnT ce ox dt er GPU 1 GPU 2 GPU 3 RSe en cd ei v& e GPU 3 GPU 1 GPU 2 GPU 2 GPU 3 GPU 1 Tiling
+𝑿!,#
+Calculate LSE
+Algo. (2)
+Image Update LSE Eq. (2)
+Encoder Eq. (4)
+LSE Loss
+In-GPU Textual Features Textual Features Textual Features
+Tiling Copy to SRAM Copy to SRAM Copy to SRAM
+Copy to HBM
+Compute LSE
+Kernel 1 Eq. (5)
+𝑿!!,#
+UpdateLSE
+Copy to Eq. (4)
+SRAM
+Kernel 𝒏
+Figure3: Multi-leveltilingstrategy. Top: forcross-GPUtiling,eachGPUisassignedwithmulti-
+plerows. Thecomputationandthecolumn-wisecommunicationareperformedasynchronouslyto
+reduce the cost. Bottom: for in-GPU tiling, the calculations in each GPU are further divided into
+tilesandtherow-wisecalculationisdistributedtomultipleCUDAcores. Theaccumulativeopera-
+tionsofeachrowaremergedintoonekernelforreducingI/OtimesbetweenSRAMandHBM.
+From the formula, it can be seen that the second term requires the similarities x with O(b2)
+i,j
+memoryincommonimplementations, whetherstoredintheforwardprocessorcomputeddirectly
+in the backward process. To tackle this, we apply the similar tile-based method as the forward
+process to compute the gradient. Specifically, we first store l, which has only b elements during
+forwardpropagation,andcalculatethegradientw.r.tI byiterativeaccumulationinmultipletiles:
+i
+I′ ←I′+exi,j−li ·T , j =1,...,n ,
+i i j c
+∂L 1 1 (8)
+I =− ·T + I′,
+∂I b i b i
+i
+whereI′isatemporaryvariableforaccumulation. ThedetailedalgorithmisshowninAppendix.
+i
+3.2 MULTI-LEVELTILING
+ThescalingofbatchsizeisusuallyaccompaniedbythescalingofthenumberofGPUs. Inorderto
+fullyutilizetheparallelismbetweenmultipleGPUswhileexploitingpartiallyserialcomputationon
+asingleGPUtoreducethememorycost,weproposeamulti-leveltilingmethodthatdistributesthe
+aboveLSEcalculationtocoarse-grainedcross-GPUtilesandfine-grainedin-GPUtiles.
+Cross-GPU Tile. As shown in Algorithm 1, in data parallel training with n GPUs, the i-th GPU
+first processes a portion of images and texts to visual features Ii ∈ Rbs×c and textual features
+Ti ∈Rbs×c,whereb
+s
+=b/nisthebatchsizeinoneGPU.Thenforthecalculationofthecontrastive
+loss, we distribute computations of different rows to different GPUs and synchronize the columns
+betweenGPUsstep-by-step, consideringtherow-wisecharacteristic. Specifically, thei-thGPUis
+responsible for calculating Xi,: and the corresponding li. For memory considerations, based on
+thetilingstrategydescribedinSection3.1whereonlyonetileXi,j iscomputedatatime,Xi,: is
+furtherdividedintoXi,j fornsteptocalculateli followingEquation4,wherethelocalLSEli,j is
+calculatedbyin-gputilingasdescribedinthenextpart.
+Moreover,sincethecomputationofXi,j whilei̸=j requiresthetextualfeatureTj storedinother
+GPUs,additionalcommunicationoverheadisinevitable,especiallyasthenumberofGPUsgrows.
+In order to reduce or even eliminate the communication overhead, we associate all GPUs with a
+ringtopology,basedontheideaofoverlappingcommunicationtimeandcomputationtimeoverlap
+as much as possible. Concretely, starting with Ti, each GPU process sends the current textual
+5
+serutaeF
+lausiV
+···
+1
+UPG
+3
+UPG
+2
+UPG
+··· ··· ESLPreprint. Underreview
+featurestothenextprocessandreceivesthetextualfeaturesfromthepreviousprocessusingthering
+topologywhilecomputingEquation4. Inthisway,thecommunicationtimecostisnegligiblewhen
+itisgreaterthanthecomputationtimeoverhead.
+Algorithm1ForwardProcessofMulti-levelTile-WiseGlobalLSECalculation
+Require: Number of GPUs n, in-memory visual features Ii ∈ Rbs×c and textual features Ti ∈
+Rbs×cforeachGPU.
+1: forcounter=1tondo
+2: UpdateLSE:
+3: EachGPUcomputesthelocalLSEvectorviaAlgorithm2within-memoryfeatures.
+4: EachGPUupdatestheLSEvectorviaEquation4.
+5: AsynchronouslyCommunication:
+6: EachGPUsendsthein-memorytextualfeaturetothenextGPUinthering.
+7: EachGPUreceivesthetextualfeaturefromthepreviousGPUinthering.
+8: endfor
+9: ReturnthefinalLSEvectorl iforeachGPU.
+In-GPU Tile. With the cross-GPU tiling technique, the memory complexity becomes O(b2) for
+s
+directlystoringXi,j whereb = b/n. SincethenumberofGPUnissomehowlimited,wefurther
+s
+introducein-GPUtilingtoreducetheO(b2)memorycosttoO(b )forenablingfurtherbatchsize
+s s
+scaling. Specifically,wefirstsplitX˜ =Xi,j intotiles:
+X˜ =[X˜i,j], i=1,...,n˜ , j =1,...,n˜ , (9)
+r c
+wheren˜ = ⌈b/t ⌉andn˜ = ⌈b/t ⌉andt andt istherow-wiseandcolumn-wisesizeofatile.
+r r c c r c
+For implementation, we distribute rows to multiple CUDA cores to make full use of the parallel
+computing power of the GPU, and serial process the row-wise tiles in each kernel by applying
+Equation5andEquation4toX˜i,j,asshowninAlgorithm2.
+Theiterativecomputationrequiresmultiplememoryaccessforvariableli. ToavoidexpensiveI/O
+from HBM to SRAM, we fuse the row-wise iterative calculation into one kernel. Specifically, li
+andX˜i,j areallocatedinSRAM.Inthisway,theimagefeaturesareloadedtoSRAMonlyonceat
+beginning,andl˜iiswrittentoHBMonlyonceintheend,asshowninFigure3.
+Algorithm2ForwardProcessofTile-WiseLocalLSECalculation
+Require: Visualfeatures: I˜∈ Rbs×c andtextualfeatures: T˜ ∈ Rbs×c,therow-wiseandcolumn-
+wisesizeofatile: t andt .
+r c
+1: DivideI˜intoI˜i,wherei=1,2,...,n˜ r.
+2: DivideT˜ intoT˜j,wherej =1,2,...,n˜ c.
+3:
+parallelforeachI˜ido
+4:
+LoadI˜ifromHBMtoon-chipSRAM.
+5: Initializel˜i =0∈Rtr.
+6: forj =1ton˜ r do
+7: LoadT˜ j fromHBMtoon-chipSRAM.
+8: Onchip,computeX˜i,j =I˜i·T˜j′ ∈Rtr×tc.
+9: Onchip,calculatetileLSEl˜i,j basedonEquation5:
+10: l˜i,j =m˜i,j +LSE(X˜i,j −m˜i,j),wherem˜i,j =rowmax(X˜i,j).
+11:
+Onchip,updateLSEl˜ibasedonEquation4:
+12:
+l˜i ←l˜i+log(1+exp(l˜i,j −l˜i)).
+13: endfor
+14:
+Writel˜itoHBM.
+15: endparallelfor
+16:
+Returnl˜.
+6Preprint. Underreview
+Loss(Peak)MemoryCost(GB)
+Model
+32k 64k 128k 256k 1024k
+8×A800(≈8×80GB)
+✗ ✗ ✗
+CLIP 16.67(46.40) 66.11(77.94)
+✗ ✗
+OpenCLIP 2.27(43.97) 8.63(46.38) 33.64(51.23)
+✗
+Inf-CL 0.18(44.20) 0.36(46.63) 0.72(51.46) 1.45(61.13)
+Inf-CL∗ 0.18(42.40) 0.36(42.49) 0.72(42.69) 1.45(43.07) 6.53(45.40)
+32×A800(≈32×80GB)
+✗ ✗ ✗
+CLIP 16.66(42.85) 66.11(75.52)
+✗
+OpenCLIP 0.71(42.46) 2.45(43.06) 8.98(44.26) 34.35(46.71)
+Inf-CL 0.05(42.48) 0.09(43.08) 0.18(44.30) 0.35(46.71) 1.44(61.20)
+Table 1: Training Memory Cost Across Different Hardware and Batch Sizes. Experiments
+utilizeDataParallelismwithAutomaticMixedPrecisionforefficientdistributedtraining. Thebase-
+linesincludetheVanillaloss(CLIP)andLocalloss(OpenCLIP).Tominimizememoryconsump-
+tion,GradientCacheisadopted,withanaccumulationbatchsizeof128. ∗ indicatestheuseofthe
+dataoffloadstrategy,whichreducesmemoryusagebytransferringonlyasmalldatabatchfromCPU
+✗
+to GPU during each accumulation step. denotes cases where the baseline exceeds the hardware
+memorylimitforagivenbatchsize,makingtraininginfeasible. Memorycostisevaluatedusingthe
+ViT-L/14architectureandtheAdamWoptimizer.
+4 EXPERIMENTS
+4.1 EXPERIMENTALSETTINGS
+Dataset and Data Processing. We assess the effectiveness of our Inf-CL on Laion400M
+dataset (Schuhmann et al., 2021) where we used 280M (out of 400M) samples for training due
+totheunavailabilityofimagesintheremainingsamples. ImagesundergopreprocessingusingRan-
+domResizedCropwithacropratioof[0.75,1.33]andascaleof[0.08,1.0].
+TrainingHyperparameters.AmodifiedAdaFactoroptimizer(Shazeer&Stern,2018)isemployed
+fortraining,followingthesettingsofViT-g(Zhaietal.,2022a). Theoptimizerisconfiguredwitha
+learningrateof1×10−3,weightdecayof1×10−4,andcoefficientsβ =0.9andβ =0.95(Zhai
+1 2
+etal.,2023). Trainingspans8epochs,usingacosinelearningrateschedulewithalinearwarm-up
+duringthefirst0.5epoch.
+Implementation Details. For distributed training, we employ Data Parallelism (Li et al., 2020)
+withAutomaticMixedPrecision(float16)(Micikeviciusetal.,2017). Tosupportlargerbatchsizes,
+weadoptGradientCache(Gaoetal.,2021)whichdecouplescontrastivelosscomputationfromthe
+model’sforwardandbackwardpasses. Consequently,thepeakmemorycostperiteration,M ,is
+peak
+calculatedas:
+M ≈M +max(M ,M ), (10)
+peak data loss backbone
+whereM isthememoryfordata,M isforlosscomputation,andM isforthemodel’s
+data loss backbone
+forwardandbackwardoperations.
+Baselines. Wecompareourmethodagainsttwobaselines: thevanillalossfromCLIPandthelocal
+lossfromOpenCLIP/DisCo-CLIP.Thevanillalosscomputesab×bsimilaritymatrixbygathering
+bothrowandcolumnfeaturesfromallGPUs,whilethelocallossrequiresonlycolumnfeaturesto
+calculateab/n×bsimilaritymatrix,wherebandnarethebatchsizeandthenumberofGPUs.
+4.2 COSTANALYSIS
+Our method, as detailed in Section 3.2, divides the calculation of contrastive loss into tiles and
+distributesthemacrossdifferentGPUsandGPUkernels.Torigorouslyassessitsmemoryefficiency,
+wecompareourapproachwithpreviousmethodslikeCLIPandOpenCLIPbyevaluating“Memory
+7Preprint. Underreview
+MaximumBatchSize(LossMemoryCost) Improvement
+Budget
+CLIP OpenCLIP Inf-CL (Ours/Sota)
+ViT-B/16
+8×A800 68k(74.39GB) 172k(59.95GB) 800k (3.01GB) 4.65(800k/172k)
+32×A800 68k(74.39GB) 360k(66.29GB) 3456k(3.27GB) 9.60(3456k/360k)
+ViT-L/14
+8×A800 64k(66.11GB) 152k(47.23GB) 448k (2.52GB) 2.94(448k/152k)
+32×A800 64k(66.11GB) 352k(64.13GB) 2048k(2.89GB) 5.82(2048k/256k)
+ViT-L/14w/dataoffload
+8×A800 64k(66.11GB) 184k(69.10GB) 4096k(26.12GB) 22.26(4096k/184k)
+32×A800 64k(66.11GB) 368k(64.13GB) 12288k(19.59GB) 33.39(12288k/368k)
+Table 2: Maximum batch size for model training using different hardware and contrastive loss
+methods. ThetrainingsettingofthisexperimentisalignedwithTable1.
+CLIP OpenCLIP Inf-CL (Ours)
+230 80
+207 200.3 72
+66.5
+184 64 59.359.059.3 58.058.4 58.158.2 59.3
+161 56
+138 48
+115 40
+97.998.3
+92 32
+69 24
+56.3
+48.949.4
+46 16
+23 25.124.925.0 OOM OOMOOM 8 OOM OOMOOM
+0 0
+32k 64k 128k 256k 32k 64k 128k 256k
+Batch Size Batch Size
+Figure4: TrainingSpeedofViT-L/14CLIPon8×A800forVaryingBatchSizes. Theleftfigure
+showsthetimeperiterationstep,whiletherightdisplaysthetimeperepoch. Losscalculationcon-
+tributesminimallytothetotaliterationtime,makingInf-CL’siterationtimecomparabletoprevious
+methods. Furthermore, the iteration time of Inf-CL scales linearly with batch size, leading to a
+stabletrainingdurationofapproximately59hoursperepoch.
+Consumption”,“Max Supported Batch Size” and “Speed” across various model architectures and
+hardwaresettings. Theeffectivememorycostisdeterminedbypeakmemory(Equation10),which
+isthemaximummemoryneededduringaniteration.
+MemoryConsumption. ToillustratethememoryefficiencyofInf-CL,wecomparedittoprevious
+methodsusingthesamebatchsize. Table1showsthatforlosscalculation,Inf-CLrequiressignifi-
+cantlylessmemorythanitspredecessors.Specifically,withabatchsizeof128kon8×A800,Inf-CL
+onlyconsumes0.72GB,whereasOpenCLIPrequires33.64GB.However,whilethememorycost
+oflosscalculationwithInf-CLisminimal,peakmemoryusagestillincreasesrapidlywithbatchsize
+due to growing data memory, as discussed in “Max Supported Batch Size.” By integrating Inf-CL
+with “data offload”, we can mitigate this memory increase, enabling us to train a ViT-L/14 model
+withabatchsizeof1024kon8×A800.
+MaximumBatchSize. WecomparethemaximumbatchsizeofInf-CLwiththoseofpreviousap-
+proachesundervariousmodelarchitectures(ViT-B/16orViT-L/14)andtrainingbudgets(8×A800
+or 32×A800). As shown in Table 2. Inf-CL significantly outperforms previous SOTA methods,
+achieving improvements of 4.65× for ViT-B/16 on 8×A800, which is further increased to 9.60×
+whenusing32×A800. Notably,aswescaleupthemodelsize,theimprovementsdecrease;forin-
+stance,from4.65to2.94whenchangingfromViT-B/16toViT-L/14. Tounderstandthistrend,we
+analyze peak memory usage. Since Inf-CL has negligible memory requirements, peak memory is
+primarilydrivenbyM +M . M isconstant,meaningtherapidgrowthinpeak
+backbone data backbone
+8
+)s(
+emiT
+noitaretI
+)h(
+emiT
+latoTPreprint. Underreview
+ImageNet MSCOCOR@1
+Method(BatchSize)
+Validation v2 ObjectNet OOD I→T T→I
+Vanilla (64K) 74.74 65.30 46.31 66.13 25.71 44.31
+OpenCLIP (64K) 74.86 65.22 46.29 66.75 25.98 44.02
+Inf-CL (64K) 74.93 65.27 46.13 66.77 26.01 43.95
+Inf-CL (256K) 75.12 65.12 46.44 67.15 25.90 44.61
+Inf-CL(1024K) 73.58 63.87 44.55 64.60 24.53 41.58
+Table3: PerformanceVerification. ThetrainingstrategiesisconsistentwithTable2. Wechoose
+ViT-B/16asthemodelarchitectureandadoptLiTstrategylikeTable4. Weevaluatezero-shottop-1
+classificationaccuracyonseveraldatasets,e.g.,ImageNet-ValidationDengetal.(2009),ImageNet-
+v2(Rechtetal.,2019),ObjectNet(Barbuetal.,2019)andImageNet-OOD(Hendrycksetal.,2021).
+Wealsoevaluatezero-shotimage-texttop-1retrievalaccuracyonMSCOCO(Chenetal.,2015).
+Data Loss Backbone Peak
+Cross-GPU In-GPU ImageNet
+Memory Complexity Memory Memory Memory
+(Vanilla) 1.96 O(b2) 66.21 8.26 69.24 74.82
+(OpenCLIP) 1.96 O(b2/n) 16.96 8.26 20.79 74.86
+✔ 1.96 O(b2/n2) 4.81 8.26 12.30 74.78
+✔ ✔ 1.96 O(b/n2) 0.81 8.26 12.30 74.93
+Table4: AblationStudyofMulti-levelTilingStrategy. Thetrainingstrategiesisconsistentwith
+Table2,usingtheViT-B/16architecture. Toreducememoryconsumptionandexpediteexperimen-
+tation, we freeze the image encoder and load pretrained weights as done in LiT. The global batch
+size is fixed at 64k with an accumulation batch size of 256 per GPU. These experiments are con-
+ductedon4×A800(80G)GPUs. “Complexity”denotesthespacecomplexityoflosscalculation. b
+denotesbatchsize,whilendenotesthenumberofGPUs.
+memoryismainlyduetoincreasedM . SinceViT-L/14hasalargerM , theremaining
+data backbone
+memorycanaccommodateonlyasmallerbatchsizeforM .Toaddressthisissue,weimplement
+data
+“dataoffload”,whichallowsustoloadonlyasmallbatchofdataontotheGPUforeachaccumula-
+tionstep,effectivelystabilizingthedatamemoryusage. Therefore,bycombiningdataoffloadwith
+ourInf-CL,wecanscalethebatchsizetoover10Mon32×A800.
+TrainingSpeed. WecomparethetrainingspeedofourInf-CLwithpreviousmethods. Asshown
+in Figure 4, using Inf-CL to train ViT-L/14 on 8×A800 has almost the same speed as previous
+methods. Evenwhenincreasingbatchsizebeyondthelimitsofpreviousmethods,Inf-CLmaintains
+a linear increase in iteration time, with one epoch consistently taking about 59 hours. Combining
+trainingspeedresultswithmemorycostresultsdemonstratesthatourInf-CLhassuperiormemory
+efficiency,whileonlyintroducingalittleadditionaltimecost(extraanalysisinAppendixA.2).
+4.3 PERFORMANCEANALYSIS
+In this section, we investigate whether introducing Inf-CL negatively affects CLIP performance
+and whether increasing batch size with Inf-CL enhances performance. Due to the limit of GPU
+resources, weutilizetheViT-B/16withBert-Base(Devlin,2018). Wefollowthetrainingstrategy
+ofLiT(Zhaietal.,2022b)tofreezethevisualbackboneandusethepre-trainedweightsinstead.
+PerformanceVerification. WeevaluateCLIPmodelstrainedwithdifferentlossimplementations,
+withtheresultspresentedinTable3.Asshown,underthesamebatchsize,ourInf-CLperformssim-
+ilarlytopreviousmethods,withperformancedifferencesfallingwithintheerrormargin,confirming
+that our design incurs no precision loss in the loss calculations. Furthermore, the results indicate
+thatincreasingthebatchsizewithinacertainrangeyieldsperformanceenhancements,therebyun-
+derscoring the significance of our method for helping scale the batch size. However, under our
+9Preprint. Underreview
+experimentalconditions,wecurrentlyobservethatanexcessivelylargebatchsize—previouslyun-
+examined in the literatures—results in suboptimal performance. This may be attributed to factors
+such as unoptimized hyperparameters, inadequate training iterations, or constraints related to data
+size (for a comprehensive analysis, see Appendix A.3). Since our work mainly focus on how to
+enablelargebatchsizetraining,thesefactorswarrantfurtherinvestigationinfuturework.
+AblationStudy.Weablatemulti-leveltilinginTable4andshowthatourdesignsincurnoprecision
+loss in loss calculations. This allows arbitrary combinations to achieve nearly the same zero-shot
+classificationaccuracy(about74.8%onImageNetfor64kbatchsize),whilesignificantlyreducing
+memorycosts. AccordingtotheEquation10,theirM isdecidedbyM +M rather
+peak backbone data
+thanM +M asinpriormethods. Forcomplexityanalysis, Cross-GPUtilingisO(b2/n2),
+loss data
+resulting in a memory cost that is 1/n of OpenCLIP (16.96/4.81 ≈ 4 in Table 4). Based on it,
+introducing In-GPU tiling can further reduce memory cost and make the growth of memory cost
+linear,i.e.,O(b2/n2)→O(b/n2).
+5 RELATED WORK
+Contrastive Learning: The core idea of contrastive learning is to learn better representations by
+distinguishingbetweenpositiveandnegativepairsofsamples(vandenOordetal.,2018;Chenetal.,
+2020b). Thisapproachdemonstratesstrongeffectivenessacrossdiversetasks, asthenatureofthe
+paired samples varies depending on the specific application. In image foundation models, such as
+SimCLR(Chenetal.,2020a)andMoCo(Heetal.,2020),positivepairsarecreatedbyaugmenting
+thesameimageindifferentways. Forcross-modalretrieval,asexemplifiedbyCLIP(Radfordetal.,
+2021) and ALIGN (Jia et al., 2021), the positive pairs consist of aligned image and text samples.
+Similarly, for dense text retrieval (Karpukhin et al., 2020; Wang et al., 2022; Zhang et al., 2022),
+the positive pairs are composed of query and document pairs. Several works improve contrastive
+learningperformancebyenhancingdatasetquality,modifyingthelossfunction,orrefiningnegative
+sampleselection(Vasuetal.,2024;Zhaietal.,2023;Zhangetal.,2023). Moreover,severalstudies,
+bothempiricalandtheoretical,havedemonstratedfromvariousperspectivesthatlargerbatchsizes
+contribute to learning better representations (Saunshi et al., 2019; Chen et al., 2022). Due to the
+quadraticgrowthofmemoryusagewithbatchsizeinclassicalcontrastiveloss,mostexistingstudies
+have stopped scaling their batch sizes to 128k, even when leveraging hundreds of GPUs (Radford
+etal.,2021;Jiaetal.,2021;Yangetal.,2022).
+Memory-efficientTraining: Asdeeplearningmodelscontinuetogrowinsizeandcomplexity,the
+demandforcomputationalresources,particularlyGPUmemory,hasincreasedsignificantly. Tech-
+niques such as Gradient Checkpointing (Sohoni et al., 2022) recompute activations during back-
+propagationtosavememoryattheexpenseofadditionalcomputation. FlashAttention(Daoetal.,
+2022) reduces memory overhead by computing attention in blocks without storing large interme-
+diatestates. RingAttention(Liuetal.,2023)distributeslongsequenceactivationsacrossmultiple
+devices, overlapping computation and communication to train sequences far longer than previous
+methods. Forcontrastivelearning,GradCache(Gaoetal.,2021)andBASIC(Phametal.,2021)in-
+troduceagradientcachingtechniquethatdecouplesbackpropagationbetweencontrastivelossand
+theencoder,whichreducesmemoryusageinthemodelbyaccumulatinggradientspermini-batch.
+OpenCLIP(Ilharcoetal.,2021)andDisCo-CLIP(Chenetal.,2023)reducingmemoryconsumption
+bydistributingthecomputationofcontrastivelossacrossmultipleGPUs.
+6 CONCLUSION
+This paper addresses the GPU memory bottleneck in scaling batch sizes for contrastive loss. To
+overcomethequadraticmemoryconsumptionresultingfromthefullinstantiationofthesimilarity
+matrix, we proposed a tile-based computation strategy that partitions the calculation into smaller
+blocks, thus avoiding full matrix materialization. Furthermore, we introduced a multi-level tiling
+strategy that leverages ring-based communication and fused kernels to optimize synchronization
+andminimizeI/Ooverhead. Ourexperimentsdemonstratedthatourmethodscalescontrastiveloss
+batchsizestounprecedentedlevelswithoutcompromisingaccuracyortrainingspeed.Thisapproach
+marksasignificantadvancementinlarge-scalecontrastivelearning,sheddinglightonfurtherdevel-
+opmentsinareassuchasself-supervisedlearninganddensetextretrieval.
+10Preprint. Underreview
+REFERENCES
+AndreiBarbu,DavidMayo,JulianAlverio,WilliamLuo,ChristopherWang,DanGutfreund,Josh
+Tenenbaum, and Boris Katz. Objectnet: A large-scale bias-controlled dataset for pushing the
+limits of object recognition models. Advances in neural information processing systems, 32,
+2019. 9
+ChangyouChen,JianyiZhang,YiXu,LiqunChen,JialiDuan,YiranChen,SonTran,BelindaZeng,
+andTrishulChilimbi. Whydoweneedlargebatchsizesincontrastivelearning? Agradient-bias
+perspective. InSanmiKoyejo,S.Mohamed,A.Agarwal,DanielleBelgrave,K.Cho,andA.Oh
+(eds.), Advances in Neural Information Processing Systems 35: Annual Conference on Neural
+InformationProcessingSystems2022,NeurIPS2022,NewOrleans,LA,USA,November28-De-
+cember9,2022,2022. URLhttp://papers.nips.cc/paper_files/paper/2022/
+hash/db174d373133dcc6bf83bc98e4b681f8-Abstract-Conference.html. 2,
+3,10,15
+TingChen, SimonKornblith, MohammadNorouzi, andGeoffreyE.Hinton. Asimpleframework
+forcontrastivelearningofvisualrepresentations. CoRR,abs/2002.05709,2020a. URLhttps:
+//arxiv.org/abs/2002.05709. 1,2,10
+Ting Chen, Simon Kornblith, Kevin Swersky, Mohammad Norouzi, and Geoffrey E Hinton. Big
+self-supervisedmodelsarestrongsemi-supervisedlearners. Advancesinneuralinformationpro-
+cessingsystems,33:22243–22255,2020b. 10
+Xinlei Chen, Hao Fang, Tsung-Yi Lin, Ramakrishna Vedantam, Saurabh Gupta, Piotr Dolla´r, and
+C Lawrence Zitnick. Microsoft coco captions: Data collection and evaluation server. arXiv
+preprintarXiv:1504.00325,2015. 9
+YihaoChen,XianbiaoQi,JiananWang,andLeiZhang. Disco-clip: Adistributedcontrastiveloss
+for memory efficient clip training, 2023. URL https://arxiv.org/abs/2304.08480.
+2,10
+Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Re´. Flashattention: Fast and
+memory-efficientexactattentionwithio-awareness,2022.URLhttps://arxiv.org/abs/
+2205.14135. 3,10
+JiaDeng,WeiDong,RichardSocher,Li-JiaLi,KaiLi,andLiFei-Fei.Imagenet:Alarge-scalehier-
+archicalimagedatabase. In2009IEEEConferenceonComputerVisionandPatternRecognition,
+pp.248–255,2009. doi: 10.1109/CVPR.2009.5206848. 9
+Jacob Devlin. Bert: Pre-training of deep bidirectional transformers for language understanding.
+arXivpreprintarXiv:1810.04805,2018. 9
+LuyuGao,YunyiZhang,JiaweiHan,andJamieCallan.Scalingdeepcontrastivelearningbatchsize
+undermemorylimitedsetup,2021. URLhttps://arxiv.org/abs/2101.06983. 2,3,
+7,10
+Tianyu Gao, Xingcheng Yao, and Danqi Chen. Simcse: Simple contrastive learning of sentence
+embeddings,2022. URLhttps://arxiv.org/abs/2104.08821. 1
+RohitGirdhar,AlaaeldinEl-Nouby,ZhuangLiu,MannatSingh,KalyanVasudevAlwala,Armand
+Joulin, andIshanMisra. Imagebind: Oneembeddingspacetobindthemall. InProceedingsof
+theIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.15180–15190,2023.
+1
+P Goyal. Accurate, large minibatch sg d: training imagenet in 1 hour. arXiv preprint
+arXiv:1706.02677,2017. 15
+Raia Hadsell, Sumit Chopra, and Yann LeCun. Dimensionality reduction by learning an invariant
+mapping. In2006IEEEcomputersocietyconferenceoncomputervisionandpatternrecognition
+(CVPR’06),pp.1735–1742,2006. 2
+11Preprint. Underreview
+Kaiming He, Haoqi Fan, Yuxin Wu, Saining Xie, and Ross Girshick. Momentum contrast for
+unsupervisedvisualrepresentationlearning,2020. URLhttps://arxiv.org/abs/1911.
+05722. 1,10
+DanHendrycks,KevinZhao,StevenBasart,JacobSteinhardt,andDawnSong. Naturaladversarial
+examples. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecogni-
+tion,pp.15262–15271,2021. 9
+EladHoffer, ItayHubara, andDanielSoudry. Trainlonger, generalizebetter: closingthegeneral-
+izationgapinlargebatchtrainingofneuralnetworks. Advancesinneuralinformationprocessing
+systems,30,2017. 15
+GabrielIlharco,MitchellWortsman,RossWightman,CadeGordon,NicholasCarlini,RohanTaori,
+Achal Dave, Vaishaal Shankar, Hongseok Namkoong, John Miller, Hannaneh Hajishirzi, Ali
+Farhadi, and Ludwig Schmidt. Openclip, July 2021. URL https://doi.org/10.5281/
+zenodo.5143773. 2,10
+ChaoJia,YinfeiYang,YeXia,Yi-TingChen,ZaranaParekh,HieuPham,QuocV.Le,Yun-Hsuan
+Sung, ZhenLi, andTomDuerig. Scalingupvisualandvision-languagerepresentationlearning
+with noisy text supervision. In Marina Meila and Tong Zhang (eds.), Proceedings of the 38th
+International Conference on Machine Learning, ICML 2021, 18-24 July 2021, Virtual Event,
+volume139ofProceedingsofMachineLearningResearch,pp.4904–4916.PMLR,2021. URL
+http://proceedings.mlr.press/v139/jia21b.html. 10
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child,
+Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language
+models. CoRR,abs/2001.08361,2020. URLhttps://arxiv.org/abs/2001.08361. 2
+Vladimir Karpukhin, Barlas Og˘uz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi
+Chen,andWentauYih.Densepassageretrievalforopen-domainquestionanswering,2020.URL
+https://arxiv.org/abs/2004.04906. 10
+ShenLi,YanliZhao,RohanVarma,OmkarSalpekar,PieterNoordhuis,TengLi,AdamPaszke,Jeff
+Smith, BrianVaughan, PritamDamania, etal. Pytorchdistributed: Experiencesonaccelerating
+dataparalleltraining. arXivpreprintarXiv:2006.15704,2020. 7
+Hao Liu, Matei Zaharia, and Pieter Abbeel. Ring attention with blockwise transformers for near-
+infinitecontext,2023. URLhttps://arxiv.org/abs/2310.01889. 3,10
+HuaishaoLuo,LeiJi,MingZhong,YangChen,WenLei,NanDuan,andTianruiLi. Clip4clip: An
+empiricalstudyofclipforendtoendvideoclipretrievalandcaptioning. Neurocomputing,508:
+293–304,2022. 1
+Paulius Micikevicius, Sharan Narang, Jonah Alben, Gregory Diamos, Erich Elsen, David Garcia,
+BorisGinsburg, MichaelHouston, OleksiiKuchaiev, GaneshVenkatesh, etal. Mixedprecision
+training. arXivpreprintarXiv:1710.03740,2017. 7
+AaronvandenOord,YazheLi,andOriolVinyals. Representationlearningwithcontrastivepredic-
+tivecoding. arXivpreprintarXiv:1807.03748,2018. 2
+HieuPham,ZihangDai,GolnazGhiasi,KenjiKawaguchi,HanxiaoLiu,AdamsWeiYu,JiahuiYu,
+Yi-Ting Chen, Minh-Thang Luong, Yonghui Wu, et al. Combined scaling for open-vocabulary
+imageclassification. arXivpreprintarXiv:2111.10050,1(2):4,2021. 2,3,10
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agar-
+wal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya
+Sutskever. Learning transferable visual models from natural language supervision, 2021. URL
+https://arxiv.org/abs/2103.00020. 1,2,3,10
+BenjaminRecht,RebeccaRoelofs,LudwigSchmidt,andVaishaalShankar. Doimagenetclassifiers
+generalizetoimagenet? InInternationalconferenceonmachinelearning,pp.5389–5400.PMLR,
+2019. 9
+12Preprint. Underreview
+NikunjSaunshi,OrestisPlevrakis,SanjeevArora,MikhailKhodak,andHrishikeshKhandeparkar.
+Atheoreticalanalysisofcontrastiveunsupervisedrepresentationlearning.InKamalikaChaudhuri
+andRuslanSalakhutdinov(eds.),Proceedingsofthe36thInternationalConferenceonMachine
+Learning,ICML2019,9-15June2019,LongBeach,California,USA,volume97ofProceedings
+ofMachineLearningResearch,pp.5628–5637.PMLR,2019. URLhttp://proceedings.
+mlr.press/v97/saunshi19a.html. 3,10
+Christoph Schuhmann, Richard Vencu, Romain Beaumont, Robert Kaczmarczyk, Clayton Mullis,
+AarushKatta,TheoCoombes,JeniaJitsev,andAranKomatsuzaki. Laion-400m:Opendatasetof
+clip-filtered400millionimage-textpairs. arXivpreprintarXiv:2111.02114,2021. 7
+NoamShazeerandMitchellStern. Adafactor: Adaptivelearningrateswithsublinearmemorycost.
+InInternationalConferenceonMachineLearning,pp.4596–4604.PMLR,2018. 7
+Nimit S. Sohoni, Christopher R. Aberger, Megan Leszczynski, Jian Zhang, and Christopher Re´.
+Low-memoryneuralnetworktraining:Atechnicalreport,2022.URLhttps://arxiv.org/
+abs/1904.10631. 10
+Aa¨ronvandenOord,YazheLi,andOriolVinyals. Representationlearningwithcontrastivepredic-
+tivecoding. CoRR,abs/1807.03748,2018. URLhttp://arxiv.org/abs/1807.03748.
+10
+Pavan Kumar Anasosalu Vasu, Hadi Pouransari, Fartash Faghri, Raviteja Vemulapalli, and Oncel
+Tuzel. Mobileclip: Fast image-text models through multi-modal reinforced training. In Pro-
+ceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.15963–
+15974,2024. 10
+Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Ma-
+jumder, and Furu Wei. Text embeddings by weakly-supervised contrastive pre-training. arXiv
+preprintarXiv:2212.03533,2022. 1,10
+LilianWeng. Contrastiverepresentationlearning. lilianweng.github.io,May2021. URLhttps:
+//lilianweng.github.io/posts/2021-05-31-contrastive/. 2
+AnYang,JunshuPan,JunyangLin,RuiMen,YichangZhang,JingrenZhou,andChangZhou. Chi-
+neseclip: Contrastivevision-languagepretraininginchinese. arXivpreprintarXiv:2211.01335,
+2022. 10
+XiaohuaZhai,AlexanderKolesnikov,NeilHoulsby,andLucasBeyer. Scalingvisiontransformers.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pp.
+12104–12113,2022a. 7
+XiaohuaZhai,XiaoWang,BasilMustafa,AndreasSteiner,DanielKeysers,AlexanderKolesnikov,
+and Lucas Beyer. Lit: Zero-shot transfer with locked-image text tuning. In Proceedings of the
+IEEE/CVFconferenceoncomputervisionandpatternrecognition,pp.18123–18133,2022b. 9
+XiaohuaZhai,BasilMustafa,AlexanderKolesnikov,andLucasBeyer. Sigmoidlossforlanguage
+image pre-training. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision,pp.11975–11986,2023. 7,10
+Hang Zhang, Yeyun Gong, Yelong Shen, Jiancheng Lv, Nan Duan, and Weizhu Chen. Adversar-
+ial retriever-ranker for dense text retrieval. In The Tenth International Conference on Learning
+Representations, ICLR 2022, Virtual Event, April 25-29, 2022. OpenReview.net, 2022. URL
+https://openreview.net/forum?id=MR7XubKUFB. 10
+Hang Zhang, Yeyun Gong, Xingwei He, Dayiheng Liu, Daya Guo, Jiancheng Lv, and Jian Guo.
+Noisypaircorrectorfordenseretrieval. arXivpreprintarXiv:2311.03798,2023. 10
+13Preprint. Underreview
+A APPENDIX
+A.1 BACKWARDPROCESS
+Algorithm3BackwardProcessofMulti-levelTile-WiseGlobalLSECalculation
+Require: Number of GPUs n, saved intermediate variables from the forward pass: in-memory
+visualfeaturesIi ∈ Rbs×c andtextualfeaturesTi ∈ Rbs×c foreachGPU,globalLSEvectors
+li ∈Rbs.
+1: Initializevector: dIi =0∈Rbs×c,dT
+cache
+=0∈Rbs×coneachGPU i.
+2: forj =1tondo
+3: AsynchronouslyTextFeatureCommunication:
+4: EachGPUsendsin-memorytextualfeaturetothenextGPUandreceivethetextual
+featurefromthepreviousGPUinthering.
+5: BackwardCalculation:
+6: IndexofcurrenttextfeaturetileforeachGPU:k =(i+j−1) mod n
+7: CallAlgorithm4with(Ii,Tk,li),obtaininggradientsdIi anddTk .
+temp temp
+8: UpdategradientsdIi +=dIi .
+temp
+9: UpdategradientsdT +=dTk .
+cache temp
+10: AsynchronouslyGradientCommunication:
+11: EachGPUsendsin-memorydT tothenextGPUinthering.
+cache
+12: EachGPUreceivethegradientfeaturefromthepreviousGPUandwritetodT .
+cache
+13: endfor
+14: dTi =dT ineachGPU.
+cache
+15: ReturnthegradientsdIi,dTiforeachGPU.
+Algorithm4BackwardProcessfromofintra-GPUTile-WiseLSEcalculation
+Require: Saved intermediate variables from the forward pass: visual features I˜ ∈ Rb×c, textual
+featuresT˜ ∈Rb×c,thelocalLSEvectorl˜∈Rb.
+Therow-wiseandcolumn-wisesizeofatile: t andt ,
+r c
+1: DivideI˜intoI˜i,wherei=1,2,...,n˜ r.
+2: DivideT˜ intoT˜j,wherej =1,2,...,n˜ c.
+3: Dividel˜intol˜i,wherei=1,2,...,n˜ r.
+4: Initializegradientsvectors: dI˜∈Rtr×canddT˜ ∈Rtc×c.
+5:
+foreachI˜ido
+6:
+LoadI˜iandl˜ifromHBMtoon-chipSRAM.
+7: InitializedI˜i =0∈Rtr×c.
+8: forj =1to[b//t c]do
+9: LoadT˜j fromHBMtoon-chipSRAM.
+10: Onchip,computeX˜i,j =I˜i·T˜j′ ∈Rtr×tc.
+11:
+Onchip,computedX˜i,j =exp(X˜i,j −l˜i)∈Rtr×tc.
+12:
+UpdategradientsdI˜i +=dX˜i,j ·T˜j.
+13: LoaddT˜j fromHBMtoon-chipSRAM.
+14:
+dT˜j +=I˜i·dX˜i,j.
+15: WriteupdateddT˜j backtoHBM.
+16: endfor
+17:
+WriteupdateddI˜ibacktoHBM.
+18: endfor
+19: return dI˜(i.e. ∂l˜ ),dT˜(i.e.∂l˜ ).
+∂I˜ ∂T˜
+A.2 ANALYSISOFTRAININGSPEEDEFFICIENCYININF-CL
+Although Inf-CL might be expected to exhibit slower performance because it breaks the loss cal-
+culation to small tiles and serially process these tiles, it achieves comparable speed to previous
+14Preprint. Underreview
+CC3M CC12M Laion400M
+Best Batch Size Increasing with Data Scale
+1.0
+Peak Point
+0.8
+0.6
+0.4
+0.2
+Lowest Point
+0.0
+4 8 16 32 64 128 256 512 1024
+Batch Size (k)
+Figure5: PerformanceofViT-B/32acrossVaryingBatchSizes. Exceptbatchsize,otherexperi-
+mentsettingsareconsistent. InFigure,themostsuitablebatchsizeisincreasingwithdatascale.
+methods,asshowninFigure4. Thisisprimarilyduetotwofactors: (1)Losscalculationrepresents
+onlyaminorfractionofthetotaliterationtime, especiallyforlargemodels, therebyexertingmin-
+imalimpactontheoveralliterationtime. (2)WhileInf-CLhassimilarcomputationalcomplexity
+tostandardcontrastiveloss,itstilingapproachcouldintroducesomespeedoverheadduetoreduced
+parallelism. However, Inf-CL fuses the operations of similarity matrix calculation and softmax,
+whichinregularcontrastivelossrequiretwoseparatecommunicationsbetweenSRAMandHBM.
+Bymergingtheseintoasinglecommunication,Inf-CLeffectivelyreducesI/Otime,mitigatingthe
+costofserialtilecomputation.
+A.3 FACTORSINFLUENCINGPERFORMANCEWHENSCALINGBATCHSIZE
+While larger batch size is theoretically expected to enhance performance Chen et al. (2022), our
+experimentalresultsdeviatefromthisexpectation.Tobetterunderstandthisdiscrepancy,weanalyze
+thefactorsthatimpactperformancewhenscalingupbatchsize.
+Hyperparameters. Although larger batch sizes provide more diverse negative samples for con-
+trastivelearning, potentiallyimprovingtheembeddingspace, carefultuningofhyperparametersis
+necessary to ensure model convergence. Previous research indicates that when increasing batch
+size, the learning rate should be scaled proportionally to maintain a consistent parameter update
+normthroughouttraining(Goyal,2017). Sinceafixedlearningrateisusedacrossallexperiments,
+thismayhavecontributedtothereducedperformanceobservedwithlargerbatchsizes. Moreover,
+prior studies suggest that large batch sizes require longer training epochs to ensure sufficient pa-
+rameterupdatesandavoidsuboptimalconvergence(Hofferetal.,2017). Overall,theperformance
+gainsfromlargerbatchsizesarecontingentonthecarefultuningofmultiplehyperparametersbe-
+yondjust learningrate andepochs, highlighting theimportance ofcomprehensive hyperparameter
+optimizationtofullyexploitthebenefitsofscaling.
+DataScale. Increasingbatchsizeimprovestheprecisionofgradientestimationfortherepresenta-
+tiondistributiondefinedbythedatasetChenetal.(2022). Largerdatasetsmoreaccuratelycapture
+real-worlddistributions,andthus,employingalargerbatchsizeenablescontrastivelosstogenerate
+more precise gradients, enhancing the model’s ability to learn discriminative representations. As
+showninFigure5,ourexperimentsondifferentdatascales(e.g.,CC3M,CC12MandLaion400M)
+indicatethattheoptimalbatchsizeincreaseswithdatasetsize.Specifically,performanceonCC12M
+saturatesatabatchsizeof32k,whereasLaion400Machievessaturationatabatchsizeof256k.
+Insummary,whilescalingupbatchsizesiscriticalforenhancingcontrastivelearning,ourfindings
+suggest that performance does not monotonically improve with batch size increases. As seen in
+ourpreviousexperiments(Table3), extremelylargebatchsizes(e.g., 1024k)canleadtoadecline
+inperformance, indicatingthatfactorssuchashyperparametertuninganddatasetscaleareamong
+themanyconsiderationsthatinfluencemodeleffectiveness. Thishighlightstheneedforabalanced
+15
+atleD
+ycaruccAPreprint. Underreview
+approachwhenincreasingbatchsizes,ensuringthatoptimalconfigurationsarefoundtofullyexploit
+thebenefitsofcontrastivelearning.
+16
