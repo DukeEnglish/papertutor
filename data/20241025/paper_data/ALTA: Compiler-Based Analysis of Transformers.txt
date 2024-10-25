@@ -1,0 +1,1963 @@
+ALTA: Compiler-Based Analysis of Transformers
+Peter Shaw1, James Cohan2, Jacob Eisenstein1, Kenton Lee1, Jonathan Berant1,
+Kristina Toutanova1
+1Google DeepMind, 2Google
+Abstract
+WeproposeanewprogramminglanguagecalledALTAandacompilerthatcanmapALTA
+programs to Transformer weights. ALTA is inspired by RASP, a language proposed by
+Weiss et al. (2021), and Tracr (Lindner et al., 2023), a compiler from RASP programs to
+Transformerweights. ALTAcomplementsandextendsthispriorwork,offeringtheabilityto
+expressloopsandtocompileprogramstoUniversalTransformers, amongotheradvantages.
+ALTA allows us to constructively show how Transformers can represent length-invariant
+algorithmsforcomputingparityandaddition,aswellasasolutiontotheSCANbenchmark
+of compositional generalization tasks, without requiring intermediate scratchpad decoding
+steps. We also propose tools to analyze cases where the expressibility of an algorithm is es-
+tablished, butend-to-endtrainingonagiventrainingsetfailstoinducebehaviorconsistent
+withthedesiredalgorithm. Tothisend,weexploretrainingfromALTAexecutiontracesas
+a more fine-grained supervision signal. This enables additional experiments and theoretical
+analyses relating the learnability of various algorithms to data availability and modeling
+decisions, such as positional encodings. We make the ALTA framework — language speci-
+fication, symbolic interpreter, and weight compiler — available to the community to enable
+further applications and insights.1
+1 Introduction
+There has been significant discussion and debate about the degree to which Transformers can perform
+compositionalgeneralizationand“System2”reasoning, promptedbynegativeresultsonvariousevaluations
+for certain classes of Transformers (e.g., Dziri et al., 2023; Qiu et al., 2023; Shaw et al., 2021; Wu et al.,
+2024; Delétang et al., 2022; Mitchell et al., 2023; Valmeekam et al., 2023). Do such negative results reflect
+some mutable aspect of how such models were trained, or more fundamental architectural limitations? To
+better understand the conceptual limitations of Transformers, it would be useful to have an interpretable
+framework for understanding whether and how Transformers can represent and learn solutions to various
+tasks of interest. Such a framework could also potentially help elucidate a path towards improving these
+capabilities.
+We present a new framework for compiling interpretable, symbolic programs to Transformer model weights.
+TheframeworkisbasedonanewprogramminglanguagecalledALTA,ALanguageforTransformerAnalysis.
+It includes an interpreter for symbolically executing ALTA programs, and a compiler for converting ALTA
+programs to Transformer model weights. ALTA is inspired by prior work that introduced a programming
+languageforTransformerscalledRASP(Weissetal.,2021),andpriorworkthatbuiltacompilerfromRASP
+programs to model weights called Tracr (Lindner et al., 2023). ALTA complements and extends this prior
+work, with two key conceptual differences.
+First, ALTAsupportsdynamiccontrolflowoperationssuchasloops. WhileZhouetal.(2023b)showedhow
+RASP programs can be executed within the context of an auto-regressive decoder to implement some forms
+of loops by leveraging scratchpads (Nye et al., 2021; Wei et al., 2022), ALTA can implicitly support such
+1Codeisavailableathttps://github.com/google-deepmind/alta.
+1
+4202
+tcO
+32
+]GL.sc[
+1v77081.0142:viXra{ }
+ALTA >_ ALTA Transformer
+Program Com p i l e r Weights
+Figure 1: Overview of ALTA. We propose a new programming language called ALTA, and a “compiler”
+that can map ALTA programs to Transformer weights. ALTA is inspired by RASP, a language proposed
+by Weiss et al. (2021), and Tracr (Lindner et al., 2023), a compiler from RASP programs to Transformer
+weights. ALTAcomplementsandextendsthispriorwork,offeringtheabilitytoexpressloopsandtocompile
+programs to Universal Transformers, among other advantages.
+operations without relying on intermediate decoding steps. This is useful to study because such additional
+decoding steps can be computationally inefficient and are non-differentiable, typically necessitating addi-
+tional supervision. ALTA accomplishes this by compiling to Transformers with layer-wise weight sharing.
+From one perspective, Transformers with weight sharing are simply a special case of standard Transformers.
+However, they have also been shown to have an inductive bias that improves performance on composi-
+tional tasks (Csordás et al., 2021; Ontanon et al., 2022; Yang et al., 2024), which warrants further study.
+ALTA also supports a conditional computation mechanism, enabling compilation of programs to Universal
+Transformers (Dehghani et al., 2019), thereby enabling new constructive expressivity results for this class of
+models.
+Second,ALTArepresentsthecomputationoftheMLPsub-layerasasparsesetoftransition rules. Weshow
+that this enables compilation of complex programs to reasonably sized Transformers. In contrast, Tracr
+compiles functions over multiple variables expressed in RASP to dense lookup tables encoded in the MLP
+parameters, which can suffer from combinatorial explosion in the number of possible variable combinations.
+TheALTAcompilercanleveragethesparsityexpressedinthesetoftransitionrulestoreducethenumberof
+MLPhiddendimensionsrequired,insomecasesbymanyordersofmagnitude. Additionally,representingthe
+MLP sub-layer computation as a set of sparse transition rules supports new insights into the generalization
+potentialofMLPlayers, andthereforeofTransformers, whichweexploreboththeoreticallyandempirically.
+We highlight two primary applications of this framework. First, we show new constructive expressivity
+resultsforTransformersandUniversalTransformers. ThisincludesshowinghowTransformerscanimplement
+length-invariant algorithms for computing parity and addition. We also demonstrate a shift-reduce parsing
+algorithm that solves the SCAN (Lake & Baroni, 2018) benchmark of compositional generalization tasks.
+Second, weprovidetoolstoanalyzecaseswheretheexpressibilityofanalgorithmisestablished, butend-to-
+endtrainingonagiventrainingsetfailstoinducebehaviorconsistentwiththedesiredalgorithm. Specifically,
+weproposetouseintermediatesupervisionfromALTAexecutiontracesoveragiventrainingsetasalearning
+signal. In some cases, we show this additional supervision is sufficient to learn the desired algorithm, but
+in other cases failures can highlight limitations of the underlying architecture due to, e.g., the type of
+positional encoding used. To complement this empirical assessment, we also introduce the analytical notion
+of whether a program is minimal with respect to a training set, based on whether certain components of a
+program could be removed without affecting the training set predictions. We prove that if a program is not
+minimal with respect to a training set, then the compiled model will contain parameters that can be freely
+changed without affecting any predictions on the training set, i.e. some parameters are under-specified by
+thetrainingset,evenwithintermediatesupervision. Wedemonstratecaseswherethisanalysispredictsthat
+test set performance would be under-specified by a given training set, and show agreement with empirical
+results from training with intermediate supervision. We hope these tools can help provide insights to bridge
+the gap between expressibility and learnability of algorithms in Transformers.
+WemaketheALTAframework,includingthelanguagespecification,symbolicinterpreter,andcompilerfrom
+programs to Transformer weights, available to the community to support further applications and insights.
+2vars = {
+# Initialize parity with input.
+"parity": var(range=2, input_init_fn=lambda x: x),
+# Whether parity has been updated.
+"done": var(range=2, position_init_fn=lambda x: x == 0),
+# Position of current element.
+"idx": var(range=NUM_POS, position_init_fn=lambda x: x),
+# Index of preceding element.
+"idx_left": var(range=NUM_POS, position_init_fn=lambda x: max(0, x - 1),
+}
+attention_heads = {
+# Values of ‘parity’ and ‘done’ for preceding element.
+"parity_left": qkv("idx_left", "idx", "parity")
+"done_left": qkv("idx_left", "idx", "done")
+}
+def ffn_fn(z):
+if not z["done"] and z["done_left"]:
+# Update parity based on parity of preceding element.
+z["parity"] = z["parity_left"] ^ z["parity"]
+z["done"] = 1
+return program_spec(vars=vars, heads=attention_heads, ffn_fn=ffn_fn,
+output="parity", halt_spec=halt_spec("done", 1),
+input_range=2, position_range=NUM_POS)
+Figure 2: Example ALTA Program. The parity program computes whether a given binary sequence
+contains an even or odd number of “1” tokens. For an input of length N, the parity variable of the final
+inputelementwillequaltheparityoftheoverallsequenceafterN−1layers,andcomputationwillhalt. The
+program specification contains all of the necessary information to compile the program to a Transformer.
+2 Proposed Framework
+HerewegiveanoverviewofhowALTAprogramsarespecified,theircomputationalmodel,andhowtheycan
+be compiled to Transformers. More details on the ALTA program API is in Appendix A.1, and compilation
+details and examples are in Appendix A.2.
+2.1 Overview
+We give an example of an ALTA program in Figure 2. An ALTA program specification includes three key
+components: a set of variables, a set of attention heads, and a “MLP function”. We explain each of these
+below in the context of how they affect the execution of an ALTA program. The computational model of
+an ALTA program aligns closely with the computational model of a Transformer (Vaswani et al., 2017). In
+this paper we focus on encoder-only Transformers for simplicity. However, we note that ALTA programs
+can alternatively be executed in the context of a decoder-only Transformer. This involves adding a causal
+attention mask and outer auto-regressive decoding loop, but does not otherwise affect the definition and
+compilation of ALTA programs. We also focus on Transformers with layer-wise weight sharing, i.e. where
+all attention and MLP parameters are shared across layers. We also support Universal Transformers which
+have an input-dependent number of layers.
+Notably,notalltypesofcomputationexpressiblebyTransformerscanberepresentedinALTA,i.e.,therange
+oftheALTAcompilerisarelativelysmallsubspaceofallpossibleparametervalues. Forexample,ALTAhas
+limitedsupportfornumericcomputationanddoesnotsupportmodelingofprobabilisticoutputdistributions.
+However, ALTA provides broad support for implementing various types of deterministic algorithms.
+TheALTAframeworkincludesaninterpreter,whichsymbolicallyexecutesaprogram,andacompiler which
+compiles programs to Transformer weights. The input to an ALTA program P ∈P is a sequence of integers
+inputs (∈ X) and the output is a sequence of integers of equal length (∈ Y). The interpreter implements a
+function I : P ×X → Y. The interpreter is useful for development and understanding the computational
+3parity 1 1 1 1 1
+parity_left ∅ 1 ∅ 1 ∅
+done 1 1 1 1 1
+done_left ∅ 1 ∅ 1 ∅
+idx 0 0 0 0 0
+idx_left 0 0 0 0 0
+parity 0 0 1 1 1
+parity_left ∅ 1 ∅ 1 ∅
+done 0 0 1 1 1
+done_left ∅ 1 ∅ 1 ∅
+idx 1 1 1 1 1
+idx_left 0 0 0 0 0
+parity 1 1 1 1 0
+parity_left ∅ 0 ∅ 1 ∅
+done 0 0 0 0 1
+done_left ∅ 0 ∅ 1 ∅
+idx 2 2 2 2 2
+idx_left 1 1 1 1 1
+Figure3: Visualizationoftheinterpreter’ssymbolicresidualstreamfortheparityprogramshowninFigure2,
+for the input sequence [1,0,1]. The computed output sequence after the second layer is [1,1,0], which
+corresponds to the parity of the input sequence up to the current position, with the final value containing
+the parity of the entire input sequence. Output values are outlined in red, and values that have changed are
+highlighted in blue.
+modelinanabstractway. ThecompilerimplementsafunctionC suchthatθ =C(P)whereT(x,θ)≈I(P,x)
+for all x∈X and where T denotes the output of a Transformer encoder. The equality holds up to the limits
+of numerical approximation for well formed programs.
+2.2 Variables
+Similarly to Lindner et al. (2023), we adopt the residual stream view of Transformers as proposed by Elhage
+et al. (2021). In this view, the attention and MLP sub-layers within the Transformer read and write to
+the residual stream, which is represented by the activations between these sub-layers. While Transformers
+represent the residual stream for each element as a vector, our interpreter represents the residual stream
+for each element symbolically as a mapping of variables to values. The residual stream of the interpreter
+for the parity program of Figure 2 is shown in Figure 3. The set of variables and their possible values are
+specified by the program. There are three kinds of variables in ALTA: categorical variables have bounded
+integer values, numerical variables have real-valued values, and set variables have sets of bounded integer
+values. Variables representing the output of attention heads can also take on a null or undefined value (see
+§2.3). We establish a bijective mapping between variable assignments and activation vectors. Each possible
+value of a categorical variable is assigned a standard basis vector in the activation space, i.e., a one-hot
+encoding. Set variables are similarly represented, but with a multi-hot encoding. The scalar value of a
+numerical variable is directly represented in a single dimension.This mapping can be seen as establishing an
+approximateisomorphismwithrespecttothesub-layeroperationsoftheinterpreterandthoseofacompiled
+Transformer.
+2.3 Execution
+In this section, we explain the execution of an ALTA program in the interpreter, and summarize how each
+operation is encoded in a compiled Transformer, with more details in Appendix A. We denote the value of
+variable foo for element i at sub-layer k as zk . Let zk denote the vector of values for foo across all
+⟨i,foo⟩ ⟨:,foo⟩
+elements at sub-layer k.
+4
+noitnettA
+PLM
+PLM
+PLM
+noitnettA
+PLM
+PLM
+PLMInitialization Givenaninputsequencex=⟨x ,x ,··· ,x ⟩,weinitializeeveryvariableateveryposition.
+1 2 |x|
+Specifically,foravariablefoo,weinitializez0 asafunctionofx ,afunctionofthepositionalindexi,or
+⟨i,foo⟩ i
+asaconstant,basedonhowtheinitializationforfooisspecifiedintheprogram. Thisoperationisencodedin
+theparametersoftheTransformer’sembeddingtablesforinputandpositionvalues. Thenumberofpossible
+input values and possible positional indexes must be specified to the compiler. Alternatively, positional
+embeddings can be omitted if no variable is initialized as a function of position.
+Encoder Loop We then proceed to iteratively execute the self-attention sub-layer and the MLP sub-
+layer, which share parameters across all layers. A dynamic halting criterion, as proposed for the Univeral
+Transformer (Dehghani et al., 2019), can optionally be specified by the program, which consists of specify-
+ing which variable and corresponding value indicate that computation has completed for a given element.
+Alternatively, a maximum number of layers can be specified as an argument to the interpreter or when
+running a compiled Transformer. Similarly to Tracr (Lindner et al., 2023), our compiled Transformers do
+not include layer normalization operations, which simplifies compilation. Otherwise, the self-attention and
+MLP sub-layers align with those of a standard Transformer, and are described below.
+Self-Attention Foreachattentionhead,theinterpretercomputesaselectionmatrix,containinga“weight”
+foreverypairofinputs,andusesthistoaggregateinformationacrosspositions. Asimplifyingassumptionof
+ALTA,similarlytoRASP,isthatthismatrixisbinary. AttentionheadsinALTAarespecifiedbypointersto
+query, key, value, and output variables. Each head must have a unique output variable. The query variable
+mustbeacategoricalorsetvariable,thekeyvariablemustbecategorical,andthevalueandoutputvariables
+must both be either categorical or numerical. For each attention sub-layer k, every attention head updates
+the value of some output variable:
+zk+1 =aggregate(select(zk ,zk ),zk ),
+⟨:,out⟩ ⟨:,query⟩ ⟨:,key⟩ ⟨:,value⟩
+where query, key, value, and out are the variable names specified by the given attention head. The
+definition of select is similar to that used by RASP. The main difference is that we do not allow specifying
+a custom binary predicate as an argument to select, which simplifies compilation.2 The select operation
+returns a square selection matrix, S , where S = zk = zk if query is categorical and S =
+i,j i,j ⟨i,key⟩ ⟨j,query⟩ i,j
+zk ∈ zk if query is set-valued. The ag(cid:74) gregate operation(cid:75)returns a new sequence of values
+⟨i,key⟩ ⟨j,query⟩
+(cid:74) (cid:75)
+zk+1 . Each value zk+1 is determined by aggregating over the set of selected values, {zk |S = 1}
+⟨:,out⟩ ⟨i,out⟩ ⟨j,value⟩ i,j
+specified by the selection matrix row S . When value is numeric, aggregate is defined the same as in
+i,:
+RASP, outputting the average of the selected values, and will be undefined if no value is selected. When
+value is categorical, the output will be undefined if there is not exactly one value selected. The interpreter
+will raise an exception if any undefined variable is used as input to any operation in subsequent layers, as
+the encoding of an undefined variable is not well specified in a compiled model.
+Theseoperationscanbeencodedintheparametersofthequery,key,value,andoutputprojectionsforagiven
+attention head. A scalar hyperparameter controls the degree to which the softmax operation approximates
+generating a binary selection matrix. Each attention sub-layer is followed by a residual connection. We also
+support the option of using relative position representations (Shaw et al., 2018) by specifying a mask of
+relative positions that each attention head can attend to, which is applied to the selection matrix following
+the select operation. This binary mask is compiled to relative position biases using the parameterization
+of Raffel et al. (2020).
+MLP Function The MLP sub-layer implements a mapping from a set of variable assignments to a new
+setofvariableassignments,whichisappliedateveryelement. Forcompilationandanalysispurposes,ALTA
+programs internally represent this operation as a set of transition rules, which can be interpreted as logical
+implications with conjunctive antecedents. For example, here is one of the transition rules for the example
+2Whilethismayseemtorestricttheexpressivityofthequery,key,andvalueprojectionsintheTransformer,wenotethat
+theMLPsub-layerpriortotheattentionsub-layercansetthequery,key,andvaluevariablestoarbitraryvalues. Byusingset
+variables,itisstillpossibletospecifyarbitrarybinaryselectionmatrices.
+5program in Figure 2:
+consequent antecedent
+z }| { z }| {
+zk+1 =1 ⇐= zk =0 ∧ zk =1 ∧ zk =1 ∧ zk =0
+⟨·,parity⟩ ⟨·,done⟩ ⟨·,done_left⟩ ⟨·,parity_left⟩ ⟨·,parity⟩
+When the antecedent of a rule is satisfied by the MLP input (i.e., all of the conditions hold with respect
+to the variable assignments at the MLP input), then the consequent determines the value of some output
+variable for the next sub-layer. By construction, for a given output variable, there should never be more
+than one rule satisfied by the MLP input. If no rule is satisfied, then the value of that output variable is
+unchanged from the MLP input. We also include transition rules that ensure that every attention output
+variable is set to a null value so that it can be updated by the next attention sub-layer without conflicting
+with the residual connection. No attention output variable can otherwise be the output variable of any
+transition rule.
+The set of transition rules can be specified in two ways when defining ALTA programs. First, as shown
+in Figure 2, one can simply write a Python function with the signature shown. The set of transition rules
+can then be determined by executing this function for every possible set of variable assignments. In cases
+where this is not feasible, or where it is desirable to have more control over the set of transition rules, we
+offer an alternative API for specifying the set of transition rules more directly (see §A.1). In either case,
+the representation of numerical variable values in the antecedent of a transition rule is based on the set
+of discrete buckets specified for the given variable. Leveraging the sparsity represented in a set transition
+rules rather than compiling a lookup table consisting of all variable combinations can significantly reduce
+the number of MLP dimensions required.3
+The set of transition rules is represented in the parameters of the MLP layers. We generate a 4-layer MLP
+with clipped ReLU activations. The first 2 layers are only responsible for converting numerical and set
+variables into a one-hot representation, representing the possible values of these variables. For numerical
+variables, these correspond to a specified set of discrete buckets. Note that if a program contains only
+categorical variables, these 2 layers could be omitted. The final 2 layers of the MLP are based on the set of
+transition rules. The parameters of these layers are compiled such that the hidden activations are a binary
+vector where each value corresponds to whether a particular transition rule was satisfied by the MLP input.
+Each row of the first matrix is a function of the antecedent of a particular rule, and each column of the
+second matrix is a function of the consequent of a particular rule. Each MLP sub-layer is followed by a
+residual connection.
+Output Each ALTA program specifies an output variable, which must be categorical. If execution termi-
+nates after k sub-layers, and the output variable is output, then the program returns zk . Selecting
+⟨:,output⟩
+the subset of dimensions associated with the output variable is encoded in the parameters of the output
+projection. The Transformer then computes a softmax over this one-hot vector, and outputs the argmax.
+3 Expressibility and Learnability
+While there are many potential applications for ALTA, we focus on two applications in this paper: new
+constructive expressivity demonstrations, and analysis of whether such algorithms are learnable given a
+particular training set, with varying amounts of supervision. We give an overview of these applications and
+our proposed analytical tools here, with results in Section 4.
+3.1 Expressibility
+There has been considerable interest in establishing the theoretical expressivity of various classes of Trans-
+formers(Pérezetal.,2021;Chiangetal.,2023;Yunetal.,2020;Fengetal.,2023;Merrill&Sabharwal,2024).
+However, such theoretical works often do not demonstrate specific constructions of how Transformers can
+3For example, consider a string x of length N represented by a set of categorical variables, x1, x2, ···, xN, each with K
+possiblevalues. WewanttodetermineifxisinsomevocabularyconsistingofV strings. Anaivelookuptableapproachrequires
+KN hiddendimensions,butthisfunctioncanberepresentedwithonlyV transitionrules.
+6expressalgorithmsofinterestwithlimitedresources,whichcanrequiremanuallyspecifyingweightmatrices.
+Tools like RASP, Tracr, andALTA make it easier to construct such constructive demonstrations. For exam-
+ple, RASP and its extensions have supported many new expressivity results for Transformers (Zhou et al.,
+2023b; Angluin et al., 2023; Kazemnejad et al., 2024; Yang & Chiang, 2024; Strobl et al., 2024; Friedman
+et al., 2024).
+Much of the recent work on the expressivity of Transformers has focused on Transformer decoders that can
+execute an input-dependent number of intermediate decoding steps before producing a final output (Pérez
+et al., 2021; Feng et al., 2023; Merrill & Sabharwal, 2024; Zhou et al., 2023b). While such intermediate
+decoding steps have been empirically successful at improving sequential reasoning capabilities (Nye et al.,
+2021; Wei et al., 2022), this typically requires additional supervision during training (Pfau et al., 2024).
+Additionally, leveraging such intermediate decoding steps may not be the most computationally efficient
+way to represent certain algorithms. Therefore, it is interesting to study whether and how Transformers
+can represent various algorithms without relying on such intermediate decoding steps, as an alternative or
+complementary approach. We use ALTA to provide new constructive expressibility results for Universal
+Transformer encoders for various resource bounds, detailed in Section 4. When considering a finite limit on
+the number of layers, such results also hold as a special case of standard Transformer encoders.
+3.2 Learnability
+Inmanycases,wecanestablishthatanalgorithmisexpressiblebyagivenclassofTransformers,buttraining
+a model from this class on input and output examples of a particular algorithm can fail to induce a model
+that generalizes outside of the training set. It can be difficult to diagnose the reason for such failures, and
+to determine what to change regarding the architecture, training objective, or training data to improve
+generalization. We provide two tools to help bridge the gap between expressibility and learnability, which
+we discuss next.
+Trace Supervision WeproposetouseintermediatesupervisionfromALTAexecutiontracesoveragiven
+training set as a learning signal. Given a program P and a set of model inputs X, we run P for every input
+in X, and extract the variable assignments at the input and output of every sub-layer, for every position.
+These traces can be used to derive trace supervision, which encourages the behavior of the model to align
+with that of the program being used to provide supervision. In our experiments, for simplicity, we focus on
+trainingtheMLPparameterstoreconstructthedesiredoutputvectorforeachinputvector,andcompilethe
+remaining parameters. In some cases, we show this additional supervision is sufficient to learn the desired
+algorithm, but in other cases failures can highlight limitations of the underlying architecture due to, e.g.,
+the type of positional encoding used. We report results on the parity task in §4, and details of the training
+procedure in Appendix C.1.
+Theoretical Analysis To complement the empirical results from trace supervision, we also take a step
+towardsanalyticallycharacterizingtheconditionsunderwhichanyparticularALTAprogramcanbelearned
+from a given training set. To this end, we introduce criteria for determining whether a program is minimal
+withrespecttoatrainingset,whichdependsonwhethercertaincomponentsofaprogramcouldberemoved
+without affecting the training set predictions.
+Herewegiveanoverviewofourtheoreticalanalysis,whichisdetailedinAppendixB.Wefocusonthesetof
+MLPparameters,andconsiderasettingsimilartothatoftrainingwithtracesupervision,wherewederivea
+set of MLP inputs, D, corresponding to running a given program over some set of model inputs. The MLP
+parameters are specified by the set of transition rules, R, in the given program. A rule set is minimal with
+respect to a set of MLP inputs, D, if it is not possible to remove any rule or any constraint from any rule
+without changing the program output on some input in D. Similarly to training with trace supervison, we
+consider a reconstruction loss over D that quantifies how well the MLP outputs correspond to the outputs
+specified by R. Our results are with respect to a training objective that combines this reconstruction loss
+with a regularizer on the parameter weights. We show that:
+Theorem1(Informal). IftherulesetRisnotminimalwithrespecttoD,thenthecompiledMLPparameters
+are not a strict coordinate-wise local optimum of the regularized reconstruction loss.
+7Length > 20 Ones > 20
+1.0 1.0
+Compiled (Original)
+Compiled (Minimal)
+0.5 0.5 Trace Supervision
+0.0 0.0
+Sequential Sequential Sum + Modulo Sequential Sequential Sum + Modulo
+(Relative) (Absolute) (Relative) (Absolute)
+Figure4: Generalizationbylengthandnumberofonesfordifferentparityprogramsinvarioussettings. The
+training set consists of inputs of up to length 20 (and therefore up to 20 “ones”) while the test set consists
+of inputs with lengths 21 to 40. While the original compiled models have perfect accuracy, the minimal
+versions of the programs exhibit different generalization behaviors and closely mirror the behaviors of the
+trace supervision experiments.
+Theorem 2 (Informal). If the rule set R is minimal with respect to D, then the compiled MLP parameters
+are a strict coordinate-wise local optimum of the regularized reconstruction loss.
+Therefore, whentheminimalityconditionsaremet, wecanconcludethatthereexistsalocaloptimumpoint
+with respect to the training objective that corresponds to the behavior of the given program, although we
+are not guaranteed to find this point during training. See Theorems 1 and 2 in Appendix B for the formal
+statements and proofs.
+We can apply this theory to analyze a particular program, training set, and test set. We can determine a
+minimal version oftheprogramwithrespecttothetrainingsetbyremovingaspectsoftheprogramthatdo
+not change any predictions on the training set (Appendix C.2 describes the exact procedure used). We can
+then assess whether this minimal version generalizes, i.e., has the same behavior as the original program on
+a test set. This analytical test does not require training models or selecting hyperparameters, and provides
+an interpretable assessment of the potentially underspecified aspects of a program. Our theoretical analysis
+suggests that a Transformer trained with trace supervision from a program on a training set is more likely
+to generalize if the minimal version of the program generalizes, and we evaluate this in Section 4.
+Notably, this notion of minimality can also help generalize some of the ideas introduced by Zhou et al.
+(2023b)withrespecttoRASP.AsZhouetal.(2023b)wereinterestedinunderstandinglengthgeneralization,
+they proposed some restrictions on RASP programs that would otherwise be “difficult to learn”. First,
+they proposed restrictions on programs containing certain operations over positional indices. Second, they
+excluded certain programs from consideration on an intuitive basis, such as a program for solving the parity
+task using sum and modulo operations. In both cases, such programs would not be minimal with respect to
+some finite length training set, according to our proposed criteria, as we show in Section 4.
+4 Experiments and Analysis
+We detail experiments and analysis on several tasks, with further details and results in Appendix D.
+4.1 Parity
+The parity task requires the model to compute whether a binary sequence contains an even or odd number
+of ones. The ability of transformers to learn parity has been studied extensively (Hahn, 2020), particularly
+the degree to which they exhibit length generalization (Bhattamishra et al., 2020; Chiang & Cholak, 2022;
+Ruoss et al., 2023; Delétang et al., 2022). Empirically successful solutions have relied on scratchpads (Anil
+et al., 2022; Zhou et al., 2022). Zhou et al. (2023b) used a variant of RASP to investigate why Transformers
+struggle with length generalization on parity and why scratchpads help.
+We study three ALTA programs for computing parity detailed in Appendix D.1. First, the Sequential
+(Absolute) program computes parity by iterating through each position (one per layer), flipping a parity
+bit every time a one is encountered. While this program uses absolute positions to enable propagating
+8
+ycaruccA ycaruccAAccuracy by Length Accuracy by Number of Ones
+1.0 1.0
+Standard Supervision
+Sum + Modulo
+0.5 0.5 Trace Supervision
+Sequential (Relative)
+Trace Supervision
+0.0 0.0
+Length 20 Length > 20 Ones 20 Ones > 20
+Figure 5: Accuracy by length and number of ones for Transformers trained with trace supervision vs.
+standard, end-to-end supervision. Transformers trained with standard supervision exhibit behavior similar
+tothosetrainedwithtracesupervisionfromtheSum + Modulo program, i.e., theyexhibitnogeneralization
+to numbers of ones greater than those seen during training, but they do exhibit some length generalization.
+informationtoneighboringtokens,wealsoconsideraSequential(Relative)versionthatusesrelativepositions
+instead. Finally, the Sum + Modulo program computes parity in a single layer, using an attention head to
+compute the total number of ones, and then computing a mod 2 operation in the following MLP sub-layer.
+Foreachprogram,Figure4comparesthegeneralizationbehaviorofTransformerscompiledfromtheoriginal
+version, compiled from the minimal version, and trained from trace supervision. The minimal versions of
+these programs exhibit different generalization behavior. The minimal Sequential (Absolute) program does
+not generalize to examples longer than those seen during training, because the embeddings for positions
+not seen during training are not specified. The minimal Sum + Modulo program does not generalize to
+examples with more ones than those seen during training, as it does not contain transition rules related to
+thenumericalvaluescorrespondingtolargernumbersofonesthanthoseseenduringtraining. However,itcan
+handleexampleslongerthanthetrainingexamplesifthenumbersofoneswereseenduringtraining. Onlythe
+minimalSequential(Relative)programgeneralizestoallinputlengths. Notably,thetracesupervisionresults
+exhibitthesamegeneralizationbehaviorastheminimalprograms, aspredictedinSection3. TheSequential
+(Relative) program is also notable because it provides a constructive demonstration of how a Universal
+Transformerencodercanexpressalength-invariantsolutiontoparitywithafinitesetofparameters,without
+relying on intermediate decoding steps.4
+WealsoevaluatedseveraldifferentTransformervariantsusingstandard,end-to-endsupervision,withresults
+shown in Figure 5. Theoretically, a transformer trained with weight sharing and at least as many layers as
+the longest examples in the train set could learn the minimal Sequential (Relative) algorithm and generalize
+to examples of length up to the number of layers. However, in practice, all variants exhibit behavior similar
+to that of the minimal Sum + Modulo program, i.e., they exhibit some degree of length generalization but
+donotgeneralizetoexampleswithmoreonesthanwereseenduringtraining. See§D.1foradditionalresults
+and experiment details.
+Simplicity Bias Prior work has attempted to understand the implicit inductive bias of Transformers
+in relation to a simplicity bias given some measure of complexity (Zhou et al., 2023b; Abbe et al., 2023;
+Bhattamishra et al., 2023; Tsoy & Konstantinov, 2024). For instance, inspired by the Minimum Description
+Length (MDL) principle (Rissanen, 1978; Grunwald, 2004), Zhou et al. (2023b) hypothesized that Trans-
+formers are biased towards learning behavior corresponding to the simplest RASP program that fits the
+training set, if one exists. Properties of the set of transition rules in an ALTA program can potentially
+provide new measures of Transformer complexity. For example, we can empirically compare the degree to
+whichTransformerswithlayerwiseweightsharinghaveanimplicitbiastowardslearning“simpler”programs
+according to the number of transition rules. While the minimal Sequential (Relative) program contains 7
+rules and the minimal Sum + Modulo program contains 31 rules, our results show that end-to-end model
+behavior is more consistent with the Sum + Modulo program. This indicates that Transformers, in this
+4WhileChiang&Cholak(2022)previouslydemonstratedhowaTransformercanexpressasolutiontoparityforarbitrary
+lengths, their approach requires encoding activations and parameters with a degree of numerical precision that scales with
+the maximum input length. The Sequential (Relative) program does not have this limitation, but does require more layers
+of computation. Zhou et al. (2023b) also provide a length-invariant construction, but their approach requires intermediate
+decodingsteps. SeeAppendixD.1fordetails.
+9
+ycaruccA ycaruccAcontext, do not have an inherent simplicity bias that aligns with the number of transition rules expressed in
+ALTA.Inthisparticularcontext,theend-to-endbehaviorismoreconsistentwiththealgorithmthatrequires
+the fewest layers to execute. The results for SCAN in Section 4.4 show a similar finding. This suggests a
+potentially interesting direction to explore for future work.
+4.2 Addition
+Another common benchmark for evaluating Transformer generalization is multi-digit addition. This task
+has been studied extensively (Nogueira et al., 2021; Liu et al., 2022), particularly with respect to length
+generalization (Zhou et al., 2024; Shen et al., 2023; Zhou et al., 2023b; Lee et al., 2024; Kazemnejad et al.,
+2024; Ruoss et al., 2023). While new positional encodings such as FIRE (Li et al., 2024) can improve
+performance,Transformersstillstrugglewithlengthgeneralizationonthistask,unlessprovidedwithcarefully
+constructed supervision over intermediate decoding steps (Zhou et al., 2023b; 2024).
+In Appendix D.2 we detail an ALTA program with dynamic halting that can add two positive integers of
+unbounded size. This program compiles to a Universal Transformer encoder with relative position repre-
+sentations (as mentioned in Section 2, we use the parameterization of Raffel et al. (2020)). The number of
+layersrequiredtocomputethesumisN+2, whereN isthenumberofdigitsinthelargerofthetwoinputs.
+Notably, the minimal version of this program with respect to a training set that includes only inputs with
+≤3 digits can generalize to unbounded input lengths.
+4.3 SUBLEQ
+SUBLEQ is a single instruction language that has been shown to be Turing-complete when given access
+to infinite memory (Mavaddat & Parhami, 1988). Giannou et al. (2023) previously showed how a Looped
+Transformer can implement an interpreter for a variant of SUBLEQ. In Appendix D.3 we demonstrate an
+ALTA program for implementing an interpreter for a less restrictive version of SUBLEQ in a Universal
+Transformer encoder.
+4.4 SCAN
+The SCAN (Lake & Baroni, 2018) suite of compositional generalization tasks requires mapping natural lan-
+guage commands (e.g., “jump twice”) to action sequences (e.g., JUMP JUMP). Certain train and test splits
+have been shown to be challenging for Transformer-based models (Keysers et al., 2020; Furrer et al., 2020;
+Qiu et al., 2022b; Kazemnejad et al., 2024). Empirically successful solutions have involved symbolic decom-
+positions of some form (Shaw et al., 2021; Chen et al., 2020; Herzig & Berant, 2021; Qiu et al., 2022a; Zhou
+et al., 2023a).
+In Appendix D.4, we demonstrate an ALTA program that solves the SCAN task. First, the program
+executes a shift-reduce parse of the input sequence, representing the parse as a tree. Second, the ALTA
+program decodes the output sequence by traversing the parse tree. The program represents the necessary
+variable-length data structures (a stack, parse tree, and buffer) using a variable number of input tokens.
+Compiled models require fewer than 2,000 MLP hidden dimensions despite there being more than 1060
+possible variable combinations in the program. This highlights the importance of sparsity, which ALTA
+enables by representing the MLP computation as a set of transition rules.
+Notably, the minimal version of our program with respect to the training set generalizes to the test set,
+for all of the most challenging length-based and Maximum Compound Divergence (MCD) (Keysers et al.,
+2020) splits. Our ALTA program for SCAN thus gives a constructive demonstration of how Transformers
+can represent algorithms exhibiting systematic generalization: a finite set of transition rules and attention
+operations can be recombined in novel ways to process novel inputs.
+We also trained several Transformer variants using standard, end-to-end supervision on the same splits,
+varying the total number of layers up to a maximum of 256 encoder layers and 256 decoder layers (as our
+ALTA program requires at most 512 total layers). However, all generalize poorly on the test splits, and
+increasing the number of layers does not improve generalization. Consistent with the parity results, end-
+10to-end training does not learn a sequential algorithm that generalizes well, despite demonstrating that such
+an algorithm is expressible for a similar class of Transformers. See Appendix D.4 for additional results,
+experiment details, and discussion.
+5 Discussion
+Limitations ALTA has many of the same limitations as RASP and Tracr with respect to the potential
+differences between compiled models and those learned in practice, as discussed by Lindner et al. (2023). In
+particular, the framework provides limited support for numerical computations and modeling probabilistic
+outputdistributions. Thepropertiesofcompiledmodelsmaynotreflectthoseofmodelslearnedinpractice.
+However, ALTA can still be a useful tool if these limitations are kept in mind when interpreting results.
+Opportunities In this paper, we focused on analysis related to expressibility and learnability. However,
+there are many potential applications of the ALTA framework that could be interesting for future work. For
+example,wediscussmoreflexiblealternativesforlearningfromtracesupervisioninAppendixC.1. Addition-
+ally, ALTA could potentially help develop test cases for interpretability tools. This was one of the primary
+motivations for Tracr, which has been applied to help design interpretability benchmarks (Thurnherr &
+Scheurer, 2024) and more interpretable Transformers (Friedman et al., 2023). Finally, compiled components
+can potentially be integrated within learned models, such as circuits for arithmetic (Nanda et al., 2023) or
+inductionheads(Akyüreketal.,2024). Morebroadly,wehopetheALTAframeworkcanhelpthecommunity
+better understand how Transformers can represent and learn various algorithms, and inspire new methods
+and insights.
+Acknowledgments
+We would like to thank Anian Ruoss, David Lindner, Adam Fisch, and Chris Dyer for helpful feedback and
+discussions.
+References
+Emmanuel Abbe, Samy Bengio, Aryo Lotfi, and Kevin Rizk. Generalization on the unseen, logic reasoning
+and degree curriculum. In International Conference on Machine Learning, pp. 31–60. PMLR, 2023.
+EkinAkyürek,BailinWang,YoonKim,andJacobAndreas. In-contextlanguagelearning: Arhitecturesand
+algorithms. arXiv preprint arXiv:2401.12973, 2024.
+Dana Angluin, David Chiang, and Andy Yang. Masked hard-attention transformers and boolean rasp
+recognize exactly the star-free languages. arXiv preprint arXiv:2310.13897, 2023.
+Cem Anil, Yuhuai Wu, Anders Andreassen, Aitor Lewkowycz, Vedant Misra, Vinay Ramasesh, Ambrose
+Slone, Guy Gur-Ari, Ethan Dyer, and Behnam Neyshabur. Exploring length generalization in large
+language models. Advances in Neural Information Processing Systems, 35:38546–38556, 2022.
+Satwik Bhattamishra, Kabir Ahuja, and Navin Goyal. On the ability and limitations of transformers to
+recognize formal languages. arXiv preprint arXiv:2009.11264, 2020.
+Satwik Bhattamishra, Arkil Patel, Varun Kanade, and Phil Blunsom. Simplicity bias in transformers and
+their ability to learn sparse boolean functions. In The 61st Annual Meeting Of The Association For
+Computational Linguistics, 2023.
+Xinyun Chen, Chen Liang, Adams Wei Yu, Dawn Song, and Denny Zhou. Compositional generalization via
+neural-symbolicstackmachines. Advances in Neural Information Processing Systems,33:1690–1701,2020.
+David Chiang and Peter Cholak. Overcoming a theoretical limitation of self-attention. arXiv preprint
+arXiv:2202.12172, 2022.
+11DavidChiang,PeterCholak,andAnandPillay. Tighterboundsontheexpressivityoftransformerencoders.
+In International Conference on Machine Learning, pp. 5544–5562. PMLR, 2023.
+Noam Chomsky. Syntactic Structures. Mouton, Berlin, Germany, 1957.
+Róbert Csordás, Kazuki Irie, and Juergen Schmidhuber. The devil is in the detail: Simple tricks improve
+systematic generalization of transformers. In Proceedings of the 2021 Conference on Empirical Methods
+in Natural Language Processing, pp. 619–634, 2021.
+Mostafa Dehghani, Stephan Gouws, Oriol Vinyals, Jakob Uszkoreit, and Lukasz Kaiser. Universal trans-
+formers. In International Conference on Learning Representations, 2019.
+Grégoire Delétang, Anian Ruoss, Jordi Grau-Moya, Tim Genewein, Li Kevin Wenliang, Elliot Catt, Chris
+Cundy,MarcusHutter,ShaneLegg,JoelVeness,etal. NeuralnetworksandtheChomskyhierarchy. arXiv
+preprint arXiv:2207.02098, 2022.
+P Kingma Diederik. Adam: A method for stochastic optimization. (No Title), 2014.
+Nouha Dziri, Ximing Lu, Melanie Sclar, Xiang Lorraine Li, Liwei Jiang, Bill Yuchen Lin, Sean Welleck,
+Peter West, Chandra Bhagavatula, Ronan Le Bras, et al. Faith and fate: Limits of transformers on
+compositionality. Advances in Neural Information Processing Systems, 36, 2023.
+JavidEbrahimi,DhruvGelda,andWeiZhang. Howcanself-attentionnetworksrecognizedyck-nlanguages?
+In Findings of the Association for Computational Linguistics: EMNLP 2020, pp. 4301–4306, 2020.
+Nelson Elhage, Neel Nanda, Catherine Olsson, Tom Henighan, Nicholas Joseph, Ben Mann, Amanda
+Askell, Yuntao Bai, Anna Chen, Tom Conerly, et al. A mathematical framework for transformer cir-
+cuits. TransformerCircuitsThread,2021. URLhttps://transformer-circuits.pub/2021/framework/
+index.html.
+Guhao Feng, Bohang Zhang, Yuntian Gu, Haotian Ye, Di He, and Liwei Wang. Towards revealing the
+mystery behind chain of thought: A theoretical perspective. In Thirty-seventh Conference on Neural
+Information Processing Systems, 2023. URL https://openreview.net/forum?id=qHrADgAdYu.
+Dan Friedman, Alexander Wettig, and Danqi Chen. Learning transformer programs. Advances in Neural
+Information Processing Systems, 36, 2023.
+Dan Friedman, Abhishek Panigrahi, and Danqi Chen. Representing rule-based chatbots with transformers.
+arXiv preprint arXiv:2407.10949, 2024.
+DanielFurrer,MarcvanZee,NathanScales,andNathanaelSchärli.Compositionalgeneralizationinsemantic
+parsing: Pre-training vs. specialized architectures. arXiv preprint arXiv:2007.08970, 2020.
+AngelikiGiannou, ShashankRajput, Jy-yongSohn, KangwookLee, JasonDLee, andDimitrisPapailiopou-
+los. Loopedtransformersasprogrammablecomputers. InInternational Conference on Machine Learning,
+pp. 11398–11442. PMLR, 2023.
+Peter Grunwald. A tutorial introduction to the minimum description length principle. arXiv preprint
+math/0406077, 2004.
+Michael Hahn. Theoretical limitations of self-attention in neural sequence models. Transactions of the
+Association for Computational Linguistics, 8:156–171, 2020.
+Dan Hendrycks and Kevin Gimpel. Gaussian error linear units (gelus). arXiv preprint arXiv:1606.08415,
+2016.
+Jonathan Herzig and Jonathan Berant. Span-based semantic parsing for compositional generalization. In
+Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th
+International Joint Conference on Natural Language Processing (Volume 1: Long Papers), pp. 908–921,
+2021.
+12AmirhosseinKazemnejad, InkitPadhi, KarthikeyanNatesanRamamurthy, PayelDas, andSivaReddy. The
+impact of positional encoding on length generalization in transformers. Advances in Neural Information
+Processing Systems, 36, 2024.
+Daniel Keysers, Nathanael Schärli, Nathan Scales, Hylke Buisman, Daniel Furrer, Sergii Kashubin, Nikola
+Momchev, Danila Sinopalnikov, Lukasz Stafiniak, Tibor Tihon, Dmitry Tsarkov, Xiao Wang, Marc van
+Zee, andOlivierBousquet. Measuringcompositionalgeneralization: Acomprehensivemethodonrealistic
+data. In International Conference on Learning Representations, 2020. URL https://openreview.net/
+forum?id=SygcCnNKwr.
+Taku Kudo and John Richardson. Sentencepiece: A simple and language independent subword tokenizer
+and detokenizer for neural text processing. In Proceedings of the 2018 Conference on Empirical Methods
+in Natural Language Processing: System Demonstrations, pp. 66–71, 2018.
+Brenden Lake and Marco Baroni. Generalization without systematicity: On the compositional skills of
+sequence-to-sequencerecurrentnetworks. InInternationalconferenceonmachinelearning,pp.2873–2882.
+PMLR, 2018.
+Nayoung Lee, Kartik Sreenivasan, Jason D. Lee, Kangwook Lee, and Dimitris Papailiopoulos. Teaching
+arithmetic to small transformers. In The Twelfth International Conference on Learning Representations,
+2024. URL https://openreview.net/forum?id=dsUB4bst9S.
+ShandaLi,ChongYou,GuruGuruganesh,JoshuaAinslie,SantiagoOntanon,ManzilZaheer,SumitSanghai,
+Yiming Yang, Sanjiv Kumar, and Srinadh Bhojanapalli. Functional interpolation for relative positions
+improveslongcontexttransformers.InTheTwelfthInternationalConferenceonLearningRepresentations,
+2024. URL https://openreview.net/forum?id=rR03qFesqk.
+David Lindner, János Kramár, Sebastian Farquhar, Matthew Rahtz, Tom McGrath, and Vladimir Miku-
+lik. Tracr: Compiled transformers as a laboratory for interpretability. Advances in Neural Information
+Processing Systems, 36, 2023.
+Ziming Liu, Ouail Kitouni, Niklas S Nolte, Eric Michaud, Max Tegmark, and Mike Williams. Towards
+understanding grokking: An effective theory of representation learning. Advances in Neural Information
+Processing Systems, 35:34651–34663, 2022.
+FarhadMavaddatandBehroozParhami. Urisc: theultimatereducedinstructionsetcomputer. International
+Journal of Electrical Engineering Education, 25(4):327–334, 1988.
+William Merrill and Ashish Sabharwal. The expressive power of transformers with chain of thought. In The
+Twelfth International Conference on Learning Representations, 2024.
+Melanie Mitchell, Alessandro B Palmarini, and Arseny Moskvichev. Comparing humans, gpt-4, and gpt-4v
+on abstraction and reasoning tasks. arXiv preprint arXiv:2311.09247, 2023.
+Richard Montague. Universal grammar. Theoria, 36(3):373–398, 1970.
+Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith, and Jacob Steinhardt. Progress measures for
+grokking via mechanistic interpretability. arXiv preprint arXiv:2301.05217, 2023.
+Michael Nielsen. A visual proof that neural nets can compute any function. URL:
+http://neuralnetworksanddeeplearning. com/chap4. html, 2016.
+Rodrigo Nogueira, Zhiying Jiang, and Jimmy Lin. Investigating the limitations of transformers with simple
+arithmetic tasks. arXiv preprint arXiv:2102.13019, 2021.
+Maxwell Nye, Anders Johan Andreassen, Guy Gur-Ari, Henryk Michalewski, Jacob Austin, David Bieber,
+David Dohan, Aitor Lewkowycz, Maarten Bosma, David Luan, et al. Show your work: Scratchpads for
+intermediate computation with language models. arXiv preprint arXiv:2112.00114, 2021.
+13Santiago Ontanon, Joshua Ainslie, Zachary Fisher, and Vaclav Cvicek. Making transformers solve composi-
+tional tasks. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics
+(Volume 1: Long Papers), pp. 3591–3607, 2022.
+Jorge Pérez, Pablo Barceló, and Javier Marinkovic. Attention is turing-complete. Journal of Machine
+Learning Research, 22(75):1–35, 2021.
+Jackson Petty, Sjoerd Steenkiste, Ishita Dasgupta, Fei Sha, Dan Garrette, and Tal Linzen. The impact
+of depth on compositional generalization in transformer language models. In Proceedings of the 2024
+Conference of the North American Chapter of the Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers), pp. 7232–7245, 2024.
+Jacob Pfau, William Merrill, and Samuel R Bowman. Let’s think dot by dot: Hidden computation in
+transformer language models. arXiv preprint arXiv:2404.15758, 2024.
+Linlu Qiu, Peter Shaw, Panupong Pasupat, Pawel Nowak, Tal Linzen, Fei Sha, and Kristina Toutanova.
+Improving compositional generalization with latent structure and data augmentation. In Proceedings of
+the 2022 Conference of the North American Chapter of the Association for Computational Linguistics:
+Human Language Technologies, pp. 4341–4362, 2022a.
+LinluQiu,PeterShaw,PanupongPasupat,TianzeShi,JonathanHerzig,EmilyPitler,FeiSha,andKristina
+Toutanova. Evaluating the impact of model scale for compositional generalization in semantic parsing. In
+Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing,pp.9157–9179,
+2022b.
+Linlu Qiu, Liwei Jiang, Ximing Lu, Melanie Sclar, Valentina Pyatkin, Chandra Bhagavatula, Bailin Wang,
+Yoon Kim, Yejin Choi, Nouha Dziri, et al. Phenomenal yet puzzling: Testing inductive reasoning capa-
+bilities of language models with hypothesis refinement. arXiv preprint arXiv:2310.08559, 2023.
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a unified text-to-text transformer.
+Journal of machine learning research, 21(140):1–67, 2020.
+Jorma Rissanen. Modeling by shortest data description. Automatica, 14(5):465–471, 1978.
+David E Rumelhart, Geoffrey E Hinton, and Ronald J Williams. Learning internal representations by
+error propagation, parallel distributed processing, explorations in the microstructure of cognition, ed. de
+rumelhart and j. mcclelland. vol. 1. 1986. Biometrika, 71(599-607):6, 1986.
+Anian Ruoss, Grégoire Delétang, Tim Genewein, Jordi Grau-Moya, Róbert Csordás, Mehdi Bennani, Shane
+Legg, and Joel Veness. Randomized positional encodings boost length generalization of transformers. In
+Proceedingsofthe61stAnnualMeetingoftheAssociationforComputationalLinguistics(Volume2: Short
+Papers), pp. 1889–1903, 2023.
+Peter Shaw, Jakob Uszkoreit, and Ashish Vaswani. Self-attention with relative position representations. In
+Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational
+Linguistics: Human Language Technologies, Volume 2 (Short Papers), pp. 464–468, 2018.
+Peter Shaw, Ming-Wei Chang, Panupong Pasupat, and Kristina Toutanova. Compositional generalization
+and natural language variation: Can a semantic parsing approach handle both? In Proceedings of the
+59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint
+Conference on Natural Language Processing (Volume 1: Long Papers), pp. 922–938, 2021.
+Noam Shazeer and Mitchell Stern. Adafactor: Adaptive learning rates with sublinear memory cost. In
+International Conference on Machine Learning, pp. 4596–4604. PMLR, 2018.
+RuoqiShen,SébastienBubeck,RonenEldan,YinTatLee,YuanzhiLi,andYiZhang. Positionaldescription
+matters for transformers arithmetic. arXiv preprint arXiv:2311.14737, 2023.
+14Lena Strobl, Dana Angluin, David Chiang, Jonathan Rawski, and Ashish Sabharwal. Transformers as
+transducers. arXiv preprint arXiv:2404.02040, 2024.
+Hannes Thurnherr and Jérémy Scheurer. Tracrbench: Generating interpretability testbeds with large lan-
+guage models. In ICML 2024 Workshop on Mechanistic Interpretability, 2024.
+Paul Tseng. Convergence of a block coordinate descent method for nondifferentiable minimization. Journal
+of optimization theory and applications, 109:475–494, 2001.
+Nikita Tsoy and Nikola Konstantinov. Simplicity bias of two-layer networks beyond linearly separable data.
+arXiv preprint arXiv:2405.17299, 2024.
+Karthik Valmeekam, Matthew Marquez, Sarath Sreedharan, and Subbarao Kambhampati. On the planning
+abilities of large language models-a critical investigation. Advances in Neural Information Processing
+Systems, 36:75993–76005, 2023.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,ŁukaszKaiser,
+and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems, 30,
+2017.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,DennyZhou,etal.
+Chain-of-thought prompting elicits reasoning in large language models. Advances in neural information
+processing systems, 35:24824–24837, 2022.
+Gail Weiss, Yoav Goldberg, and Eran Yahav. Thinking like transformers. In International Conference on
+Machine Learning, pp. 11080–11090. PMLR, 2021.
+Zhaofeng Wu, Linlu Qiu, Alexis Ross, Ekin Akyürek, Boyuan Chen, Bailin Wang, Najoung Kim, Jacob An-
+dreas,andYoonKim. Reasoningorreciting? exploringthecapabilitiesandlimitationsoflanguagemodels
+through counterfactual tasks. In Proceedings of the 2024 Conference of the North American Chapter of
+the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers),
+pp. 1819–1862, 2024.
+Andy Yang and David Chiang. Counting like transformers: Compiling temporal counting logic into softmax
+transformers. arXiv preprint arXiv:2404.04393, 2024.
+Liu Yang, Kangwook Lee, Robert D Nowak, and Dimitris Papailiopoulos. Looped transformers are better
+at learning learning algorithms. In The Twelfth International Conference on Learning Representations,
+2024.
+Shunyu Yao, Binghui Peng, Christos Papadimitriou, and Karthik Narasimhan. Self-attention networks can
+process bounded hierarchical languages. In Proceedings of the 59th Annual Meeting of the Association for
+Computational Linguistics and the 11th International Joint Conference on Natural Language Processing
+(Volume 1: Long Papers), pp. 3770–3785, 2021.
+ChulheeYun,SrinadhBhojanapalli,AnkitSinghRawat,SashankReddi,andSanjivKumar. Aretransform-
+ers universal approximators of sequence-to-sequence functions? In International Conference on Learning
+Representations, 2020. URL https://openreview.net/forum?id=ByxRM0Ntvr.
+DennyZhou, NathanaelSchärli, LeHou, JasonWei, NathanScales, XuezhiWang, DaleSchuurmans, Claire
+Cui, Olivier Bousquet, Quoc V Le, and Ed H. Chi. Least-to-most prompting enables complex reasoning
+in large language models. In The Eleventh International Conference on Learning Representations, 2023a.
+URL https://openreview.net/forum?id=WZH7099tgfM.
+HattieZhou,AzadeNova,HugoLarochelle,AaronCourville,BehnamNeyshabur,andHanieSedghi. Teach-
+ing algorithmic reasoning via in-context learning. arXiv preprint arXiv:2211.09066, 2022.
+Hattie Zhou, Arwen Bradley, Etai Littwin, Noam Razin, Omid Saremi, Josh Susskind, Samy Bengio, and
+Preetum Nakkiran. What algorithms can transformers learn? a study in length generalization. arXiv
+preprint arXiv:2310.16028, 2023b.
+15Yongchao Zhou, Uri Alon, Xinyun Chen, Xuezhi Wang, Rishabh Agarwal, and Denny Zhou. Transformers
+can achieve length generalization but not robustly. arXiv preprint arXiv:2402.09371, 2024.
+16A Framework Details
+In this section we provide additional details about the ALTA Framework, as introduced in §2. First, we
+detailtheprogramAPIin§A.1,whichisreferencedbytheALTAprogramsinthispaper. Second,weprovide
+more details and examples of how programs are compiled to Transformer weights in §A.2.
+A.1 Program API Details
+HerewedetailthefunctionsoftheALTAAPIusedtobuildtheprogramsshowninthispaper. Wereferthe
+reader to our open-source implementation for further details.
+Variables and Attention Heads The module contains several methods for defining variable specifica-
+tions:
+• vardefinesacategoricalvariable,themostcommonvariabletype. Thecardinalitymustbespecified.
+• numerical_var defines anumerical variable. A set of discretebucketsmustbe specified, and values
+are rounded to the closest bucket in the MLP sub-layer of compiled models.
+• set_var defines a set variable. A set of sets of possible values must be specified.
+For each of these functions, it is also necessary to specify how the variable is initialized.
+There are two methods for defining attention heads:
+• qkv defines an attention head, with arguments that specify the query, key, and value variables.
+Optionally, a set of relative positions can also be passed, as well as an explicit specification for the
+output variable.
+• relative_visashorthandfunctionfordefininganattentionheadthatattendstoaspecificrelative
+position. The query and key are implicitly set to a single-valued categorical variable.
+The output variable specification can be optionally specified explicitly, or is otherwise inferred from the
+type of the value variable. The output variable for each head is also included in the overall set of program
+variables.
+MLP Functions TherearetwowaystospecifytheMLPfunction,asmentionedin§2. Forsimplicity, the
+programslistedinthispaperspecifytheMLPfunctionasaPythonfunction,whichispassedadictionary-like
+object for accessing and updating variable values. Alternatively, the set of transition rules can be specified
+directly, allowing more control to manage the scope of variables included in the antecedent of each rule, and
+avoid the combinatorial explosion of possible variable values for more complex programs. Figure 6 gives an
+example of specifying the transition rules for the parity program of Figure 2 using the MLPBuilder class.
+The class has two methods. The get method returns a generator over possible variable values. The class
+automaticallytrackswhichvariablesandvariablevaluesareinscope. Thesetmethodgeneratesatransition
+rule,generatingtheantecedentoftheruleautomaticallybasedonthecurrentscope. Inalmostallcases,this
+resultsinamorecompactsetoftransitionrulesthanspecifyingtheMLPfunctionasaPythonfunction. All
+of the results in this paper related to analyzing the minimal versions of programs or computing the number
+of MLP hidden dimensions in compiled models are based on versions of programs where the transition rule
+set has been specified directly.
+17def get_transition_rules(variables, attention_heads):
+x = MLPBuilder(variables, attention_heads)
+for done in x.get("done"):
+if done != 1:
+for done_left in x.get("done_left"):
+if done_left == 1:
+x.set("done", 1)
+for parity_left, parity in x.get("parity_left", "parity"):
+x.set("parity", parity_left ^ parity)
+return x.rules
+Figure 6: Function for directly specifying the set transition rules for the parity program of Figure 2.
+A.2 Compiler Details
+Inthissectionwewillgiveanexampleofthecompilationprocessintroducedin§2,usingtheparityprogram
+of Figure 2 as an example.
+Notation Let vk denote the activation vector in a compiled model for element i at sub-layer k.
+i
+Encoding Variable Assignments Consider a set of variable assignments:
+parity=1
+parity_left=0
+···
+idx=2
+···
+For brevity, we only include a subset of program variables in this example. This set of assignments is
+represented as the following vector in a compiled model:
+ 0  parity = 0
+ 1 parity = 1
+  1  parity_left = 0
+  0  parity_left = 1
+ 
+···
+  0  idx = 0
+  0  idx = 1
+  1  idx = 2
+···
+Initialization The input embedding is computed as: z0 = WX +WI , where x is the input token ID
+i xi,: i,: i
+at position i, and WX and WI represent the embedding matrices for token and positional embeddings,
+respectively. For brevity, we only consider up to 3 positional indices for this example. We also omit some
+variables in the matrices below, and transpose them for clarity of the row and column labels. Note that
+18variables representing attention outputs, e.g. parity_left, are initialized to a null value.
+0 1
+= = 0 1 2
+= = =
+xi xi i i i
+ 1 0  parity = 0  0 0 0  parity = 0
+ 0 1 parity = 1  0 0 0 parity = 1
+  0 0  parity_left = 0   0 0 0  parity_left = 0
+  0 0  parity_left = 1   0 0 0  parity_left = 1
+(WX)⊤ =  ··· ···   (WI)⊤ =  ··· ··· ···  
+  0 0  idx = 0   1 0 0  idx = 0
+  0 0  idx = 1   0 1 0  idx = 1
+  0 0  idx = 2   0 0 1  idx = 2
+··· ··· ··· ··· ···
+Self-attention The self-attention operation sums over a set of attention heads:
+X
+zk+1 =zk+ oh,
+i i i
+h
+where oh is the output of head h parameterized by matrices WQ, WK, WV, and WO:
+i h h h h
+X
+oh =WO α ·Wvzk
+i h ij j
+j
+elij
+α =
+ij P elik
+k
+l =(WQzk)⊤WKzk.
+ij h i h j
+For simplicity, we ignore the constant scalar term commonly applied to the dot product. Simlarly to
+Tracr (Lindner et al., 2023), we also adopt the parameterization of Elhage et al. (2021) for the atten-
+tionoutput,whichcanbeshowntobeequivalenttothatoftheoriginalTransformer,butallowsforaclearer
+exposition.
+The parity program of Figure 2 has two attention heads. Here we describe the WQ, WK, WV, and WO
+matrices corresponding to the attention head with query idx_left, key idx, value parity, and output
+parity_left (ommitted cells are zeros):
+   
+··· ··· ··· ··· ··· ···
+ 0 0 0 idx = 0 λ 0 0 idx = 0
+  0 0 0  idx = 1   0 λ 0  idx = 1
+(WQ)⊤ =  0 0 0  idx = 2 (WK)⊤ =  0 0 λ idx = 2
+ λ 0 0  idx_left = 0   0 0 0  idx_left = 0
+  0 λ 0  idx_left = 1   0 0 0  idx_left = 1
+0 0 λ idx_left = 2 0 0 0 idx_left = 2
+ 1 0  parity = 0  0 0  parity = 0
+ 0 1 parity = 1  0 0 parity = 1
+(WV)⊤ =  0 0  parity_left = 0 WO =  1 0  parity_left = 0
+  0 0  parity_left = 1   0 1  parity_left = 1
+··· ··· ··· ···
+where λ is a hyperparameter that controls the degree to which the selection matrix approximates a binary-
+valued matrix, set to 100 by default.
+19MLP Sub-layer OurapproachtocompilingMLPparameterstakeslooseinspirationfromNielsen(2016),
+which provides a helpful visual exposition of how MLPs can encode arbitrary functions. The MLP function
+of the parity program can be represented with 7 transition rules, using the notation of Section 2:
+R :zk+1 =1 ⇐= zk =0 ∧ zk =1 ∧ zk =1 ∧ zk =0
+1 ⟨·,parity⟩ ⟨·,done⟩ ⟨·,done_left⟩ ⟨·,parity_left⟩ ⟨·,parity⟩
+R :zk+1 =0 ⇐= zk =0 ∧ zk =1 ∧ zk =1 ∧ zk =1
+2 ⟨·,parity⟩ ⟨·,done⟩ ⟨·,done_left⟩ ⟨·,parity_left⟩ ⟨·,parity⟩
+R :zk+1 =1 ⇐= zk =0 ∧ zk =1
+3 ⟨·,done⟩ ⟨·,done⟩ ⟨·,done_left⟩
+R :zk+1 =∅ ⇐= zk =0
+4 ⟨·,parity_left⟩ ⟨·,parity_left⟩
+R :zk+1 =∅ ⇐= zk =1
+5 ⟨·,parity_left⟩ ⟨·,parity_left⟩
+R :zk+1 =∅ ⇐= zk =0
+6 ⟨·,done_left⟩ ⟨·,done_left⟩
+R :zk+1 =∅ ⇐= zk =1
+7 ⟨·,done_left⟩ ⟨·,done_left⟩
+Appendix B provides a more formal description of the MLP sub-layer and the compilation process. Here
+we provide an example of the compiled parameters W1, b1, and W2 for the parity program (the second bias
+term, b2, is always set to a vector of zeros). Note that we use a clipped ReLU function as the non-linearity.
+AsdescribedinSectionA,therearealsotwoinitialMLPlayersthatareresponsibleforconvertingnumerical
+and set variables into one-hot representations, but those are not necessary for the parity program we are
+consideringwhichusesonlycategoricalvariables. Wealsoomitthecellscorrespondingtoidxandidx_left
+in the matrices and vector below (the corresponding cells are all zeros).
+Each column of the transposed first matrix corresponds to a rule, with a 1 in cells corresponding to variable
+valuesintheantecedent oftherule. Eachscalarinthebiasvectorhasavalue1−N, whereN isthenumber
+of conjuncts in the antecedent of a given rule. This ensures that the output of the following non-linearity is
+1whenallconjunctsaresatisfied, and0otherwise. Eachcolumnofthesecondmatrixissimilarlyassociated
+witharule,butthevaluesaredeterminedbytheconsequent oftherule. Thereisa1intherowcorresponding
+to the new value of the output variable (or 0, if the output value is null), and a −1 corresponding to the
+value of the output variable in the antecedent of the rule.
+R R R R R R R
+1 2 3 4 5 6 7
+ 1 0 0 0 0 0 0  parity = 0
+ 0 1 0 0 0 0 0 parity = 1
+  0 0 0 1 0 0 0  parity_left = 0
+  1 1 0 0 1 0 0  parity_left = 1
+(W1)⊤ =  1 1 1 0 0 0 0  done = 0
+  0 0 0 0 0 0 0  done = 1
+  0 0 0 0 0 1 0  done_left = 0
+  1 1 1 0 0 0 1  done_left = 1
+··· ··· ··· ··· ··· ··· ···
+R R R R R R R
+1 2 3 4 5 6 7
+(b1)⊤ =(cid:2) −3 −3 −1 0 0 0 0 (cid:3)
+R R R R R R R
+1 2 3 4 5 6 7
+ −1 1 0 0 0 0 0  parity = 0
+ 1 −1 0 0 0 0 0 parity = 1
+  0 0 0 −1 0 0 0  parity_left = 0
+  0 0 0 0 −1 0 0  parity_left = 1
+W2 =  0 0 −1 0 0 0 0  done = 0
+  0 0 1 0 0 0 0  done = 1
+  0 0 0 0 0 −1 0  done_left = 0
+  0 0 0 0 0 0 −1 done_left = 1
+··· ··· ··· ··· ··· ··· ···
+20MLP Example Consider a set of variable assignments:
+parity=1
+parity_left=1
+done=0
+done_left=1
+···
+Let z denote the vector encoding of these assignments:
+ 0  parity = 0
+ 1 parity = 1
+  0  parity_left = 0
+  1  parity_left = 1
+z =  1  done = 0
+  0  done = 1
+  0  done_left = 0
+  1  done_left = 1
+···
+Here are the hidden activations in the MLP layer, which is binary vector corresponding to which rules are
+satisfied by the input:
+0
+R
+1
+1 R
+2
+ 1
+R
+3
+h(z)=σ(W1z+b1)= 0
+R
+4
+ 1
+R
+5
+ 0
+R
+6
+1 R
+7
+Note that σ is a clipped ReLU non-linearity applied element-wise. Here is the output of the MLP sub-layer
+before and after the residual connection:
+ 1  parity = 0  1  parity = 0
+−1 parity = 1  0 parity = 1
+  0  parity_left = 0   0  parity_left = 0
+ −1 parity_left = 1   0  parity_left = 1
+W2h(z)= −1 done = 0 W2h(z)+z =  0  done = 0
+  1  done = 1   1  done = 1
+  0  done_left = 0   0  done_left = 0
+ −1 done_left = 1   0  done_left = 1
+··· ···
+Which corresponds to the expected output assignments:
+parity=0
+parity_left=∅
+done=1
+done_left=∅
+···
+where the attention output variables are set to null values so they are ready to be updated at the next
+self-attention layer.
+21B Theoretical Analysis of Minimal Rule Sets and MLP Parameters
+If a program is minimal with respect to some training set, can we draw any conclusions about whether the
+transformer implementation of that program will be learned on that same training set? We now explore
+this question from the perspective of the MLP parameters in the trace supervision setting. Specifically, we
+identify conditions under which the compiled MLP parameters are a strict coordinate-wise
+local optimum of a regularized reconstruction loss. Extensions to consider all parameters of the
+compiled transformer, end-to-end training objectives, or non-coordinate-wise local optima are left to future
+work.
+B.1 MLP Specification
+Here we introduce notation that differs from that in other sections, but is more appropriate for the goals
+of this section. Let us focus on two components of an ALTA program P for this analysis: a set of possible
+variable assignments, V, and a set of rules, R. The rules implicitly define an MLP function, f : V → V,
+R
+whichisasub-componentoftheoverallprogram. Forsimplicity,weconsideronlyprogramswithcategorical
+variables for this analysis, and exclude transition rules related to attention outputs.
+Variable Assignments An assignment V ∈ V is a tuple of N elements, with V = ⟨V ,V ,··· ,V ⟩,
+V 0 1 NV−1
+where V ∈{0,1,...,D −1} and D is the dimensionality of variable V . The number and dimensionality of
+i i i i
+variables is given by the program specification.
+Transition Rules Let R = ⟨R ,R ,··· ,R ⟩, where R is a transition rule. As described informally in
+1 2 NR i
+Section 2.3, transition rules consist of the following components:
+• The antecedent of R , denoted A , consists of a set of N constraints (k,v) where each k ∈
+i Ri Ri
+{0,··· ,N } refers to a variable index, and each v ∈{0,··· ,D −1} refers to a variable value. A
+V−1 k
+transition rule is satisfied by an assignment V ∈ V if and only if V = v for all (k,v) in the rule’s
+k
+antecedent.
+• The consequent of k includes an the output variable index, denoted k , and a new value for this
+Ri Ri
+variable, denoted v′ . Per construction, for every R we require that the output variable appears in
+the antecedent of tR hie rule. Let v denote to the vi alue associated with the output variable in the
+Ri
+antecedent.
+The rule R can therefore be interpreted as updating the value of the variable k from v to v′ if R is
+satisfied.
+i Ri Ri Ri i
+Finally, we also require that for any assignment ∈ V, no more than one rule is satisfied for a given output
+variable. In other words, if two rules share the same output variable index, then they should never both be
+satisfied for any assignment ∈V.
+Logical MLP Function We can define the logical MLP function f : V → V in terms of R. Let
+R
+V′ =f (V). Then:
+R
+(
+v′ , if ∃R ∈R that is satisfied by V
+V′ = Ri i
+k V , otherwise.
+k
+B.2 Compiling MLP Parameters
+As described in Section 2.3 and Appendix A.2, in our compiled models, we represent variable assignments
+as vectors, and compile the MLP function into the parameters of an MLP. Here we introduce notation and
+a more detailed description of the compilation procedure to support our theoretical analysis.
+22Assignment Embeddings In our compiled models, variable assignments are represented as N -
+Z
+dimensional vectors. Let Z = RNZ represent the space of such vectors, which include the inputs and
+outputs of MLP layers.
+We can define a mapping e : V → Z. First, we define a bijective function m(k,v) which for a given
+V
+variable index k ∈ {0,1,...,N −1} and corresponding variable value v ∈ {0,1,...,D }, returns an index
+v k
+in {0,1,...,N −1}. Let ⟨z ,z ,··· ,z ⟩=e (V). Then:
+Z 0 1 Nz−1 V
+z = ∃k,v |V =v∧m(k,v)=i . (1)
+i k
+(cid:74) (cid:75)
+In other words, for a given assignment V, the vector e (V) will have a 1 for dimensions associated with
+V
+variable values in V, and 0’s elsewhere.
+MLP Function The compiled MLP function f : Z → Z is defined by parameters θ ∈ Θ, where θ =
+θ
+⟨W1,b1,W2⟩, and W1 ∈ RNR×NZ, b1 ∈ RNR, and W2 ∈ RNZ×NR. The bias term in the second layer is set
+to all zeros in practice, and omitted here for simplicity.
+For z ∈Z, we can the define the MLP function:
+g(θ,z)=W1z+b1, (2)
+h(θ,z)=σ(g(θ,z)) (3)
+f(θ,z)=W2h(θ,z)+z (4)
+where σ(z)=max(0,min(1,z)) is a clipped ReLU activation function applied element-wise to the vector z.5
+For notational convenience, let f (θ,z) := (f(θ,z)) , i.e. denote the ith element of the output of f, and
+i i
+similarly for g, h. Following equations 4-2, the values of these individual scalars are:
+X
+g (θ,z)= W1 z+b1, (5)
+i i,j i
+j
+h (θ,z)=σ(g (θ,z)) (6)
+i i
+X
+f (θ,z)=z + W2 h (θ,z) (7)
+i i i,j j
+j
+MLP Parameters We can define the compiled parameters θˆ ∈ Θ such that e (f (V)) = f (e (V)) for
+V R θˆ V
+all V ∈V. Let θˆ=⟨Wˆ 1,ˆ b1,Wˆ 2⟩.
+Wˆ1 = ∃ (k,v)∈A s.t.m(k,v)=j (8)
+i,j Ri
+(cid:74) (cid:75)
+ˆ b1 =1−N (9)
+i Ri
+
+−1, if m(k ,v )=i
+Wˆ2
+=
+1, if
+m(kRj ,vR
+′
+j
+)=i (10)
+i,j
+0,
+otherwR isj
+e
+Rj
+This construction ensures that for any assignment V ∈V, we have:
+1, R is satisfied by V
+g (θˆ ,e
+(V))=0, Nj
+Rj −1 constraints of R j are satisfied by V (11)
+j V − ··1 ·,
+,
+N
+··R ·j
+−2 constraints of R
+j
+are satisfied by V
+h (θˆ ,e (V))= R is satisfied by V . (12)
+j V j
+(cid:74) (cid:75)
+5AsnotedbyPérezetal.(2021),theclippedReLUfunctioncanbeimplementedintermsofthestandardReLUfunction,
+i.e. σ(z)=max(0,z)−max(0,z−1). Therefore, there is an equivalent formulation that uses additional layers but standard
+ReLUactivations. However,weuseclippedReLUforsimplicity.
+23In other words, each element in the hidden layer activations corresponds to whether a particular rule was
+satisfied by the variable assignment represented in the input. Each column of Wˆ 2 encodes an “update” to
+the assignments related to a particular rule. This construction also ensures that:
+f(θˆ ,e (V))=e (f (V)). (13)
+V V R
+An example demonstrating equations 11, 12, and 13 is given in Appendix A.2.
+B.3 Minimal Rule Set
+In Section 3 we introduced the notion of a minimal program. Here we focus on the minimality conditions
+relating only to the rule set and the corresponding MLP layer. We define a minimal rule set, encompassing
+the conditions necessary to obtain guarantees about a reconstruction loss landscape around the parameters
+of the compiled MLP.
+Definition 1. (minimal rule set) Given a dataset of N variable assignments D =⟨V ,V ,...,V ⟩, a set of
+1 2 N
+rules R is a minimal rule set over D if:
+• It is not possible to remove any individual rule in R and not change the output of f for some
+R
+example V ∈D.
+n
+• It is not possible to remove any individual constraint of the antecedent of any rule in R without
+changing the output of f for some example V ∈D.
+R n
+B.4 Reconstruction Loss
+We consider a setting related to that of training models with trace supervision, as discussed in §C.1. For
+program P and set of model inputs X, let D = ⟨V ,V ,...,V ⟩ be the set of variable assignments at the
+1 2 N
+input to the MLP for every position and layer when we run P over X. We use the shorthand:
+zn :=e (V ), (14)
+V n
+to denote the vector encoding of assignment V .
+n
+Nowletusdefineareconstruction loss, L , overindividualpredictions. Formodelparametersθ andagiven
+R
+variable assignment V with corresponding vector encoding zn = e (V ), the reconstruction loss quantifies
+n V n
+howwellthepredictedvariableencodingsf(θ,zn)matchthevariableencodingsspecifiedbyR, e (f (V )).
+V R n
+Per equation 13, this vector can alternatively be written in terms of compiled parameters θˆas f(θˆ ,zn). For
+simplicity, we consider an L loss over the predicted and expected encodings, which simplifies the analysis
+1
+of the local minimum point. We write L as:
+R
+L (θ,zn)=||f(θ,zn)−f(θˆ ,zn)|| . (15)
+R 1
+Note that for all n:
+L (θˆ ,zn)=0. (16)
+R
+B.5 Coordinate-wise Local Minimum
+As it is difficult to analyze whether a point is a strict local minimum, we will instead analyze whether a
+point is a coordinate-wise local minimum. Prior work has defined the notion of a coordinate-wise minimum,
+which is defined in terms of axis-aligned movements of parameter values (e.g., Tseng, 2001).
+Definition 2. (coordinate-wise local minimum) For a multivariate function f : X ×X ×...×X → R,
+1 2 n
+the value Xˆ = ⟨xˆ ,xˆ ,...,xˆ ⟩ is a strict coordinate-wise local minimum iff for each i ∃λ > 0, such that
+1 2 n
+f(xˆ ,...,xˆ ,...xˆ )<f(xˆ ,...,xˆ +ϵ,...xˆ ) for all ϵ∈(−λ,λ).
+1 i n 1 i n
+24Wewillbeevaluatingalossfunctionatasemi-differentiablepoint(duetothenon-linearityσ),soitisuseful
+to note the following proposition:
+ˆ
+Proposition 1. Consider a multivariate function f and point X. If f is a continuous function that is
+ˆ
+semi-differentiable at X with both left and right partial derivatives, and for every i the right derivative with
+respect to X evaluated at
+Xˆ
+is positive,
+∂+f(Xˆ)>0,
+and the left derivative with respect to X evaluated at
+i ∂Xi i
+Xˆ
+is negative,
+∂−f(Xˆ)<0,
+then
+Xˆ
+is a strict coordinate-wise local minimum as defined in Definition 2.
+∂Xi
+This follows from the definition of left and right derivatives, and the requirement that f is continuous.
+B.6 Main theorems
+Suppose we learn θ by optimizing a regularized sum of reconstruction losses over a dataset,
+X
+L(θ,D,α)=αL (θ)+ L (θ,e (V )) (17)
+1 R V n
+n
+X
+=αL (θ)+ L (θ,zn),
+1 R
+n
+with α > 0 penalizing the sum of L norms ||W2|| +||W1|| +||b1|| . We consider the L norm as the
+1 1 1 1 1
+regularization term for simplicity.
+We want to show that when the weights θˆare generated by compiling a set of rules that is minimal with
+respect to D, then θˆis a coordinate-wise local optimum of L for α<1.
+Theorem 1 (Formal). If θˆ is the compilation of a rule set R that is not minimal for D, then θˆ is not a
+strict coordinate-wise local optimum of L(θ,D,α).
+Theorem 2 (Formal). If θˆ is the compilation of a rule set R that is minimal for D, then θˆ is a strict
+coordinate-wise local optimum of L(θ,D,α) for α<1.
+Remark. Both theorems can also be proved for a squared L regularizer with coefficient α ∈ (0,1/(2K)),
+2
+where K = max(1,max N −1) is the largest parameter magnitude in θˆand 2K is therefore the largest
+element of the gradienti of tR hi e squared L regularizer evaluated at θˆ.
+2
+B.7 Proof of Theorem 1
+Proof. There are two ways in which a ruleset might violate minimality with respect to D.
+• We can remove rule R without affecting the output of f on any example. All rules
+j R
+affect the output when their antecedent conditions are met, so we can infer that the conditions of
+R are never met. In this case, there is guaranteed to be a parameter Wˆ 2 ̸= 0, setting the value
+j i,j
+of f (θˆ ,zn) when the conditions of R are met. If R is never active for any zn, then Wˆ 2 does not
+i j j i,j
+affect the reconstrution loss L .
+R
+• There is a condition of R that we can remove without affecting the output of f on
+j R
+any example. This condition is represented as a nonzero element in Wˆ 1 (and also in b , which is
+j,k j
+not necessary for the proof). By construction this parameter does not affect the reconstruction loss.
+In both cases, the gradient with respect to the nonzero parameter (Wˆ 2 and Wˆ 1 ) is set only by the
+i,j j,k
+regularizer. The right and left derivatives have the same sign, violating the conditions of strict coordinate-
+wise local optimality.
+B.8 Proof of Theorem 2
+To prove Theorem 2, we will analyze the left and right derivatives of the loss function (eq. 17) with respect
+to each parameter in the compiled parameters θˆ, and show that the left derivative is positive and the right
+25derivative is negative, satisfying the conditions of Proposition 1. The left and right derivatives of the loss
+function with respect to w, evaluated at θˆ, can be written as follows.
+!
+∂− L(θˆ ,D,α)= ∂− (α|w|)+ ∂− X L (θˆ ,zn) (18)
+∂w ∂w ∂w R
+n
+!
+∂+ L(θˆ ,D,α)= ∂+ (α|w|)+ ∂+ X L (θˆ ,zn) (19)
+∂w ∂w ∂w R
+n
+Wecananalyzethetermsofthesederivativesrelatedtotheregularizerandthereconstructionlossseparately.
+First, we consider the regularizer term.
+(
+∂− −α, w ≤0
+(α|w|)= (20)
+∂w α, w >0
+(
+∂+ −α, w <0
+(α|w|)= (21)
+∂w α, w ≥0
+Next, let us consider the term related to the reconstruction loss. Let θˆ ϵ be a set of parameters equal to θˆ,
+but with ϵ added to parameter w, e.g. θˆ ϵ =⟨Wˆ 1,ˆ b1+ϵ·e ,Wˆ 2⟩, wherw e e is a standard basis vector with
+b1 j j
+j
+a 1 at position j and |ϵ|<1. The left derivative can be written as follows,
+! !
+∂− X L (θˆ ,zn) = lim 1 X L (θˆϵ,zn)−X L (θˆ ,zn) (22)
+∂w R ϵ→0− ϵ R w R
+n n n
+1
+= lim X L (θˆϵ,zn), (23)
+ϵ→0− ϵ R w
+n
+using L (θˆ ,zn)=0 per eq. 16. The right derivative can be obtained similarly.
+R
+There are several ways we can show that the conditions of Proposition 1 are met for a given parameter w,
+i.e. that the left derivative ∂−L(θˆ ,D,α) is negative and the right derivative ∂+L(θˆ ,D,α) is positive.
+∂w ∂w
+Lemma 1. If there exists some d>0 such that P L (θˆ ϵ,zn)≥|ϵ| for all ϵ∈(−d,d), then the conditions
+n R w
+of Proposition 1 are satisfied for w.
+Proof. The left and right derivatives of the reconstruction loss term are:
+1 1
+lim X L (θˆϵ,zn)≤ lim |ϵ|=−1 (24)
+ϵ→0− ϵ R w ϵ→0− ϵ
+n
+1 1
+lim X L (θˆϵ,zn)≥ lim |ϵ|=1 (25)
+ϵ→0+ ϵ R w ϵ→0+ ϵ
+n
+(26)
+Because α<1, for any value of w we have:
+∂−
+L(θˆ ,D,α)≤−1+α<0 (27)
+∂w
+∂+
+L(θˆ ,D,α)≥1−α>0. (28)
+∂w
+Therefore the conditions of Proposition 1 are satisfied.
+Lemma 2. If w =0, then the conditions of Proposition 1 are satisfied for w.
+26Proof.
+Becausethereconstructionlossiszeroatθˆandnon-negativeeverywhere,itsleftandrightderivatives
+are guaranteed to be ≤0 and ≥0, respectively. Therefore:
+∂−
+L(θˆ ,D,α)≤0−α<0 (29)
+∂w
+∂+
+L(θˆ ,D,α)≥0+α>0. (30)
+∂w
+Therefore the conditions of Proposition 1 are satisfied.
+Lemma 3. If w >0 and there exists some d>0 such that P L (θˆ ϵ,zn)≥|ϵ| for all ϵ∈(−d,0), then the
+n R w
+conditions of Proposition 1 are satisfied for w.
+Proof. This case therefore combines the reasoning of Lemmas 1 (for the left derivative) and 2 (for the right
+derivative).
+∂−
+L(θˆ ,D,α)≤−1+α<0 (31)
+∂w
+∂+
+L(θˆ ,D,α)≥0+α>0. (32)
+∂w
+Therefore the conditions of Proposition 1 are satisfied.
+Remark. Compared to Lemma 1, this Lemma combines a stronger condition on the sign of w with a looser
+condition on the reconstruction loss, which in this case must grow with the perturbation ϵ only for ϵ<0.
+We prove lemmas separately for each group of parameters, Wˆ 2,ˆ b1, and Wˆ 1, showing that the conditions of
+Lemma 1, 2, or 3 are met for every parameter in θˆ.
+ˆ
+Lemma 4. Each W2 satisfies the conditions of Propostion 1.
+i,j
+Proof.
+L (θˆϵ ,zn)=X |f (θˆϵ ,V)−f (θˆ ,V)| (33)
+R W2 i′ W2 i′
+i,j i,j
+i′
+(cid:12)(cid:20) (cid:21)
+=X(cid:12) (cid:12)
+(cid:12)
+z in ′ +X (Wˆ i2 ,j′ +ϵ× (cid:74)j =j′∧i=i′ (cid:75))h j′(θˆ ,zn) − (34)
+i′ j′
+(cid:20) (cid:21)(cid:12)
+z in ′ +X Wˆ i2 ,j′h j′(θˆ ,zn) (cid:12) (cid:12)
+(cid:12)
+j′
+=|ϵ×h (θˆ ,zn)|. (35)
+j
+Lines 33 and 34 plug in the definitions of L (eq. 15) and f (eq. 7) respectively, and line 35 follows from
+R i
+algebra.
+Recall that h (θˆ ,zn) ∈ {0,1} for all (j,n), per eq. 12. For all n where h (θˆ ,zn) = 0, the value of
+j j
+L (θˆ ϵ ,zn) = 0 for all i, but by minimality there must be some zn for which h (θˆ ,zn) = 1 or else
+R W2 j
+rule j ci,ojuld be removed. Therefore:
+X L (θˆϵ ,zn)=X |ϵ×h (θˆ ,zn)|≥|ϵ|. (36)
+R W2 j
+i,j
+n n
+Therefore the conditions of Lemma 1 are met.
+ˆ
+Lemma 5. Each b1 satisfies the conditions of Propostion 1.
+j
+27Proof. We can derive the following by substituting the definitions of L (eq. 15) and f (eq. 7), h (eq. 6),
+R i j
+and g (eq. 5), and simplifying the resulting expression, for ϵ<1:
+j
+L (θˆϵ ,zn)=X |f (θˆϵ ,zn)−f (θˆ ,zn)| (37)
+R b1 i b1 i
+j j
+i
+=X |Wˆ2 ×ϵ× g (θˆ ,zn)+ϵ∈(0,1) | (38)
+i,j j
+(cid:74) (cid:75)
+i
+=|ϵ|× g (θˆ ,zn)+ϵ∈(0,1) ×X |W2 |. (39)
+j i,j
+(cid:74) (cid:75)
+i
+(40)
+By construction of W2, for all j there exists |W2 |=1, i.e. there is a non-zero entry in every column of W2
+i,j
+(see eq. 10). Therefore, P |W2 |≥1, and:
+i i,j
+L (θˆϵ ,zn)≥|ϵ|× g (θˆ ,zn)+ϵ∈(0,1) . (41)
+R b1 j
+j (cid:74) (cid:75)
+By construction of θˆ, for all n, g (θˆ ,zn) ∈ {1,0,−1,···} (per eq. 11). Therefore we can enumerate the
+j
+possible cases:
+ |ϵ|, g (θˆ ,zn)=0∧ϵ>0
+L (θˆϵ
+,zn)≥
+|ϵ|,
+gj
+(θˆ ,zn)=1∧ϵ<0 (42)
+R b1 j
+j 0, otherwise.
+By the minimality criteria, for all j there exists some n where g (θˆ ,zn)=0, where N −1 conditions of rule
+j
+j are satisfied (see eq. 11). If not, some condition could be removed, violating minimality. Also, for all j
+there exists some n where g (θˆ ,zn)=1, where all N conditions of rule j are satisfied. If not, the rule could
+j
+be removed, violating minimality. Therefore:
+X L (θˆϵ ,zn)≥|ϵ|. (43)
+R b1
+j
+n
+Therefore, the conditions of Lemma 1 are met.
+ˆ
+Lemma 6. Each W1 satisfies the conditions of Propostion 1.
+j,k
+Proof. The analysis is similar to that ofˆ b1, and we can reuse the result of eq. 41.
+j
+L (θˆϵ ,zn)=X |f (θˆϵ ,zn)−f (θˆ ,zn)| (44)
+R W1 i W1 i
+j,k j,k
+i
+=X |zn×Wˆ2 ×ϵ× g (θˆ ,zn)+ϵ∈(0,1) | (45)
+k i,j j
+(cid:74) (cid:75)
+i
+=|zn|×X |Wˆ2 ×ϵ× g (θˆ ,zn)+ϵ∈(0,1) | (46)
+k i,j j
+(cid:74) (cid:75)
+i
+| {z }
+LR(θˆ bϵ 1,zn)
+j
+≥|zn|×|ϵ|× g (θˆ ,zn)+ϵ∈(0,1) . (47)
+k j
+(cid:74) (cid:75)
+Recall that W1 ∈{0,1} (eq. 8) and zn ∈{0,1} (eq. 1). There are two cases to consider.
+j,k k
+Case 1: W1 = 1. By minimality, for all k there exists some n such that zn = 1 and g (θˆ ,zn) = 1, i.e.
+j,k k j
+where rule R is satisfied by zn, and thus necessarily the constraint represented by W1 is satisfied by the
+j j,k
+input. However, minimality does not guarantee that there exists some n such that zn =1 and g (θˆ ,zn)=0.
+k j
+28Note that if ϵ<0, then |zn|×|ϵ|× g (θˆ ,zn)+ϵ∈(0,1) =|ϵ| if zn =1 and g (θˆ ,zn)=1, which is the case
+k j k j
+for some n. Therefore: (cid:74) (cid:75)
+(
+X L (θˆϵ ,zn)=X |zn|×|ϵ|× g (θˆ ,zn)+ϵ∈(0,1) ≥ |ϵ|, ϵ<0 (48)
+R W j1
+,k
+k
+(cid:74)
+j
+(cid:75)
+0, ϵ≥0
+n n
+Since W1 >0, the conditions of Lemma 3 are met.
+j,k
+Case 2: W1 =0. The conditions of Lemma 2 are met.
+j,k
+C Learnability Analysis Details
+In this section, we provide additional discussion and details related to trace supervision (§C.1) and the
+procedure for determining the minimal version of a program with respect to a training set (§C.2).
+C.1 Procedure for Training with Trace Supervision
+Given a program P and a set of model inputs X, we can run P for every input in X, and extract the
+variable assignments at the input and output of every sub-layer, for every position. In our experiments,
+for simplicity, we focus on training the MLP parameters. After using the ALTA interpreter to collect pairs
+of variable assignments at the input and output of the MLP layers, we map these assignments to vectors,
+using the mapping described in §2. Finally, we can train a MLP layer based on these pairs of input and
+output vectors. Specifically, we use an L2 loss to encourage the MLP to produce the output vector given
+the input. We then use the ALTA compiler to compile parameters other than those used for the MLP
+layer. By combining the learned MLP parameters with those provided by the compiler, we have a full set of
+Transformer parameters. See §D.1 for the hyperparameters and training details for the parity task.
+For future work, it may be possible to provide supervision from execution traces in a way that makes fewer
+assumptionsabouthowvariablesareencodedintheresidualstream,i.e. byencouragingtheresidualstream
+to encode such values in a way that allows them to be accurately predicted from the residual stream with
+a linear classifier. This would enable training models with intermediate supervision without any compiled
+parameters, but is out of scope for this work. It would then be interesting to assess whether there is any
+potential for transfer learning from training with such supervision in cases where a ground truth program is
+known to cases where a ground truth program is unknown or not feasible to express.
+C.2 Procedure for Determining Minimal Versions of Programs
+Given a program P and set of model inputs X, we can determine the minimal version of P with respect
+to X. For simplicity, we focus on the set of transition rules and the input embedding operations for this
+analysis. First,asmotivatedbyourtheoreticalanalysisinAppendixB,weremoveanytransitionruleswhich
+areneversatisfiedwhenrunningP ontheinputsinX. Whiletheformaldefinitionofaminimal rule set also
+puts conditions on the constraints of satisfied rules, we assume that there are no unnecessary constraints to
+simplify our analysis. Second, we analyze the set of input IDs and positions seen when executing P over X.
+Werestrictthevariableinitializationfunctionsoftheminimalprogramtooutputdefaultvaluesforvariables
+outside of this minimal set of observed token IDs and positions.
+D Program Details and Additional Results
+Inthissectionweprovideprogramdetailsandadditionalresults. Someprogramlistingsomitthedefinitions
+ofvariousconstantsandhelperfunctionsforbrevity, andwereferthereadertotheopen-sourcecodeforthe
+complete program specifications for all programs discussed in this paper.
+29D.1 Parity
+Programs Here we provide the ALTA code for the parity programs that we study. The code for the
+Sequential (Relative) program is in Figure 8 and the code for the Sum + Modulo program is in Figure 7.
+vars = {
+"parity": var(range=2),
+"start": numeric_var(input_init_fn=lambda x: float(x == START),
+values=(0, 1)),
+"start_or_one": var(range=2, input_init_fn=lambda x: x in {1, START}),
+"query": var(range=2, default=1),
+}
+attention_heads = {
+"x": qkv("query", "start_or_one", "start",
+output_spec=numeric_var(values=BUCKETS)),
+}
+def ffn_fn(z):
+num_ones = round(1 / z["x"]) - 1
+z["parity"] = int(num_ones %
+return program_spec(
+variables=vars, heads=attention_heads, ffn_fn=ffn_fn,
+output_name="parity", input_range=3, position_range=None
+)
+Figure 7: Program for computing parity using a sum and modulo operation.
+variables = {
+"parity": var(range=2, input_init_fn=lambda x: 0 if x == START else x),
+"done": var(range=2, input_init_fn=lambda x: x == START),
+}
+attention_heads = {
+"parity_left": v_relative("parity", -1),
+"done_left": v_relative("done", -1),
+}
+def ffn_fn(z):
+if z["done"] != 1 and z["done_left"] == 1:
+z["parity"] = z["parity_left"] ^ z["parity"]
+z["done"] = 1
+return program_spec(
+variables=variables, heads=attention_heads,ffn_fn=ffn_fn,
+output_name="parity", input_range=3, position_range=None,
+halt=halt_spec("done", halt_value=1),
+)
+Figure 8: Program for computing parity sequentially using relative positions.
+AlternativePrograms ThereisanotheralgorithmforparityproposedbyChiang&Cholak(2022),which
+wasinspiredbyalgorithmsforMLPsfrom Rumelhartetal.(1986). SimilarlytotheSum+Moduloprogram,
+this algorithm first computes a sum operation using an attention head, but they avoid explicitly computing
+themodulooperationbyinsteadusingattentionheadsthatseparatelyattendtoevenandoddelements. This
+enables the algorithm to be implemented with a fixed set of parameters that is invariant to the maximum
+input length, aside from the positional encodings. However, we did not explore this algorithm because it is
+not possible to implement in a way where the minimal ALTA program is invariant to the maximum input
+length considered. This is because ALTA requires discretization of numerical variables in order to perform
+numerical computations, a current limitation of the framework. Implementing the computations required
+would therefore require a number of transition rules that scales with the maximum input length considered,
+30similarly to how the Sum + Modulo program requires a number of buckets that scales with the maximum
+numberofonesconsidered. Regardless,Chiang&Cholak(2022)showedthisalgorithmisdifficulttolearnin
+practice,anditalsorequiresspecializedpositionalencodings. Furthermore,theiralgorithmrequiresencoding
+parametersandactivationswithadegreeofnumericalprecisionthatscaleswiththemaximuminputlength.
+Incontrast,theSequential(Relative)programcompilestoaUniversalTransformerthatonlyneedstoencode
+4 binary variables in the residual stream, and consists of only 7 transition rules, i.e., requires only 7 hidden
+MLP dimensions. However, the construction of Chiang & Cholak (2022) requires only 2 layers, where as the
+Sequential (Relative) program requires N −1 layers, where N is the maximum input length.
+Train and Test Sets The train and test sets are the same for all experiments (including both trace and
+end-to-end supervision). The train set consists of examples between lengths 0 and 20, and the test set
+contains examples between lengths 0 and 40. The sets include roughly an equal number of examples per
+number of ones.
+Table 1: Trace supervision hyperparameters.
+Program
+Hyperparameter Sequential (Relative) Sequential (Absolute) Sum + Modulo
+HiddenLayers 2 4 4
+HiddenLayerSize 128 4,096 4,096
+BatchSize 256 256 256
+Steps 50,000 50,000 400,000
+LearningRate 1e-2 1e-4 1e-4
+ActivationFn ReLU ReLU ReLU
+OptimizationFn Adafactor Adam Adam
+NoiseStdDev 0.1 0.1 0.1
+TraceSupervisionDetails HyperparametersfortrainingwithtracesupervisionarelistedinTable1. All
+arestandardhyperparametersfortrainingneuralnetworksexcept"NoiseStdDev."Weaddedasmallamount
+of Gaussian noise to the neural network input at training time to make it robust to numeric imprecision at
+inference time.
+The Sequential (Absolute) and Sum + Modulo experiments used four hidden layers instead of the standard
+two, as we explored various hyperparameters to ensure the MLP had the capacity to fit the training set.
+Similarly,weusedAdam(Diederik,2014)forbothexperimentsinsteadofAdafactor(Shazeer&Stern,2018),
+as it helped fit the training set.
+The Sum + Modulo program used for trace supervision differs slightly from the program in Figure 7.
+num_ones is stored as an intermediate categorical variable, as we found it easier for the MLP to learn
+to map a categorical variable to the correct parity output than a numeric variable.
+End-to-endTrainingDetails Wetrainedtransformerswithvariousconfigurationsusingstandardsuper-
+vision — varying the number of layers, whether weight sharing is used, and the type of positional encoding.
+Constant in all standard supervision experiments are the following hyperparameters: embeddings with di-
+mension 512, hidden layer sizes of 2048, 6 attention heads with dimension 64, an Adafactor optimization
+function, GeLU (Hendrycks & Gimpel, 2016) activation functions, a learning rate of 5e-4, 50,000 steps, and
+a byte vocabulary.
+Results Table 2 presents the accuracy for each intermediate supervision experiment and Table 3 presents
+theaccuracyforeachstandardsupervisionconfigurationondifferentslicesofthedata. Figure5comparesthe
+intermediate and standard supervision results, showing that standard supervision exhibits behavior similar
+to the Sum + Modulo program.
+Figures 9, 10, and 11 break down the standard supervision results in more detail.
+31Table 2: Length generalization accuracy for Transformers trained with intermediate supervision on parity.
+Accuracy
+Program Length ≤20 Length >20 Ones >20
+Sequential(Relative) 100% 100% 100%
+Sequential(Absolute) 100% 52% 51%
+Sum+Modulo 100% 78% 50%
+Table 3: Length generalization accuracy for Transformers trained with standard supervision on parity.
+Accuracy
+Layers Weight Sharing Positional Encoding Length ≤20 Length >20 Ones >20
+8 No Relative 100% 60% 51%
+8 Yes Relative 100% 65% 52%
+40 No Relative 100% 55% 51%
+40 Yes Relative 100% 54% 48%
+8 No Absolute 100% 49% 50%
+8 Yes Absolute 100% 50% 52%
+40 No Absolute 100% 50% 51%
+40 Yes Absolute 100% 52% 51%
+Relative Position Embeddings Absolute Position Embeddings
+1.0 1.0
+0.8 0.8
+40 Layers
+0.6 0.6 40 Layers + Weight Sharing
+6 Layers
+6 Layers + Weight Sharing
+0.4 0.4
+0.2 0.2
+0.0 0.0
+10 15 20 25 30 35 40 10 15 20 25 30 35 40
+Length Length
+Figure 9: Accuracy by length for Transformers trained with standard supervision. There is some length
+generalization with relative position embeddings (left), but none with absolute (right).
+Figure9showsthatthereisnolengthgeneralizationwhenusingabsolutepositionalembeddings, whilewith
+relative positional embeddings there is some length generalization which decreases as length increases.
+Figure10showsthatthelengthgeneralizationweobservewithrelativepositionalembeddingsisdueentirely
+to longer examples sometimes containing the same number of ones as shorter examples in the training
+distribution,consistentwithresultsinAniletal.(2022). After20ones,accuracystartsoscillatingbetween0
+and 1. The oscillations are due to the model predicting either 0 or 1 for all examples once examples contain
+more ones than were seen during training, which is shown in Figure 11.
+32
+ycaruccA ycaruccAAccuracy by Number of Ones
+1.0
+0.8
+40 Layers
+0.6 40 Layers + Weight Sharing
+8 Layers
+8 Layers + Weight Sharing
+0.4
+0.2
+0.0
+0 5 10 15 20 25 30 35 40
+Number of Ones
+Figure 10: Accuracy by number of ones for Transformers trained with standard supervision using relative
+positionembeddings. Thereisnogeneralizationbeyond20ones,whichisthemaximumnumberseenduring
+training.
+Average Prediction by Number of Ones
+1.0
+0.8
+40 Layers
+0.6 40 Layers + Weight Sharing
+8 Layers
+8 Layers + Weight Sharing
+0.4
+0.2
+0.0
+0 5 10 15 20 25 30 35 40
+Number of Ones
+Figure 11: Average prediction by number of ones for Transformers trained with standard supervision using
+relative position embeddings. Once examples have slightly more than 20 ones, the maximum number seen
+during training, the models resort to predicting either 0 or 1 for all examples.
+D.2 Addition
+Our program for computing addition is given in Figure 13. The algorithm initializes a pointer to the first
+digitofeachinput,andapointertoanoutputbuffer. Thealgorithmtheniteratesoverthedigits,addingthe
+current digits, adding the value to the output buffer, and updating the carry value. When the last digit has
+been processed, the final carry value is added to the output buffer. The compiled MLP width (i.e., number
+of transition rules) is 884.
+33
+ycaruccA
+noitciderP
+egarevAdef init(x):
+# Initializes pointers.
+if x["token_right"] == END_TOKEN:
+x["ptr_b"] = 1
+x["ptr_out"] = 1
+if x["token_right"] == ADD_TOKEN:
+x["ptr_a"] = 1
+def iterate(x):
+# Execute one step of addition.
+raw_sum = x["value_carry"] + x["ptr_a_token"] + x["ptr_b_token"]
+if x["ptr_out"]:
+x["value_out"] = raw_sum %
+x["value_carry"] = raw_sum // 10
+# Move all pointers to the left.
+# Attention heads attending to the right will be undefined.
+if x["token"] != END_TOKEN:
+x["ptr_out"] = x["ptr_out_right"]
+x["ptr_a"] = x["ptr_a_right"]
+x["ptr_b"] = x["ptr_b_right"]
+def finalize(x):
+# Finalize output by adding the final carry to the output.
+if x["ptr_out"]:
+x["value_out"] = x["value_carry"]
+x["step"] = STEP_DONE
+def ffn_fn(x):
+if x["step"] == STEP_INIT:
+init(x)
+x["step"] = STEP_ITERATE
+elif x["step"] == STEP_ITERATE:
+if x["ptr_a_token"] == START_TOKEN:
+x["step"] = STEP_FINALIZE
+else:
+iterate(x)
+elif x["step"] == STEP_FINALIZE:
+finalize(x)
+Figure 12: MLP function for addition program.
+34variables = {
+"token": pb.var(INPUT_RANGE, input_init_fn=lambda x: x),
+# This variable tracks the current processing step.
+"step": pb.var(NUM_STEPS),
+# These are pointers to which digit is currently being processed.
+# They are ‘1‘ at the position of the current digit to process, and ‘0‘
+# otherwise.
+"ptr_a": pb.var(2),
+"ptr_b": pb.var(2),
+# This pointer is ‘1‘ at the position to write the next output to,
+# and ‘0‘ otherwise.
+"ptr_out": pb.var(2),
+# This tracks the "carry" value form the previous iteration.
+"value_carry": pb.var(10),
+# This tracks the final output value for a given digit.
+"value_out": pb.var(10),
+# Static variables used as attention query.
+"one": pb.var(var_range=2, default=1),
+}
+attention_heads = {
+# For these relative attention heads, we always want to attend to the
+# position immediately to the right.
+"token_right": v_relative("token", 1),
+"ptr_a_right": v_relative("ptr_a", 1),
+"ptr_b_right": v_relative("ptr_b", 1),
+"ptr_out_right": v_relative("ptr_out", 1),
+# For these attention heads, we want to attend to the positions associated
+# with the current pointers.
+"ptr_a_token": qkv("one", "ptr_a", "token"),
+"ptr_b_token": qkv("one", "ptr_b", "token"),
+}
+return program_spec(
+variables=variables, heads=attention_heads, ffn_fn=ffn_fn,
+output_name="value_out", input_range=INPUT_RANGE, position_range=None,
+halt_spec=pb.halt_spec("step", halt_value=STEP_DONE),
+)
+Figure 13: Program for adding two positive integers. The MLP function is defined in Figure 12.
+35D.3 SUBLEQ
+Our ALTA program for implementing a SUBLEQ interpreter is given in Figure 15. The input tokens define
+the set of memory registers, and program execution starts at position 0. SUBLEQ stands for SUBtract and
+branch if Less-than or EQual to zero. Commands in SUBLEQ are specified by three memory addresses A,
+B, and C. Executing a command consists of subtracting the value at memory address A from the value at
+addressB,andwritingtheresulttoaddressB. Iftheresultislessthanorequalzero,thentheprogramjumps
+tothecommandataddressC,orwillhaltifC <0. Giannouetal.(2023)showedhowaLoopedTransformer
+can implement an interpreter for a restricted form of SUBLEQ that did not allow self-modifying code, i.e.,
+memory registers specifying SUBLEQ instructions could not be modified during program execution. Our
+program implements a SUBLEQ interpreter without such restrictions, i.e. without differentiating between
+program and memory registers. Additionally, our implementation executes 1 SUBLEQ instruction every 3
+layers,asopposedtoevery9layersfortheimplementationof Giannouetal.(2023). However,ourapproach
+requires O(N3) MLP hidden dimensions (i.e., transition rules), where N is the number of possible memory
+values. The construction of Giannou et al. (2023) requires only O(logN) MLP hidden dimensions.
+def encode(value):
+# Encodes a register value as positive integer.
+return value - MIN_VALUE
+def decode(value):
+# Decodes a register value from positive integer.
+return value + MIN_VALUE
+def _update_position(z, position_a):
+z["position_a"] = position_a
+z["position_b"] = position_a + 1
+z["position_c"] = position_a + 2
+def ffn_fn(z):
+if z["state"] == STATE_1:
+if decode(z["a"]) < 0 or decode(z["b"]) < 0:
+# ‘a‘ or ‘b‘ are not valid register positions.
+z["state"] = STATE_DONE
+return
+z["state"] = STATE_2
+elif z["state"] == STATE_2:
+# Compute mem[b] - mem[a].
+mem_b = decode(z["mem_b"]) - decode(z["mem_a"])
+z["jump"] = int(mem_b <= 0)
+# Update memory value at position ‘b‘.
+if z["position"] == z["b"]:
+z["mem"] = encode(mem_b)
+z["state"] = STATE_3
+elif z["state"] == STATE_3:
+# Determine next instruction.
+if z["jump"]:
+# Jump to instruction ‘c‘.
+if decode(z["c"]) < 0:
+# Break if ‘c‘ is negative.
+z["state"] = STATE_DONE
+else:
+_update_position(z, z["c"])
+z["state"] = STATE_1
+else:
+# Proceed to next instruction.
+_update_position(z, z["position_a"] + 3)
+z["state"] = STATE_1
+Figure 14: MLP function for interpreting SUBLEQ instructions.
+36mem_range = (MAX_VALUE - MIN_VALUE) + 1
+variables = {
+# Value of register.
+"mem": var(mem_range, input_init_fn=lambda x: x),
+# Position of register.
+"pos": var(mem_range, position_init_fn=encode),
+# Position of current instruction.
+"pos_a": var(mem_range, default=encode(0)),
+"pos_b": var(mem_range, default=encode(1)),
+"pos_c": var(mem_range, default=encode(2)),
+# Program state.
+"state": var(NUM_STATES),
+# Whether to jump at next instruction.
+"jump": var(2),
+}
+attention_heads = {
+# Values of registers at ‘pos_a‘, ‘pos_b‘, and ‘pos_c‘.
+"a": qkv("pos_a", "pos", "mem"),
+"b": qkv("pos_b", "pos", "mem"),
+"c": qkv("pos_c", "pos", "mem"),
+# Value of registers at ‘a‘ and ‘b‘.
+"mem_a": qkv("a", "pos", "mem"),
+"mem_b": qkv("b", "pos", "mem"),
+}
+return program_spec(
+variables=variables, heads=attention_heads, ffn_fn=ffn_fn,
+output_name="mem", input_range=mem_range, pos_range=NUM_POSITIONS,
+halt=halt_spec("state", halt_value=STATE_DONE),
+)
+Figure 15: Program for interpreting SUBLEQ instructions. The MLP function is specified in Figure 14.
+D.4 SCAN
+Background The SCAN suite of compositional generalization tasks (Lake & Baroni, 2018) require map-
+ping natural language commands (e.g., “jump twice and look left”) to action sequences (e.g., JUMP JUMP
+LTURN LOOK). The suite is inspired by the linguistic notion of systematic compositionality, i.e., the ability
+to recombine a finite set of elements in novel ways (Chomsky, 1957; Montague, 1970). Certain splits have
+been shown to be challenging for Transformer-based models (Keysers et al., 2020; Furrer et al., 2020; Qiu
+et al., 2022b; Kazemnejad et al., 2024), especially the length split and the Maximum Compound Divergence
+(MCD) splits proposed by Furrer et al. (2020). Notably, no Transformer-based model has been shown to
+reliably solve these tasks, without relying on some symbolic decomposition of the task (Zhou et al., 2023a)
+or training data augmented by a symbolic system (Qiu et al., 2022a). Other successful solutions have also
+involvedsymbolicparsingofsomeform(Shawetal.,2021;Chenetal.,2020;Herzig&Berant,2021). While
+priorworkhasstudiedtheexpressivityofvariousclassesofTransformerswithrespecttoformallanguages,it
+has primarily focused on recognizing and generating Dyck languages (Yao et al., 2021; Bhattamishra et al.,
+2020;Hahn,2020;Weissetal.,2021;Ebrahimietal.,2020),andthushasnotpreviouslyshownaconstructive
+demonstration of how a Transformer can solve the SCAN task.
+Program Our approach follows Shaw et al. (2021) in formalizing the SCAN task as translation given a
+quasi-synchronouscontext-freegrammar. Notably,theSCANgrammarisunambiguousandcanbeparsedin
+lineartime. First,theprogramexecutesashift-reduceparseoftheinputsequence,representingtheparseas
+a tree. Second, the ALTA program decodes the output sequence by traversing the parse tree. The program
+represents the necessary variable-length data structures (a stack, parse tree, and buffer) using a variable
+numberofinputtokens. Weincludeadditional“memory”tokensintheinputtoensurethereareasufficient
+number of tokens to represent these structures. We give an example of shift-reduce parsing for SCAN in
+Table 4.
+37Table 4: Example of shift-reduce parsing for SCAN, for the input “jump twice”. Our ALTA program
+represents the state of the stack and parse tree using a variable number of input tokens.
+Action Stack Parse Tree Input Buffer
+Initialize ⟨⟩ ⟨⟩ ⟨jump,twice⟩
+Shift ⟨jump⟩ ⟨⟩ ⟨twice⟩
+Reduce ⟨NT⟩ ⟨NT→jump⟩ ⟨twice⟩
+Shift ⟨NT,twice⟩ ⟨NT→jump⟩ ⟨⟩
+Reduce ⟨NT⟩ ⟨NT→jump,NT→NT twice⟩ ⟨⟩
+In Figure 17 we show a program for parsing SCAN inputs using a shift-reduce parser. This program is a
+fragment of the overall SCAN program, which also decodes the output from the parsed representation, but
+is too long to include in this paper. We refer the reader to our open-source code for the full SCAN program.
+def shift_stack_pointers(z, stack_pointer_offset):
+new_stack_pointer_0 = z["stack_pointer_0"] + stack_pointer_offset
+z["stack_pointer_0"] = new_stack_pointer_0
+z["stack_pointer_1"] = new_stack_pointer_0 - 1
+z["stack_pointer_2"] = new_stack_pointer_0 - 2
+z["stack_pointer_3"] = new_stack_pointer_0 - 3
+def reduce(z, matched_rule):
+# Pop RHS elements and add LHS nonterminal to stack.
+if z["position"] == (z["stack_pointer_0"] - rule_len(matched_rule)):
+z["symbol_id"] = rule_lhs_id(matched_rule)
+shift_stack_pointers(z, 1 - rule_len(matched_rule))
+# Add rule to parse tree.
+if z["position"] == z["tree_pointer"]:
+# Use 1-indexing to reserve 0 for no rule.
+z["rule_id"] = rule_id(matched_rule)
+z["tree_pointer"] += 1
+def shift(z):
+# Shift the next token to the stack.
+if z["position"] == z["stack_pointer_0"]:
+z["symbol_id"] = get_symbol_id(z["input_pointer_token_id"])
+shift_stack_pointers(z, 1)
+z["input_pointer"] += 1
+def ffn_fn(z):
+if not z["done"]:
+# Check if top-3 stack symbols (and 1 lookahead token) match any rule.
+matched_rule = maybe_match_rule(
+z["input_pointer_token_id"],
+z["stack_symbol_1"],
+z["stack_symbol_2"],
+z["stack_symbol_3"],
+)
+if matched_rule is not None:
+reduce(z, matched_rule)
+else:
+# Check if parsing is complete.
+if z["input_pointer_token_id"] == EOS_ID:
+z["done"] = 1
+else:
+shift(z)
+Figure 16: MLP function for parsing SCAN.
+End-to-end Training Details Wetrainedencoder-decoder Transformersend-to-endontheSCANlength
+andMCDsplits. Wevariedthenumberoflayers,whetherweightsharingwasused,andthetypeofpositional
+38variables = {
+"token": var(NUM_INPUT_TOKENS, input_init_fn=lambda x: x),
+"position": var(NUM_POSITIONS, position_init_fn=lambda x: x),
+# Whether parsing is complete.
+"done": var(2),
+# Pointer to the next stack position, and then the top 3 elements on
+# the stack.
+"stack_pointer_0": var(NUM_POSITIONS, default=STACK_OFFSET),
+"stack_pointer_1": var(NUM_POSITIONS, default=STACK_OFFSET - 1),
+"stack_pointer_2": var(NUM_POSITIONS, default=STACK_OFFSET - 2),
+"stack_pointer_3": var(NUM_POSITIONS, default=STACK_OFFSET - 3),
+# Pointer to write the next rule to.
+"tree_pointer": var(NUM_POSITIONS, default=TREE_OFFSET),
+# Pointer to the next input token to process.
+"input_pointer": var(NUM_POSITIONS, default=INPUT_OFFSET),
+# Stores index of associated parsing rule.
+"rule_id": var(NUM_RULES),
+# Stores symbol ID associated with stack element.
+"symbol_id": var(NUM_SYMBOLS),
+}
+heads = {
+# Get token at input pointer.
+"input_pointer_token_id": qkv("input_pointer", "position", "token"),
+# Get top 3 symbols on stack.
+"stack_symbol_1": qkv("stack_pointer_1", "position", "symbol_id"),
+"stack_symbol_2": qkv("stack_pointer_2", "position", "symbol_id"),
+"stack_symbol_3": qkv("stack_pointer_3", "position", "symbol_id"),
+}
+return program_spec(
+variables=variables, heads=heads, ffn_fn=ffn_fn,
+output_name="rule_id",
+input_range=NUM_INPUT_TOKENS,
+position_range=NUM_POSITIONS,
+)
+Figure 17: Program for parsing SCAN. The MLP function is defined in Figure 16.
+encodings used in the encoder. When using weight sharing, we trained with up to 256 encoder layers and
+256 decoder layers (as our ALTA program requires at most 512 total layers). Without weight sharing, we
+only trained with up to 64 encoder layers and 64 decoder layers due to memory constraints.
+Constant in all experiments were the following hyperparameters: embeddings with dimension 128, hidden
+layersizesof512,8attentionheadswithdimension128,anAdafactoroptimizationfunction,GeLUactivation
+functions,alearningrateof5e-4,100,000steps,andaSentencePiecevocabulary(Kudo&Richardson,2018).
+Results Figure 18 plots test accuracy when using weight sharing and relative positional encodings. Accu-
+racy does not improve as the number of layers increases. (If anything, there is a slight inverse relationship
+between number of layers and test accuracy.) This is the case in all experiments, regardless of the type of
+positional encoding used in the encoder and whether weight sharing is used. (See Table 5 for all results.)
+The fact that increasing the number of layers does not improve generalization indicates that when trained
+with standard supervision, Transformers are unable to take advantage of extra layers to learn a function
+consistentwiththesequentialALTAprogramthatgeneralizesperfectly. Notably,allend-to-endexperiments
+fit the training set, even with just two layers, so there exists some other algorithm that fits the training set
+that requires at most two layers. We speculate that in all cases, the end-to-end supervised Transformers
+are unable to learn the sequential algorithm with perfect generalization because of a bias towards learning
+algorithms that require fewer layers to execute. These results are consistent with our results on Parity, in
+which Transformers trained with end-to-end supervision do not learn the sequential algorithm with perfect
+generalization, instead seeming to mimic an algorithm that requires just one layer (see §D.1).
+39Accuracy by Number of Layers With Weight Sharing
+Length MCD1 MCD2 MCD3
+0.25 0.25 0.25 0.25
+0.20 0.20 0.20 0.20
+0.15 0.15 0.15 0.15
+0.10 0.10 0.10 0.10
+0.05 0.05 0.05 0.05
+0.00 0.00 0.00 0.00
+2 6 16 32 64 128 256 2 6 16 32 64 128 256 2 6 16 32 64 128 256 2 6 16 32 64 128 256
+Number of Layers
+Figure 18: Test accuracy by number of layers on SCAN splits when trained using standard, end-to-end
+supervision with weight sharing and relative positional encodings. Test accuracy does not increase as the
+number of layers increases.
+Similarly, prior work has generally not shown a consistent benefit from increasing model size or number of
+layers on SCAN or other similar compositional generalization tasks when fine-tuning. Furrer et al. (2020)
+evaluated models of various sizes on SCAN and did not find that increasing size improves generalization.
+Ontanon et al. (2022) showed some improvement on the SCAN length split when increasing the number of
+layers with weight sharing, but only evaluated up to six layers. Qiu et al. (2022b) and Petty et al. (2024)
+systematically evaluated the impact of model size and depth, respectively, on compositional generalization
+(thoughnotonSCAN)andfoundthatwhenfine-tuning,scalingcurvesareflatorquicklysaturate. However,
+these papers evaluated models with at most 118 layers, and only Ontanon et al. (2022) evaluated models
+with varying numbers of layers using weight sharing.
+Table 5: Test accuracy for all Transformers trained with standard, end-to-end supervision on SCAN. Re-
+gardless of the configuration and split, increasing the number of layers does not improve test accuracy.
+Number of Layers
+Split Weight Sharing Encoder Positional Encoding 2 6 16 32 64 128 256
+Length Yes Relative 11% 10% 9% 7% 7% 7% 5%
+Length Yes Absolute 8% 9% 7% 5% 5% 6% 4%
+Length No Relative 9% 9% 11% 10% 10% – –
+Length No Absolute 9% 6% 7% 6% 4% – –
+MCD1 Yes Relative 5% 3% 2% 4% 3% 3% 2%
+MCD1 Yes Absolute 4% 1% 3% 2% 2% 2% 1%
+MCD1 No Relative 4% 4% 3% 2% 2% – –
+MCD1 No Absolute 5% 2% 1% 1% 2% – –
+MCD2 Yes Relative 9% 13% 9% 5% 4% 7% 3%
+MCD2 Yes Absolute 5% 6% 2% 2% 2% 2% 2%
+MCD2 No Relative 13% 7% 4% 5% 4% – –
+MCD2 No Absolute 4% 4% 2% 2% 1% – –
+MCD3 Yes Relative 12% 12% 6% 5% 7% 2% 3%
+MCD3 Yes Absolute 3% 4% 3% 3% 3% 2% 2%
+MCD3 No Relative 8% 8% 7% 3% 2% – –
+MCD3 No Absolute 4% 5% 2% 3% 1% – –
+40
+ycaruccA

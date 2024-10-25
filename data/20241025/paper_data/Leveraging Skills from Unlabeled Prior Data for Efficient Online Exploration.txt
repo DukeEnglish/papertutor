@@ -1,0 +1,1102 @@
+LEVERAGING SKILLS FROM UNLABELED PRIOR DATA
+FOR EFFICIENT ONLINE EXPLORATION
+MaxWilcoxson∗,QiyangLi∗,KevinFrans,SergeyLevine
+UCBerkeley
+{mwilcoxson, qcli, kvfrans, svlevine}@eecs.berkeley.edu
+ABSTRACT
+Unsupervised pretraining has been transformative in many supervised domains.
+However, applying such ideas to reinforcement learning (RL) presents a unique
+challenge in that fine-tuning does not involve mimicking task-specific data, but
+rather exploring and locating the solution through iterative self-improvement.
+In this work, we study how unlabeled prior trajectory data can be leveraged
+to learn efficient exploration strategies. While prior data can be used to pre-
+train a set of low-level skills, or as additional off-policy data for online RL, it
+has been unclear how to combine these ideas effectively for online exploration.
+Our method SUPE (Skills from Unlabeled Prior data for Exploration) demon-
+strates that a careful combination of these ideas compounds their benefits. Our
+method first extracts low-level skills using a variational autoencoder (VAE), and
+then pseudo-relabels unlabeled trajectories using an optimistic reward model,
+transforming prior data into high-level, task-relevant examples. Finally, SUPE
+uses these transformed examples as additional off-policy data for online RL to
+learn a high-level policy that composes pretrained low-level skills to explore
+efficiently. We empirically show that SUPE reliably outperforms prior strate-
+gies, successfully solving a suite of long-horizon, sparse-reward tasks. Code:
+https://github.com/rail-berkeley/supe.
+1 INTRODUCTION
+Unsupervised pretraining has been transformative in many supervised domains, such as lan-
+guage (Devlin et al., 2018) and vision (He et al., 2022). Pretrained models can adapt with small
+numbersofexamples, andwithbettergenerality(Radfordetal.,2019;Brownetal.,2020). How-
+ever, in contrast to supervised learning, reinforcement learning (RL) presents a unique challenge
+in that fine-tuning does not involve further mimicking task-specific data, but rather exploring and
+locatingthesolutionthroughiterativeself-improvement. Thus,thekeychallengetoaddressinpre-
+training for RL is not simply to learn good representations, but to learn an effective exploration
+strategyforsolvingdownstreamtasks.
+Pretrainingbenefitsgreatlyfromthebreadthofthedata. Unlabeledtrajectories(i.e.,thosecollected
+frompreviouspolicieswhoseobjectivesareunknown)arethemostabundantlyavailable,butusing
+themtosolvespecifictaskscanbedifficult. Itisnotenoughtosimplycopybehaviors, whichcan
+differgreatlyfromthecurrenttask. Thereisanentanglementproblem–generalknowledgeofthe
+environmentismixedinwithtask-specificbehaviors.Aconcreteexampleislearningfromunlabeled
+locomotion behavior: we wish to learn how to move around the world, but not necessarily to the
+locationspresentinthepretrainingdata. Wewillrevisitthissettingintheexperimentalsection.
+Theentanglementproblemcanbealleviatedthroughhierarchicaldecomposition. Specifically,tra-
+jectoriescan brokenintosegmentsof task-agnosticskills, whichare composedinvariousways to
+solvevariousobjectives. Wepositthatunlabeledtrajectoriesthuspresentatwofoldbenefit, (1)as
+awaytolearnadiversesetofskills,and(2)asoff-policyexamplesofcomposingsuchskills. No-
+tably,prioronlineRLmethodsthatleveragepretrainedskillslargelyignorethesecondbenefit,and
+discardthepriortrajectoriesaftertheskillsarelearned(Ajayetal.,2021;Pertschetal.,2021;Hu
+∗EqualContribution
+1
+4202
+tcO
+32
+]GL.sc[
+1v67081.0142:viXraUnlabeled Prior Trajectory Data
+(a) Trajectory Segment Encoder
+label label label label label label
+(f)
+Optimistic
+(d)
+Reward
+update reward
+learns to pick bonus
+Low-Level High-Level low-level skills
+(b) (c)
+Skill Policy Policy to explore via
+off-policy RL
+Environment
+learns to clone the
+trajectory segment
+add high-level
+transition
+Online
+(e) Replay
+Stage 1: Offline unsupervised Stage 2: Online exploration using
+Buffer
+skill pretraining pseudo-labeled high-level trajectories
+Figure1: SUPEutilizesunlabeledtrajectorydatatwice,bothforofflineunsupervisedskillpretrainingand
+foronlinehigh-levelpolicylearningusingRL.Left: intheofflinepretrainingphase(Stage1), weunsuper-
+visedlylearnbothatrajectorysegmentencoder(a)andalow-levellatentconditionedskillpolicy(b)via
+abehaviorcloningobjectivewherethepolicyisoptimizedtoreconstructtheactioninthetrajectorysegment.
+Right: intheonlineexplorationphase(Stage2),thepretrainedtrajectorysegmentencoder(a)andanopti-
+misticrewardmodule(d)areusedtopseudo-labelthepriordataandtransformitintohigh-leveltrajectories
+(f)thatcanbereadilyconsumedbyahigh-leveloff-policyRLagent. Leveragingtheseofflinetrajectoriesand
+theonlinereplaybuffer(e),welearnahigh-levelpolicy(c)thatpicksthepretrainedlow-levelskillsonlineto
+exploreintheenvironment.Finally,theobservedtransitionsandrewardvaluesareusedtoupdatetheoptimistic
+rewardmoduleandtheonlinereplaybuffer.
+etal.,2023;Chenetal.,2024). Weinsteadarguethatsuchtrajectoriesarecritical,andcangreatly
+speeduplearning. Wemakeuseofasimplestrategyoflearninganoptimisticrewardmodelfrom
+onlinesamples,andpseudo-relabelingpasttrajectorieswithanoptimisticrewardestimate. Thepast
+trajectories can thus be readily utilized as off-policy data, allowing for quick learning even with a
+verysmallnumberofonlineinteractions.
+WeformalizetheseinsightsasSUPE(SkillsfromUnlabeledPriordataforExploration),arecipefor
+maximally leveraging unlabeled prior data in the context of exploration. The prior data is utilized
+in two capacities, the offline and online phases. In the offline pretraining phase, we extract short
+segments of trajectories and use them to learn a set of low-level skills. In the online phase, we
+learn a high-level exploration policy, and again utilize the prior data by labelling each trajectory
+segmentwithanoptimisticrewardestimate. By“double-dipping”inthisway, wecanutilizeboth
+thelow-levelandhigh-levelstructureofpriortrajectoriestoenableefficientexplorationonline.
+Our main contribution is a simple method that leverages unlabeled prior trajectory data to both
+pretrain skills offline and compose these skills efficiently online for exploration. We instantiate
+SUPE with a variational autoencoder (VAE) to extract low-level skills, and an off-the-shelf off-
+policy RL algorithm (Ball et al., 2023) to learn a high-level policy from both online and offline
+data (Figure 1). Our empirical evaluations on a set of challenging sparse reward tasks show that
+leveraging the unlabeled prior data during both offline and online learning is crucial for efficient
+exploration,enablingSUPEtofindthesparserewardsignalmorequicklyandachievemoreefficient
+learningoverallpriormethods(noneofwhichareabletoutilizethedatabothonlineandoffline).
+22 RELATED WORK
+Unsupervisedskilldiscovery. Unsupervisedskilldiscoverymethodsfirstbeganintheonlineset-
+ting,whereRLagentsweretaskedwithlearningstructuredbehaviorsintheabsenceofrewardsignal
+(Gregoretal.,2016;Baconetal.,2017;Florensaetal.,2017;Achiametal.,2018;Eysenbachetal.,
+2018; Sharma et al., 2020; Hansen et al., 2020; Liu & Abbeel, 2021; Park et al., 2023b). These
+insightsnaturallytransferredtotheofflinesettingasamethodofdealingwithunlabeledtrajectory
+data. Offline skill discovery methods largely comprise of two categories, those who extract skills
+basedonoptimizingunsupervisedrewardsignals(ineithertheformofpolicies(Touatietal.,2022;
+Huetal.,2023;Fransetal.,2024;Parketal.,2024)orQ-functions(Chenetal.,2024)),andthose
+whoutilizeconditionalbehavior-cloningoversubsetsoftrajectories (Shankar&Gupta,2020;Ajay
+etal.,2021;Singhetal.,2021;Pertschetal.,2021;Nasirianyetal.,2022). Closesttoourmethod
+inimplementationareAjayetal.(2021)andPertschetal.(2021),whoutilizeatrajectory-segment
+VAE to learn low-level skills, and learn a high-level policy online. However, in contrast to prior
+methods which all utilize offline data purely for skill-learning and do not keep it around during
+onlinetraining,weshowthatutilizingthedataviarelabelingiscriticalforfastexploration.
+Offline to online reinforcement learning. The offline-to-online reinforcement learning meth-
+ods(Xieetal.,2021;Songetal.,2023;Leeetal.,2022;Agarwaletal.,2022;Zhangetal.,2023;
+Zhengetal.,2023;Balletal.,2023;Nakamotoetal.,2024)focusonefficientonlinelearningwith
+thepresenceofofflinedata(oftenlabeledwiththerewardvalue). ManyofflineRLapproachescan
+beappliedtothissetting–simplyrunofflineRLfirstontheofflinedatatoconvergenceasanini-
+tialization and then continue training for online learning (using the combined dataset that consists
+of both offline and online data) (Kumar et al., 2020; Kostrikov et al., 2021; Tarasov et al., 2024).
+However, such approaches often result in slow online improvements as offline RL objectives tend
+tooverlyconstrainthepolicybehaviorstobeclosetothepriordata,limitingtheexplorationcapa-
+bility. Ontheotherhand,off-policyonlineRLmethodscanalsobedirectlyappliedinthissetting
+bydirectlytreatingtheofflinedataasadditionaloff-policydatainthereplaybufferandlearningthe
+policy from scratch (Lee et al., 2022; Song et al., 2023; Ball et al., 2023). While related in spirit,
+thesemethodscannotbedirectlyusedinoursettingastheyrequireofflinedatatohaverewardlabels.
+Data-drivenexploration.Acommonapproachforonlineexplorationistoaugmentrewardbonuses
+totheperceivedrewardsandoptimizetheRLagentwithrespecttotheaugmentedrewards(Stadie
+et al., 2015; Bellemare et al., 2016; Houthooft et al., 2016; Pathak et al., 2017; Tang et al., 2017;
+Ostrovski et al., 2017; Achiam & Sastry, 2017; Burda et al., 2018; Ermolov & Sebe, 2020; Guo
+etal.,2022;Lobeletal.,2023). Whilemostexplorationmethodsoperateinthepurelyonlinesetting
+andfocusonaddingbonusestotheonlinereplaybuffer, recentworksalsostarttoexploreamore
+data-drivenapproachthatmakesuseofanunlabeledpriordatatoguideonlineexploration. Lietal.
+(2024) explore adding bonuses to the offline data, allowing them to optimize the RL agent to be
+optimisticaboutstatesinthedata,encouragingexplorationaroundtheofflinedatadistribution. Our
+method explores a similar idea of adding bonuses to the offline data but for training a high-level
+policy,allowingustocomposepretrainedskillseffectivelyforexploration. Huetal.(2023)explore
+a slightly different strategy of learning a number of policies using offline RL that each optimizes
+forarandomrewardfunction. Then,itsamplesactionsfromthesepoliciesonlinetoformanaction
+poolfromwhichtheonlineagentcanchoosetoselectforexploration.Thisapproachdoesnotutilize
+offlinedataduringtheonlinephaseandrequireallthepolicies(foreveryrandomrewardfunction)
+toberepresentedseparately. Incontrast,ourmethodmakesuseoftheofflinedataasoff-policydata
+for updating the high-level policy and our skills are represented using a single network (with the
+skilllatentbeingtheinputtoournetwork). Aswewillshowinourexperiments,beingabletouse
+offlinedataiscrucialforlearningtoexploreintheenvironmentefficiently.
+Optionsframework. Ourmethodisalsorelatedtotheoptionframework(Suttonetal.,1999;Men-
+ache et al., 2002; Mannor et al., 2004; S¸ims¸ek & Barto, 2004; S¸ims¸ek & Barto, 2007; Konidaris,
+2011;Danieletal.,2016a;Srinivasetal.,2016;Danieletal.,2016b;Foxetal.,2017;Baconetal.,
+2017; Kim et al., 2019; Bagaria & Konidaris, 2019; Bagaria et al., 2024). Different from the ap-
+proach we take that learns latent skills with a fixed time horizon (H = 4 in all our experiments),
+theoptionsframeworkprovidesamoreflexiblewaytolearnskillswithvaryingtimehorizon,often
+defined by learnable initiation and/or termination conditions (Sutton et al., 1999). We opt for the
+simplified skill definition because it allows us to bypass the need to learn initiation or termination
+conditions,andframetheskillpretrainingphaseasasimplesupervisedlearningtask.
+33 PROBLEM FORMULATION
+We consider a Markov decision process (MDP) M = {S,A,P,γ,r,ρ} where S is the set of all
+possible states, A is the set of all possible actions that a policy π(a|s) : S (cid:55)→ P(A) may take,
+P(s′|s,a) : S ×A (cid:55)→ P(S) is the transition function that describes the probability distribution
+overthenextstates′giventhecurrentstateandtheactiontakenatthestate,γisthediscountfactor,
+r(s,a) : S ×A (cid:55)→ R is the reward function, and ρ : P(S) is the initial state distribution. We
+haveaccesstoadatasetoftransitionsthatarecollectedfromthesameMDPwithnorewardlabels:
+D = {(s ,a ,s′)}. Duringonlinelearning,theagentmayinteractwiththeenvironmentbytaking
+i i i
+actionsandobservesthenextstateandtherewardspecifiedbytransitionfunctionP andthereward
+functionr. WeaimtodevelopamethodthatcanleveragethedatasetDtoefficientlyexploreinthe
+MDPtocollectrewardinformation,andoutputsawell-performingpolicyπ(a|s)thatachievesgood
+cumulativereturnintheenvironmentη(π)=E (cid:80)∞ [γtr(s ,a )].
+{s0∼ρ,at∼π(at|st),st+1∼P(·|st,at)} t=0 t t
+Note that this is different from the zero-shot RL setting (Touati et al., 2022) where the reward
+function is specified for the online evaluation (only unknown during the unspervised pretraining
+phase). In our setting, the agent has zero knowledge of the reward function and must actively
+explore in the environment to identify the task it needs to solve by receiving the reward through
+environmentinteractions.
+4 SKILLS FROM UNLABELED PRIOR DATA FOR EXPLORATION (SUPE)
+In this section, we describe in detail how we utilize the unlabeled trajectory dataset to accelerate
+onlineexploration. Ourmethod, SUPE,canberoughlydividedintotwoparts. Thefirstpartisan
+offline pretraining phase where we extract skills from the unlabeled prior data with an trajectory-
+segment VAE. The second part is the online learning phase where we train a high-level off-policy
+agenttocomposethepretrainedskillsleveragingexamplesfrombothpriordataandonlinereplay
+buffer. Algorithm1describesourmethod.
+Algorithm1SUPE
+1: Input: UnlabeleddatasetoftrajectoriesD,trajectorysegmentlengthH andbatchsizeB.
+2: foreachpretrainingstepdo
+3: SampleabatchoftrajectorysegmentsoflengthH,{τ 1,··· ,τ B}fromD
+4: Optimize the skill policy π θ(a|s,z), the trajectory encoder f θ(z|τ), along with the state-
+dependentpriorp (z|s)withtheVAEloss 1 (cid:80)B L (τ )(Equation1)
+θ B i=1 θ i
+5: endfor
+6: D replay ←∅
+7: Initializetheoptimisticrewardmoduler UCB(s,z)(following(Lietal.,2024))
+8: foreveryH onlineenvironmentstepsdo
+9: Samplethetrajectorylatentz ∼π ψ(z|s)
+10: Runtheskillpolicyπ θ(a|s,z)forH stepsintheenvironment: {s 0,a 0,r 0,··· ,s H}
+11: Addthehigh-leveltransitiontobufferD replay ←D replay∪{(s 0,z,s H,(cid:80)H i=− 01[γir i])}.
+12: SampleabatchoftrajectorysegmentsoflengthH,{τ 1,··· ,τ B}fromD
+13: Encodeeachtrajectorysegmentusingthetrajectoryencoder: zˆi ∼f θ(z|τ i)
+14: Usef θ andr UCBtotransformeachunlabeledtrajectorysegmentintoahigh-leveltransition
+withpseudo-labels(Equation2): B ={(si,zˆi,rˆi,si )}B
+offline 0 H i=1
+15: SamplebatchB onlinefromD replay
+16: Runoff-policyRLupdateonB online∪B offlinetotrainπ ψ(z|s).
+17: endfor
+18: Output: Ahierarchicalpolicyconsistingofahigh-levelπ ψ(z|s)andlow-levelπ θ(a|s,z).
+Pretraining with trajectory VAE. Since we only have access to an unlabeled dataset of tra-
+jectories, we must capture all the behaviors in the data as accurately as possible. At the same
+time, we aim to make the dataset directly usable for training a high-level skill-setting policy
+in hope that this high-level policy can be trained in a more sample-efficient way (compared to
+only having access to the online samples). We achieve this by adopting a trajectory VAE design
+from prior methods (Ajay et al., 2021; Pertsch et al., 2021) where a short segment of trajectory
+τ ={s ,a ,s ,··· ,s ,a }isfirstfedintoatrajectoryencoderf (z|τ)thatoutputsadistri-
+0 0 1 H−1 H−1 θ
+butionoverthelatentcodez,thenaskillpolicyπ (a|s,z)isusedtoreconstructtheactionsinthe
+θ
+4trajectorysegment. Suchadesignhelpsusdirectlymaptrajectorysegmentstotheircorresponding
+skillpolicies,effectivelyallowingustotransformthesegmentintoahigh-leveltransitionintheform
+of(currentstate: s ,action: z,nextstate: s ). Asresult,suchtransitioncanbedirectlyconsumed
+0 H
+byanyoff-policyRLalgorithmintheonlinephasetoupdatethehigh-levelpolicyπ (z|s)(aswe
+ψ
+will explain in the next section in more details). We also learn a state-dependent prior p (z|s),
+θ
+following the prior works (Pertsch et al., 2021), to help accommodate the difference in behavior
+diversityofdifferentstates. Puttingthemalltogether,thelossisshowninEquation1.
+(cid:34)H−1 (cid:35)
+(cid:88)
+L (τ)=βD (f (z|τ)||p (z|s ))−E logπ (a |s ,z) . (1)
+θ KL θ θ 0 z∼fθ(z|τ) θ h h
+h=0
+Onlineexplorationwithtrajectoryskills.Ourmaingoalintheonlinephaseistolearnahigh-level
+off-policyagentthatdecideswhichskilltouseataregularintervalofH timestepstolearnthetask
+quickly. Theagentconsumeshigh-leveltransitionswherethestateandthenextstateareseparated
+byH timestepsandtheactioncorrespondstothetrajectorylatentzthatisusedtoretrievethelow-
+levelactionsfromtheskillpolicyπ(a|s,z). Tomakeuseofthepriordataandgeneratehigh-level
+transitions from it, we need both the action and the reward label for each pair of states (that are
+separated by H steps) in the trajectory. For the action, we can simply sample from the trajectory
+encodingofthetrajectorysegmentenclosedbythestatepair. Forthereward,wemaintainanupper-
+confidence bound (UCB) estimate of the reward value for each state and skill pair (s,z) inspired
+by the prior work (Li et al., 2024) (where it does so directly in the state-action space (s,a)), and
+pseudo-labelthetransitionwithsuchanoptimisticrewardestimate. Theoptimisticrewardestimate
+isrecomputedbeforeupdatingthehighlevelagent,sincetheestimatechangesovertime,whilethe
+trajectory encoding is computed before starting online learning, since this label does not change.
+Therelabelingissummarizedbelow:
+(s ,zˆ∼f (z|τ),rˆ=r (s ,zˆ), s ). (2)
+0 θ UCB 0 H
+state labeledaction labeledreward nextstate
+Practicalimplementationdetails. Followingpriorworkontrajectory-segmentVAEs(Ajayetal.,
+2021;Pertschetal.,2021),weuseaGaussiandistribution(withbothmeananddiagonalcovariance
+learnable) for the trajectory encoder, the skill policy, as well as the state-dependent prior. While
+Pertsch et al. (2021) use a KL constraint between the high-level policy and the state-dependent
+prior, we use a simpler design without the KL constraint that works much better (as we show in
+Appendix E). To achieve this, we adapt the policy parameterization from (Haarnoja et al., 2018),
+wheretheactionvalueisenforcedtobebetween−1and1usingatanhtransformation,andentropy
+regularization is applied on the squashed space. We use this policy parameterization for the high-
+levelpolicyπ(z|s)topredicttheskillactioninthesquashedspacez . Wethenrecoverthe
+sqaushed
+actual skill action vector by unsquashing it according to z = arctanh(z ), so that it can
+sqaushed
+be used by our skill policy π (a|s,z). For upper-confidence bound (optimistic) estimation of the
+θ
+reward, (r (s ,zˆ)), we directly borrow the UCB estimation implementation in Li et al. (2024)
+UCB 0
+(Section 3, practical implementation section in their paper), where they use a combination of the
+randomnetworkdistillation(RND)(Burdaetal.,2018)rewardbonusandthepredictedrewardfrom
+a reward model (see Appendix C, Ours for more details). For the off-policy high-level agent, we
+followLietal.(2024)touseRLPD(Balletal.,2023)thattakesabalancednumberofsamplesfrom
+thepriordataandtheonlinereplaybufferforagentoptimization. Inadditiontousingtheoptimistic
+offline reward label, we also find that adding the RND reward bonus to the online batch is also
+helpfultoencourageonlineexploration,soweuseitinallourexperiments.
+5 EXPERIMENTAL RESULTS
+We present a series of experiments to evaluate the effectiveness of our method to discover fast
+explorationstrategies. Wespecificallyfocusonlong-horizon,sparse-rewardsettings,whereonline
+explorationisespeciallyimportant. Inparticular,weaimtoanswerthefollowingquestions:
+1. Canweleverageunsupervisedtrajectoryskillstoaccelerateonlinelearning?
+2. Isourmethodabletofindgoalsfasterthanpriormethods?
+3. Doesofflinedatahelpourmethodtocomposeskillsbetterforfasterexploration?
+5a)AntMaze:threemazelayouts(medium,largeandultra),andfourgoalsforeachlayout.
+b)Kitchen c)VisualAntMaze:mazelayoutandimageobservationexamples
+Figure2: Weexperimentonthreechallenging,sparse-rewarddomains: AntMaze,Kitchen,andVisual
+AntMaze.a):AntMaze(Fuetal.,2020)(state-based)withthreedifferentmazelayouts(antmaze-medium,
+antmaze-large, and antmaze-ultra) and the corresponding four goal locations (denoted as the red
+dots)thatweexperimentwithforeachofthelayouts; b): Kitchen(Fuetal.,2020)(state-based); c): Visual
+AntMaze(Parketal.,2023a)withcolorsaddedtothefloorwithlocal64×64imageobservations(e.g.,see
+examplesrightofthemaze). Thecoloroftheflooruniquelyidentifiestheant’spositionwithinthemaze. For
+bothstate-basedandvisualAntMaze,theantstartsatthebottom-leftcornerinthebeginningofeveryepisode.
+5.1 EXPERIMENTALSETUP
+Weconductourexperimentsonthreechallengingsparserewarddomains(Figure2).
+D4RL AntMaze with Additional Goal Locations. D4RL AntMaze is a standard benchmark
+for offline-to-online RL (Fu et al., 2020; Ball et al., 2023) where an ant robot needs to navigate
+around a maze to a specified goal location. We benchmark on three mazes of increasing size,
+antmaze-medium, antmaze-large, and antmaze-ultra. We take the D4RL dataset for
+mediumandlargemazesaswellasthedatasetfromJiangetal.(2022)fortheultramaze(weuse
+the diverse version of the datasets for all these layouts). We then remove the termination and
+reward information from the dataset such that the agent does not know about the goal location a
+priori. Foreachofthemedium,large,ultramazes,wetestwithfourdifferentgoallocationsthatare
+hidden from the agent. See Figure 2a for a visualization of the mazes and the four goal locations
+that we use for each of them. We use a −1/0 sparse reward function where the agent receives −1
+when it has not found the goal and it recieves 0 when it reaches the goal location and the episode
+terminates. Theantalwaysstartsfromtheleftbottomcornerofthemaze,andthegoalfortheRL
+agentistoreachthegoalconsistentlyfromthestartlocation. Itisworthnotingthatthegoalisnot
+knownaprioriandtheofflinedataisunlabeled. Inordertolearntonavigatetothegoalconsistently,
+theagentfirstneedstotraverseinthemazetogatherinformationaboutwherethegoalislocated.
+D4RLKitchenisanotherstandardbenchmarkforoffline-to-onlineRL(Fuetal.,2020;Nakamoto
+et al., 2024), where a Franka robot arm is controlled to interact with various objects in a simu-
+lated kitchen scenario. The desired goal is to complete four tasks (open the microwave, move
+the kettle, flip the light switch, and slide open the cabinet door) in sequence. In the pro-
+cess, the agent attains a reward equal to the number of currently solved tasks. The benchmark
+6contains three datasets, kitchen-mixed, kitchen-partial, and kitchen-complete.
+kitchen-completeistheeasiestdataset,whichonlyhasdemonstrationsofthefourtaskscom-
+pletedinorder. kitchen-partialaddsadditionaltasks,butthefourtasksaresometimescom-
+pleted in sequence. kitchen-mixed is the hardest, where the four tasks are never completed
+in sequence. To adapt this benchmark in our work, we remove all the reward labels in the offline
+dataset.
+Asidefromthetwostate-baseddomainsabove,wealsoconsideravisualdomainbelowtotestthe
+abilityofourmethodinscalinguptohigh-dimensionalimageobservations.
+Visual AntMaze is a benchmark introduced by Park et al. (2023a), where the agent must rely on
+64 × 64 image observations of its surroundings, as well as proprioceptive information including
+bodyjointpositionsandvelocitiestonavigatethemaze. Inparticular,theimageistheonlywayfor
+the agent to locate itself within the maze, so successfully learning to extract location information
+from the image is necessary for successful navigation. The floor is colored such that any image
+can uniquely identify a position in the maze. The maze layout is the same as the large layout in
+thestate-basedD4RLAntMazebenchmarkaboveandwealsousethesameadditionalgoals. The
+rewardfunctionandtheterminationconditionarealsothesameasthestate-basedbenchmark.
+Weusethenormalizedreturn,astandardmetricforD4RL(Fuetal.,2020)environments,asthemain
+evaluationmetric. FortheKitchendomain,thenormalizedreturnrepresentstheaveragepercentage
+ofthetasksthataresolved.ThenormalizedreturnfortheAntMazedomains(state-basedandvisual)
+representstheaveragesuccessrateofreachingthegoal.
+5.2 COMPARISONS
+Whilethereisnoexistingmethodinourproblemsettingthatutilizesunlabeledpriordatainboththe
+pretrainingphaseandtheonlinelearningphase,therearemethodsthatmakeuseofthepriordatain
+eitherphase. Wefirstconsidertwobaselinesthatdonotusepretrainingandinsteaddirectlyperform
+onlinelearning.
+Online. Thisbaselinecompletelydiscardstheofflinedataandtheexplorationisdonewithonline
+rewardbonusimplementedbyrandomnetworkdistillation(RND)(Burdaetal.,2018). Forallthe
+baselinesbelowaswellasourmethod,weaddonlineRNDbonustothereplaybuffertoencourage
+exploration.
+ExPLORe (Li et al., 2024). This baseline is similar to our method in the sense that it also uses
+exploration bonus and offline data to encourage exploration. The one crucial difference is that it
+does not perform unsupervised skill pretraining and learns a 1-step policy directly online. As we
+willshow,pretrainingiscrucialforourmethodtofindgoalsfasterandleadtomoreefficientonline
+learning.ItisworthnotingthattheoriginalExPLORemethoddoesnotmakeuseofonlineRND.To
+makethecomparisonfair,weadditionallyaddonlineRNDbonustothisbaselinetohelpitexplore
+betteronline. Forcompleteness,wealsoincludetheperformanceoftheoriginalExPLORemethod
+intheAppendix(Figure8).
+Wethenconsideradditionalbaselinesthatusethepriordataduringapretrainingphasebutdonot
+usethedataduringonlinelearning.
+Diffusion BC + JSRL. This baseline is an upgraded version of the BC + JSRL baseline used in
+ExPLORe (Li et al., 2024). Instead of using a Gaussian policy (as used by Li et al. (2024)), we
+use an expressive diffusion model to behavior clone the unlabeled prior data. At the beginning of
+eachonlineepisode,werolloutthepolicyforarandomnumberofstepsfromtheinitialstatebefore
+using switching to the online RL agent (Uchendu et al., 2023; Li et al., 2023). One might expect
+thatanexpressiveenoughpolicyclasscanmodelthebehaviorofthepriorgoodenoughsuchthatit
+canformagoodpriorforexplorationonline.
+OnlinewithSkills. Wealsoconsidertwoskill-basedbaselineswherethepriordataisdiscardedin
+theonlinephaseandthehigh-levelpolicyistrainedfromscratchonlinewithexplorationbonus. We
+experimentwithtwotypesofpretrainingskills. ThefirstoneisthetrajectoryVAEskillusedinour
+method. The second one is from a recently proposed unsupervised offline skill discovery method
+whereskillsarepretrainedtobeabletotraversealearnedHilbertrepresentationspace(Parketal.,
+7Ours ExPLORe Online w/ HILP Skills Online
+Online w/ Traj. Skills Diffusion BC + JSRL HILP w/ Offline Data
+AntMaze Visual AntMaze Kitchen
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure 3: Aggregatednormalizedreturnacrossthreedifferentdomains. Oursachievesthebestperfor-
+mancethroughtrainingonallthreedomains.ExPLOReachievesstronglaterstageperformanceonAntMaze,
+butstrugglesinhigh-dimensionalVisualAntMazeandKitchentasks. Onlinew/HILPSkillsandHILPw/
+OfflineDataachievedecentinitialreturnonKitchen,butstruggletolearninallthreedomains.Onlinew/Tra-
+jectorySkillsconsistentlyunderperformsOursacrossallthreeenvironments. DiffusionBC+JSRLlearns
+reasonablywellinKitchen,butperformsmuchworseinAntMazeandVisualAntMaze. Onlinedoesnotper-
+formcompetitivelyatanystageofexploration. Section5.2containsdetailsonthebaselineswecomparewith.
+Each curve is an average over 8 seeds. For AntMaze, we aggregate over 3 maze layouts and 4 goals. For
+Kitchen,weaggregateover3tasks.ForVisualAntMaze,weaggregateover4goalsononemazelayout.
+2024) (HILP). We use the exact same high-level RL agent as our method except that the agent no
+longermakesuseofthepriordataonline.
+Finally, we also consider a novel baseline that also uses prior data during pretraining and online
+exploration,butusesHILPskillsratherthantrajectory-basedskills.
+HILPw/OfflineData. WeobservethatHILPskillscanalsoutilizetheofflinedataviarelabeling.
+RecallthatHILPlearnsalatentspaceoftheobservations(viaanencoderϕ )andlearnsskills
+HILP
+that move agent in a certain direction z (skill) in the latent space. For any high-level transition
+(s ,s ),wesimplytakezˆ← ϕHILP(sH)−ϕHILP(s0) ,thenormalizeddifferencevectorthatpoints
+0 H ∥ϕHILP(sH)−ϕHILP(s0)∥2
+froms tos inthelatentspace. Weusethenormalizeddifferencevectorbecausethepretrained
+0 H
+HILPskillpolicytakesinnormalizedskillvectors. Weusetheexactsamehigh-levelRLagentas
+our method except that the skill relabeling is done by computing the latent difference rather than
+usingthetrajectoryencoder(f (z|τ)).
+θ
+For the visual antmaze environment, we use the same image encoder used in RLPD (Ball et al.,
+2023). Wealsofollowoneofourbaselines,ExPLORe(Lietal.,2024),touseICVF(Ghoshetal.,
+2023), a method that uses task-agnostic value functions to learn image/state representations from
+passive data. ICVF takes in an offline unlabeled trajectory dataset with image observations and
+pretrain an image encoder in an unsupervised manner. Following ExPLORe, we take the weights
+oftheimageencoderfromICVFpretrainingtoinitializetheimageencoder’sweightsintheRND
+network. To make the comparison fair, we also apply ICVF to all our baselines (see details in
+AppendixD).
+5.3 CANWELEVERAGEUNSUPERVISEDTRAJECTORYSKILLSTOACCELERATEONLINE
+LEARNING?
+Figure 3 shows the aggregated performance of our approach on all three domains. Overall, our
+methodoutperformsallpriormethods. BothHILP-basedmethods(OnlinewithHILPSkills and
+HILP with Offline Data) achieve a good initial return on the Kitchen domain, but improve very
+slowly during online training. The Online with Trajectory Skills baseline also consistently per-
+formsworsethanourmethodacrossallthreedomains,whichdemonstratestheimportanceofusing
+prior data for online learning of the high-level policy, since that is only difference between this
+baselineandOurs. ExPLOReusesofflinedataduringonlinelearning,butdoesnotpretrainskills,
+leadingtoslowerlearningonallthreeenvironmentsanddifficultyachievinganysignificantreturn
+8
+nruteR
+dezilamroNOurs ExPLORe Online w/ HILP Skills Online
+Online w/ Traj. Skills Diffusion BC + JSRL HILP w/ Offline Data
+Medium Large Ultra
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Kitchen Mixed Kitchen Partial Kitchen Complete
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure 4: Normalized return on individual AntMaze and Kitchen tasks. Ours achieves the strongest
+performance on all tasks. Online w/ Trajectory Skills learns much slower on all AntMaze tasks, and is
+asymptotically worse on two of the three more challenging Kitchen tasks. ExPLORe struggles to learn on
+Kitchen,andperformsworseasmazesizeincreases.Noneoftheotherbaselinesarecompetitiveonanytasks.
+Eachcurveisanaverageoverfourgoalswith8seedsforAntMaze,and16seedsforKitchen.
+onVisualAntMazeorKitchen. WealsoreporttheperformanceonindividualAntMazemazesand
+Kitchen tasks in Figure 4, and observe that our method outperforms the baselines more on harder
+environments. FortheAntMazedomain,asthemazesizeincreases,thetwobestbaselines,Online
+w/ Trajectory Skills and ExPLORe, perform worse, while Ours continues to achieve a similar
+level of performance. For the Kitchen domain, on the more challenging kitchen-mixed and
+kitchen-partial tasks, the improvement of Ours over Online w/ Trajectory Skills is also
+larger. Theseexperimentssuggestthatpretrainingskillsandtheabilitytoleveragethepriordataare
+both crucial for achieving efficient online learning, especially in more challenging environments.
+For the visual domain, we additionally perform an ablation study to assess the importance of the
+ICVF pre-trained representation, which we include in Appendix D. While ICVF combines syner-
+gistically with our method to further accelerate learning and exploration, initializing RND image
+encoderweightsusingICVFisnotcriticaltoitssuccess. Eventhoughwehavedemonstratedthat
+our method is able to achieve higher success rate faster than prior works, it is still not clear if our
+methodcanactuallyleadtobetterexploration(insteadofsimplylearningthehigh-levelpolicybet-
+ter). In the following two sections, we study the exploration aspect in isolation in the AntMaze
+domain.
+5.4 ISOURMETHODABLETOFINDGOALSFASTERTHANPRIORMETHODS?
+Table1showstheaveragenumberofonlineenvironmentinteractionstepsfortheagenttoreachthe
+goalforeachofthefourgoalsineachofthethreemazelayouts. Suchametricallowsustoassess
+howefficientlytheagentexploresinthemazewhereasthesuccessratemetriconlymeasureshow
+goodtheagentisatreachingthedesiredgoal. Itispossibleforanagenttobegoodatexploration,
+butbadatreachinggoalsconsistentlyandvice-versa. Table1showsthatourmethod’saveragefirst
+9
+nruter
+dezilamroNgoaltimeoutperformsormatcheseverybaselineoneachofthe12goals, whichconfirmsthatour
+methodnotonlylearnsfaster,butdoessobyexploringmoreefficiently.
+MethodswithoutPretraining MethodswithPretraining
+MazeLayout GoalLocation
+DiffusionBCw/ Onlinew/ Onlinew/ HILPw/
+Online+RND ExPLORe Ours
+JSRL TrajectorySkills HILPSkills OfflineData
+TopLeft 71±5.0 27±3.2 60±8.1 21±4.1 120±47 27±6.2 14±3.1
+TopRight 100±16 29±2.8 85±19 76±26 160±40 72±36 22±3.2
+Medium BottomRight 230±38 35±4.9 99±15 77±34 300±0 270±33 22±4.4
+Center 210±32 71±8.0 260±28 26±3.4 260±28 300±0.0 18±1.7
+Aggregated 150±14 40±2.0 130±10 50±11 210±17 170±13 19±1.8
+TopLeft 72±10 33±2.9 52±3.3 22±4.2 300±0 300±0.0 21±2.8
+TopRight 220±20 49±7.7 220±28 190±27 280±20 110±36 27±2.6
+Large BottomRight 280±15 34±1.8 160±22 140±22 280±21 260±19 21±1.8
+TopCenter 220±28 48±5.2 120±8.8 59±12 240±23 33±8.5 39±6.2
+Aggregated 200±8.9 41±2.7 140±13 100±13 270±12 180±13 27±1.7
+TopLeft 76±7.0 34±4.9 91±11 36±11 39±21 15±5.3 17±3.6
+TopRight 300±0.0 92±20 290±7.8 120±14 260±19 150±32 37±5.5
+Ultra BottomRight 300±0.0 70±8.0 300±0.0 130±16 240±28 67±12 34±6.0
+TopCenter 230±35 29±5.5 230±29 75±16 100±32 17±1.7 22±4.4
+Aggregated 230±9.3 56±5.4 230±9.1 90±7.1 160±14 61±8.2 27±2.4
+Aggregated 190±6.9 46±2.3 160±6.3 80±5.9 210±11 130±7.4 25±1.4
+Table1: Thenumberofenvironmentsteps(×103)takenbeforetheagentfindthegoal. Lowerisbetter.
+Thefirstgoaltimeisconsideredtobe300×103stepsiftheagentneverfindsthegoal.Weseethatourmethod
+isthemostconsistent,achievingperformanceasgoodasorbetterthanallothermethodsineachofthe4
+goalsacross3differentmazelayouts.Theerrorquantityindicatedisstandarderrorover8seeds.
+Ours ExPLORe Online w/ HILP Skills Online
+Online w/ Traj. Skills Diffusion BC + JSRL HILP w/ Offline Data
+Medium Large Ultra
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure5: CoverageonthreedifferentAntMazemazes,averagedoverrunsonfourgoals. Ourshasthe
+best coverage performance on the challenging antmaze-ultra, and is only passed by HILP w/ Offline
+Dataonantmaze-large. Onlinew/Traj. SkillsandOnlinewithHILPSkillsstruggletoexploreafter
+initiallearning,andOnlineandDiffusionBC+JSRLgenerallyperformpoorlyatalltimesteps.
+5.5 DOESOFFLINEDATAHELPOURMETHODTOCOMPOSESKILLSBETTERFORFASTER
+EXPLORATION?
+Figure5showsthepercentageofthemazethattheagenthascoveredthroughoutthetraining. The
+coverageofskill-basedmethodsthatdonotusepriordataduringonlinelearning,Onlinew/Trajec-
+torySkillsandOnlinew/HILPSkills,significantlylagsbehindbaselinesthatuseofflinedataafter
+50,000environmentsteps. Manymethodsachievesimilarcoverageonantmaze-medium,likely
+because the maze is too small to differentiate the different methods. Ours is able to achieve the
+highestcoverageontheantmaze-ultra,andisonlysurpassedonantmaze-largebyHILP
+w/OfflineData, whichhashighfirstgoaltimesandslowlearning. Thus, thecoveragedifference
+can likely be at least partially attributed to HILP w/ Offline Data struggling to find the goal and
+continuing to explore after finding the goal. All non-skill based methods struggle to get competi-
+tivecoveragelevelsonantmaze-largeandantmaze-ultra. Thissuggestsbothpretraining
+skillsandtheabilitytoleveragepriordataonlinearecrucialforefficientexploration,andourmethod
+effectively compounds their benefits. For completeness, we include the success rate and coverage
+resultsforeachmazelayoutandgoallocationinAppendixF.
+10
+egarevoC6 DISCUSSION AND LIMITATIONS
+In this work, we propose a novel method, SUPE, that leverages unlabeled prior trajectory data to
+accelerate online exploration and learning. The key insight is to use unlabeled trajectories twice,
+to 1) extract a set of low-level skills offline, and 2) serve as additional data for a high-level off-
+policyRLagenttocomposetheseskillstoexploreintheenvironment. Thisallowsustoeffectively
+combinethestrengthsfromunsupservisedskillpretrainingandsample-efficientonlineRLmethods
+tosolveaseriesofchallenginglong-horizonsparserewardtaskssignificantlymoreefficientlythan
+existingmethods. Ourworkopensupavenuesinmakingfulluseofpriordataforscalable,online
+RLalgorithms. First,ourpre-trainedskillsremainfrozenduringonlinelearning,whichmayhinder
+onlinelearningwhentheskillsarenotlearnedwellorneedtobeupdatedasthelearningprogresses.
+Suchproblemscouldbealleviatedbyutilizingabetterskillpretraningmethod,orallowingthelow-
+levelskillstobefine-tunedonline. AsecondlimitationofourapproachistherelianceonRNDto
+maintainanupperconfidenceboundontheoptimisticrewardestimate. AlthoughwefindthatRND
+workswithoutICVFonhigh-dimensionalimageobservationsinVisualAntMaze,theuseofRND
+in other high dimensional environments may require more careful consideration. Possible future
+directionsincludeexaminingalternativemethodsofmaintainingthisbound.
+ACKNOWLEDGMENTS
+This research used the Savio computational cluster resource provided by the Berkeley Research
+Computing program at UC Berkeley, and was supported by ONR through N00014-22-1-2773,
+AFOSR FA9550-22-1-0273, and the AI Institute. We would like to thank Seohong Park for pro-
+vidinghisimplementationofOPALwhichwasadaptedandusedforskillpretraininginourmethod.
+We wouldalso like tothank Seohong Park, Fangchen Liu, JunsuKim, DibyaGhosh, Katie Kang,
+OlegRybkin, KyleStachowicz, ZhiyuanZhoufordiscussionsonthemethodandfeedbackonthe
+earlydraftofthepaper.
+REFERENCES
+Joshua Achiam and Shankar Sastry. Surprise-based intrinsic motivation for deep reinforcement
+learning. arXivpreprintarXiv:1703.01732,2017.
+JoshuaAchiam,HarrisonEdwards,DarioAmodei,andPieterAbbeel. Variationaloptiondiscovery
+algorithms. arXivpreprintarXiv:1807.10299,2018.
+Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron C Courville, and Marc Belle-
+mare. Reincarnating reinforcement learning: Reusing prior computation to accelerate progress.
+In S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh (eds.), Advances in
+Neural Information Processing Systems, volume 35, pp. 28955–28971. Curran Associates, Inc.,
+2022. URL https://proceedings.neurips.cc/paper_files/paper/2022/
+file/ba1c5356d9164bb64c446a4b690226b0-Paper-Conference.pdf.
+Anurag Ajay, Aviral Kumar, Pulkit Agrawal, Sergey Levine, and Ofir Nachum. OPAL: Offline
+primitive discovery for accelerating offline reinforcement learning. In International Confer-
+ence on Learning Representations, 2021. URL https://openreview.net/forum?id=
+V69LGwJ0lIN.
+Pierre-LucBacon,JeanHarb,andDoinaPrecup. Theoption-criticarchitecture. InProceedingsof
+theAAAIconferenceonartificialintelligence,volume31,2017.
+AkhilBagariaandGeorgeKonidaris. Optiondiscoveryusingdeepskillchaining. InInternational
+ConferenceonLearningRepresentations,2019.
+Akhil Bagaria, Ben Abbatematteo, Omer Gottesman, Matt Corsaro, Sreehari Rammohan, and
+GeorgeKonidaris. Effectivelylearninginitiationsetsinhierarchicalreinforcementlearning. Ad-
+vancesinNeuralInformationProcessingSystems,36,2024.
+11PhilipJBall,LauraSmith,IlyaKostrikov,andSergeyLevine. Efficientonlinereinforcementlearn-
+ingwithofflinedata. InInternationalConferenceonMachineLearning,pp.1577–1594.PMLR,
+2023.
+MarcBellemare,SriramSrinivasan,GeorgOstrovski,TomSchaul,DavidSaxton,andRemiMunos.
+Unifying count-based exploration and intrinsic motivation. In Advances in Neural Information
+ProcessingSystems,pp.1471–1479,2016.
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhari-
+wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal,
+ArielHerbert-Voss,GretchenKrueger,T.J.Henighan,RewonChild,AdityaRamesh,DanielM.
+Ziegler, JeffWu, ClemensWinter, ChristopherHesse, MarkChen, EricSigler, MateuszLitwin,
+Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford,
+IlyaSutskever,andDarioAmodei. Languagemodelsarefew-shotlearners. InNeuralInforma-
+tionProcessingSystems(NeurIPS),2020.
+YuriBurda, HarrisonEdwards, AmosStorkey, andOlegKlimov. Explorationbyrandomnetwork
+distillation. arXivpreprintarXiv:1810.12894,2018.
+BoyuanChen,ChuningZhu,PulkitAgrawal,KaiqingZhang,andAbhishekGupta. Self-supervised
+reinforcement learning that transfers using random features. Advances in Neural Information
+ProcessingSystems,36,2024.
+KyunghyunCho,BartVanMerriënboer,CaglarGulcehre,DzmitryBahdanau,FethiBougares,Hol-
+gerSchwenk,andYoshuaBengio. LearningphraserepresentationsusingRNNencoder-decoder
+forstatisticalmachinetranslation. arXivpreprintarXiv:1406.1078,2014.
+ChristianDaniel,GerhardNeumann,OliverKroemer,andJanPeters. Hierarchicalrelativeentropy
+policysearch. JournalofMachineLearningResearch,17(93):1–50,2016a.
+Christian Daniel, Herke Van Hoof, Jan Peters, and Gerhard Neumann. Probabilistic inference for
+determiningoptionsinreinforcementlearning. MachineLearning,104:337–357,2016b.
+JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. BERT:Pre-trainingofdeep
+bidirectionaltransformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,2018.
+Aleksandr Ermolov and Nicu Sebe. Latent world models for intrinsically motivated exploration.
+AdvancesinNeuralInformationProcessingSystems,33:5565–5575,2020.
+BenjaminEysenbach,AbhishekGupta,JulianIbarz,andSergeyLevine. Diversityisallyouneed:
+Learningskillswithoutarewardfunction. arXivpreprintarXiv:1802.06070,2018.
+Carlos Florensa, Yan Duan, and Pieter Abbeel. Stochastic neural networks for hierarchical re-
+inforcement learning. In International Conference on Learning Representations, 2017. URL
+https://openreview.net/forum?id=B1oK8aoxe.
+Roy Fox, Sanjay Krishnan, Ion Stoica, and Ken Goldberg. Multi-level discovery of deep options.
+arXivpreprintarXiv:1703.08294,2017.
+Kevin Frans, Seohong Park, Pieter Abbeel, and Sergey Levine. Unsupervised zero-shot rein-
+forcement learning via functional reward encodings. In Ruslan Salakhutdinov, Zico Kolter,
+Katherine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp (eds.),
+Proceedings of the 41st International Conference on Machine Learning, volume 235 of Pro-
+ceedings of Machine Learning Research, pp. 13927–13942. PMLR, 21–27 Jul 2024. URL
+https://proceedings.mlr.press/v235/frans24a.html.
+JustinFu,AviralKumar,OfirNachum,GeorgeTucker,andSergeyLevine.D4RL:Datasetsfordeep
+data-drivenreinforcementlearning. arXivpreprintarXiv:2004.07219,2020.
+Dibya Ghosh, Chethan Anand Bhateja, and Sergey Levine. Reinforcement learning from passive
+datavialatentintentions. InInternationalConferenceonMachineLearning,pp.11321–11339.
+PMLR,2023.
+12Karol Gregor, Danilo Jimenez Rezende, and Daan Wierstra. Variational intrinsic control. arXiv
+preprintarXiv:1611.07507,2016.
+Zhaohan Guo, Shantanu Thakoor, Miruna Pîslar, Bernardo Avila Pires, Florent Altché, Corentin
+Tallec, AlaaSaade, DanieleCalandriello, Jean-BastienGrill, YunhaoTang, etal. Byol-explore:
+Explorationbybootstrappedprediction. Advancesinneuralinformationprocessingsystems,35:
+31855–31870,2022.
+Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft actor-critic: Off-policy
+maximumentropydeepreinforcementlearning with astochasticactor. In Internationalconfer-
+enceonmachinelearning,pp.1861–1870.PMLR,2018.
+Steven Hansen, Will Dabney, Andre Barreto, David Warde-Farley, Tom Van de Wiele, and
+Volodymyr Mnih. Fast task inference with variational intrinsic successor features. In Interna-
+tional Conference on Learning Representations, 2020. URL https://openreview.net/
+forum?id=BJeAHkrYDS.
+PhilippeHansen-Estruch,IlyaKostrikov,MichaelJanner,JakubGrudzienKuba,andSergeyLevine.
+IDQL: Implicit Q-learning as an actor-critic method with diffusion policies. arXiv preprint
+arXiv:2304.10573,2023.
+KaimingHe, XinleiChen, SainingXie, YanghaoLi, PiotrDollár, andRossGirshick. Maskedau-
+toencodersarescalablevisionlearners. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pp.16000–16009,2022.
+Rein Houthooft, Xi Chen, Yan Duan, John Schulman, Filip De Turck, and Pieter Abbeel. VIME:
+Variationalinformationmaximizingexploration. InAdvancesinNeuralInformationProcessing
+Systems,pp.1109–1117,2016.
+HaoHu,YiqinYang,JianingYe,ZiqingMai,andChongjieZhang. Unsupervisedbehaviorextrac-
+tion via random intent priors. In Thirty-seventh Conference on Neural Information Processing
+Systems,2023. URLhttps://openreview.net/forum?id=4vGVQVz5KG.
+Zhengyao Jiang, Tianjun Zhang, Michael Janner, Yueying Li, Tim Rocktäschel, Edward Grefen-
+stette, and Yuandong Tian. Efficient planning in a compact latent action space. arXiv preprint
+arXiv:2208.10291,2022.
+Taesup Kim, Sungjin Ahn, and Yoshua Bengio. Variational temporal abstraction. Advances in
+NeuralInformationProcessingSystems,32,2019.
+George Dimitri Konidaris. Autonomous robot skill acquisition. University of Massachusetts
+Amherst,2011.
+Ilya Kostrikov, Ashvin Nair, and Sergey Levine. Offline reinforcement learning with implicit Q-
+learning. arXivpreprintarXiv:2110.06169,2021.
+AviralKumar,AurickZhou,GeorgeTucker,andSergeyLevine.ConservativeQ-learningforoffline
+reinforcement learning. Advances in Neural Information Processing Systems, 33:1179–1191,
+2020.
+Seunghyun Lee, Younggyo Seo, Kimin Lee, Pieter Abbeel, and Jinwoo Shin. Offline-to-online
+reinforcementlearningviabalancedreplayandpessimisticQ-ensemble. InConferenceonRobot
+Learning,pp.1702–1712.PMLR,2022.
+QiyangLi,YuexiangZhai,YiMa,andSergeyLevine.Understandingthecomplexitygainsofsingle-
+taskRLwithacurriculum. InInternationalConferenceonMachineLearning,pp.20412–20451.
+PMLR,2023.
+QiyangLi,JasonZhang,DibyaGhosh,AmyZhang,andSergeyLevine. Acceleratingexploration
+withunlabeledpriordata. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Hao Liu and Pieter Abbeel. Behavior from the void: Unsupervised active pre-training. In
+A. Beygelzimer, Y. Dauphin, P. Liang, and J. Wortman Vaughan (eds.), Advances in Neural
+Information Processing Systems, 2021. URL https://openreview.net/forum?id=
+fIn4wLS2XzU.
+13Sam Lobel, Akhil Bagaria, and George Konidaris. Flipping coins to estimate pseudocounts for
+exploration in reinforcement learning. In International Conference on Machine Learning, pp.
+22594–22613.PMLR,2023.
+Shie Mannor, Ishai Menache, Amit Hoze, and Uri Klein. Dynamic abstraction in reinforcement
+learning via clustering. In Proceedings of the twenty-first international conference on Machine
+learning,pp. 71,2004.
+IshaiMenache,ShieMannor,andNahumShimkin. Q-cut—dynamicdiscoveryofsub-goalsinrein-
+forcementlearning. InMachineLearning: ECML2002: 13thEuropeanConferenceonMachine
+LearningHelsinki,Finland,August19–23,2002Proceedings13,pp.295–306.Springer,2002.
+VinodNairandGeoffreyEHinton.Rectifiedlinearunitsimproverestrictedboltzmannmachines.In
+Proceedingsofthe27thinternationalconferenceonmachinelearning(ICML-10),pp.807–814,
+2010.
+Mitsuhiko Nakamoto, Simon Zhai, Anikait Singh, Max Sobol Mark, Yi Ma, Chelsea Finn, Aviral
+Kumar, andSergeyLevine. Cal-QL:CalibratedofflineRLpre-trainingforefficientonlinefine-
+tuning. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Soroush Nasiriany, Tian Gao, Ajay Mandlekar, and Yuke Zhu. Learning and retrieval from prior
+dataforskill-basedimitationlearning. InConferenceonRobotLearning,2022.
+GeorgOstrovski,MarcGBellemare,AäronOord,andRémiMunos. Count-basedexplorationwith
+neuraldensitymodels. InInternationalconferenceonmachinelearning,pp.2721–2730.PMLR,
+2017.
+Seohong Park, Dibya Ghosh, Benjamin Eysenbach, and Sergey Levine. HIQL: Offline goal-
+conditioned RL with latent states as actions. In Thirty-seventh Conference on Neural In-
+formation Processing Systems, 2023a. URL https://openreview.net/forum?id=
+cLQCCtVDuW.
+SeohongPark,OlehRybkin,andSergeyLevine. METRA:ScalableunsupervisedRLwithmetric-
+aware abstraction. In NeurIPS 2023 Workshop on Goal-Conditioned Reinforcement Learning,
+2023b. URLhttps://openreview.net/forum?id=YgZNmDqyR6.
+Seohong Park, Tobias Kreiman, and Sergey Levine. Foundation policies with hilbert represen-
+tations. In Forty-first International Conference on Machine Learning, 2024. URL https:
+//openreview.net/forum?id=LhNsSaAKub.
+Deepak Pathak, Pulkit Agrawal, Alexei A Efros, and Trevor Darrell. Curiosity-driven exploration
+by self-supervised prediction. In Proceedings of the IEEE Conference on Computer Vision and
+PatternRecognitionWorkshops,pp.16–17,2017.
+KarlPertsch,YoungwoonLee,andJosephLim. Acceleratingreinforcementlearningwithlearned
+skillpriors. InConferenceonrobotlearning,pp.188–204.PMLR,2021.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal.Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+TanmayShankarandAbhinavGupta. Learningrobotskillswithtemporalvariationalinference. In
+InternationalConferenceonMachineLearning,pp.8624–8633.PMLR,2020.
+ArchitSharma,ShixiangGu,SergeyLevine,VikashKumar,andKarolHausman. Dynamics-aware
+unsuperviseddiscoveryofskills.InInternationalConferenceonLearningRepresentations,2020.
+URLhttps://openreview.net/forum?id=HJgLZR4KvH.
+ÖzgürS¸ims¸ekandAndrewGBarto. Usingrelativenoveltytoidentifyusefultemporalabstractions
+inreinforcementlearning.InProceedingsofthetwenty-firstinternationalconferenceonMachine
+learning,pp. 95,2004.
+ÖzgürS¸ims¸ekandAndrewG.Barto. Betweennesscentralityasabasisforformingskills. Working-
+paper,UniversityofMassachusettsAmherst,April2007.
+14Avi Singh, Huihan Liu, Gaoyue Zhou, Albert Yu, Nicholas Rhinehart, and Sergey Levine.
+Parrot: Data-driven behavioral priors for reinforcement learning. In International Confer-
+ence on Learning Representations, 2021. URL https://openreview.net/forum?id=
+Ysuv-WOFeKR.
+YudaSong,YifeiZhou,AyushSekhari,DrewBagnell,AkshayKrishnamurthy,andWenSun. Hy-
+bridRL:UsingbothofflineandonlinedatacanmakeRLefficient. InTheEleventhInternational
+ConferenceonLearningRepresentations,2023.URLhttps://openreview.net/forum?
+id=yyBis80iUuU.
+AravindSrinivas,RamnandanKrishnamurthy,PeeyushKumar,andBalaramanRavindran. Option
+discoveryinhierarchicalreinforcementlearningusingspatio-temporalclustering. arXivpreprint
+arXiv:1605.05359,2016.
+Bradly C Stadie, Sergey Levine, and Pieter Abbeel. Incentivizing exploration in reinforcement
+learningwithdeeppredictivemodels. arXivpreprintarXiv:1507.00814,2015.
+Richard S Sutton, Doina Precup, and Satinder Singh. Between MDPs and semi-MDPs: A frame-
+work for temporal abstraction in reinforcement learning. Artificial intelligence, 112(1-2):181–
+211,1999.
+HaoranTang,ReinHouthooft,DavisFoote,AdamStooke,OpenAIXiChen,YanDuan,JohnSchul-
+man, Filip DeTurck, and Pieter Abbeel. # exploration: A study of count-based exploration for
+deepreinforcementlearning. Advancesinneuralinformationprocessingsystems,30,2017.
+DenisTarasov,VladislavKurenkov,AlexanderNikulin,andSergeyKolesnikov. Revisitingthemin-
+imalist approach to offline reinforcement learning. Advances in Neural Information Processing
+Systems,36,2024.
+AhmedTouati,JérémyRapin,andYannOllivier. Doeszero-shotreinforcementlearningexist? In
+TheEleventhInternationalConferenceonLearningRepresentations,2022.
+IkechukwuUchendu,TedXiao,YaoLu,BanghuaZhu,MengyuanYan,JoséphineSimon,Matthew
+Bennice,ChuyuanFu,CongMa,JiantaoJiao,etal. Jump-startreinforcementlearning. InInter-
+nationalConferenceonMachineLearning,pp.34556–34583.PMLR,2023.
+Tengyang Xie, Nan Jiang, Huan Wang, Caiming Xiong, and Yu Bai. Policy finetuning: Bridg-
+ing sample-efficient offline and online reinforcement learning. Advances in neural information
+processingsystems,34:27395–27407,2021.
+HaichaoZhang,WeiXu,andHaonanYu. Policyexpansionforbridgingoffline-to-onlinereinforce-
+ment learning. In The Eleventh International Conference on Learning Representations, 2023.
+URLhttps://openreview.net/forum?id=-Y34L45JR6z.
+HanZheng,XufangLuo,PengfeiWei,XuanSong,DongshengLi,andJingJiang. Adaptivepolicy
+learningforoffline-to-onlinereinforcementlearning. InProceedingsoftheAAAIConferenceon
+ArtificialIntelligence,volume37,pp.11372–11380,2023.
+15A COMPUTE RESOURCES
+WerunallourexperimentsonNVIDIAA5000GPUs.
+We first calculate required compute for AntMaze experiments. For each maze-goal configuration,
+eachofourpretrainingruntakesabouttwohoursandonlinetrainingalsotakesabouttwohourseach.
+Toreproducetheresultsofourmethods,itrequires8(seeds) ×3(mazelayouts)×(1(pretraining)+
+4(onlinelearning))×2(hoursperrun) =240GPUhours.Wehaveeightbaselinesthattakesimilar
+GPUhours,whichbringthetotalestimatedGPUhoursrequiredtobearound2160.
+TheruntimeperKitchenexperimentissimilar. Thereareonly3environments,butwedo16seeds.
+Thismeansweneedabout16(seeds)×3(Kitchentasks)×(1(pretraining)+1(onlinelearning))×
+2(hoursperrun) =192GPUhoursforourmethod. Weonlytrainsixbaselines(wedonotrunEx-
+PLORe(NoOnlineRND)ablation,orKLablation),sothisgives1344hours. Wealsocalculatethe
+compute used for the Visual AntMaze experiments. On average it takes approximately 8 hours to
+trainapretrainingcheckpointandapproximately24hourstodoonlinelearning. Thismeansitre-
+quires8(seeds) ×(1(pretraining) ×8(hoursperrun)+4(onlinelearning) ×24(hoursperrun))=
+832hoursforourmethod. Wehavesixbaselinesinthemainfigure. Additionally, weadd4addi-
+tional baselines in the ICVF ablation. This gives a total of 9152 hours for the Visual AntMaze
+results.
+Finally, we look at the compute required for the data ablation experiments. These are additional
+AntMaze experiments on just the goals in antmaze-large maze. Thus, we have approxi-
+mately8(seeds) ×1(mazelayouts)×2(dataablations)×(1(pretraining)+4(onlinelearning))×
+2(hoursperrun) = 160 GPUhours toreproduceour method. Weinclude 5additional baselines,
+bringingthetotalcomputefordataablationsto960GPUhours.
+Thus,intotaltheresultsinthispaperrequiredapproximately13616GPUhours,orabout1.5GPU
+years.Notethisisanapproximateupperbound,sincenotallmethodsrequiredtrainingcheckpoints,
+andcheckpointsweresharedbetweendifferentbaselinesthatbothusestrajectoryskillsorbothused
+HILPskills.
+B VAE ARCHITECTURE AND HYPERPARAMETERS
+We use a VAE implementation from Park et al. (2024). The authors kindly shared with us their
+OPAL implementation (which produces the results of the OPAL baseline in the paper). In this
+implementation,theVAEencoderisarecurrentneuralnetworkthatusesgated-recurrentunits(Cho
+etal.,2014)(GRU).Ittakesinashortsequenceofstatesandactions,andproducesaprobabilistic
+output of a latent z. The reconstruction policy decoder is a fully-connected network with ReLU
+activation(Nair&Hinton,2010)thattakesinboththestateinthesequenceaswellasthelatentz
+tooutputanactiondistribution.
+ParameterName Value
+Batchsize 256
+Optimizer Adam
+Learningrate 3×10−4
+GRUHiddenSize 256
+GRULayers 2hiddenlayers
+KLCoefficient(β) 0.1
+VAEPrior state-conditionedisotropicGaussiandistributionoverthelatent
+VAEPosterior isotropicGaussiandistributionoverthelatent
+ReconstructionPolicyDecoder isotropicGaussiandistributionovertheactionspace
+LatentDimension 8
+TrajectorySegmentLength(H) 4
+ImageEncoderLatentDim 50
+Table2: VAEtrainingdetails.
+Intheonlinephase,ourhigh-levelpolicyisaSoft-Actor-Critic(SAC)agent(Haarnojaetal.,2018)
+with10criticnetworks,entropybackupdisabledandLayerNormaddedtothecriticsfollowingthe
+architecturedesignusedinRLPD(Balletal.,2023). WefollowasimilarstrategyinExPLORe(Li
+et al., 2024) where we sample 128 offline samples and 128 online samples and add RND reward
+16bonustoallofthesamples. ThemaindifferenceisintheoriginalExPLORepaperisthattheyonly
+addrewardbonustotheofflinedataasadditionallyaddingthebonustotheonlinereplaybufferdoes
+nothelpforthemazegoalstheytested. Inourexperiments,weaddtherewardbonustobothoffline
+data and online data, as it leads to better performance in goals where there is limited offline data
+coverage(seeAppendixF).
+Parameter Value
+Batchsize 256
+Discountfactor(γ) 0.99
+Optimizer Adam
+Learningrate 3×10−4
+Criticensemblesize 10
+Criticminimumensemblesize 1forallmethodsonAntMaze,2forallonKitchen,
+1fornon-skillbasedmethodsonVisualAntMaze,
+2forskill-basedmethodsonVisualAntMaze.
+UTDRatio 20forAntMazeandKitchen,40forVisualAntMaze
+ActorDelay 20
+NetworkWidth 256
+NetworkDepth 3hiddenlayers.
+InitialEntropyTemperature 1.0onKitchen,0.05onVisualAntMaze/AntMaze
+TargetEntropy −dim(A)/2
+EntropyBackups False
+StartTraining after5Kenvsteps(RNDupdatestartsafter10Ksteps)
+RNDcoefficient(α) 2.0fornon-skillbased,8.0forskillbasedmethods
+Table3:HyperparametersfortheonlineRLagentfollowingRLPD(Balletal.,2023)/ExPLORe(Li
+etal.,2024). ForDiffusionBC+JSRLonAntMaze, weuseaninitialentropytemperatureof1.0
+becauseitworksmuchbetterthan0.05. Weusea4×largerRNDcoefficientinskill-basedmethods
+suchthattherewardbonuswegetforeachstepintheskillhorizonstaysroughlyproportionaltothe
+non-skill-basedmethods.
+C IMPLEMENTATION DETAILS FOR BASELINES
+Diffusion BC + JSRL. We use the diffusion model implementation from (Hansen-Estruch et al.,
+2023). Followingthepaper’simplementation,wetrainthemodelfor3milliongradientstepswith
+adropoutrateof0.1andacosinedecayinglearningrateschedulefromthelearningrateof0.0003.
+Intheonlinephase, inthebeginningofeveryepisode, withprobabilityp, werolloutthediffusion
+policy for a random number of steps that follows a geometric distribution Geom(1 − γ) before
+samplingactionsfromtheonlineagent(inspiredby(Lietal.,2023)). ARNDbonusisalsoadded
+to the online batch on the fly with a coefficient of 2.0 to further encourage online exploration of
+theSACagent. Thesamecoefficientisusedinallothernon-skillbasedbaselines. Forskillbased
+baselines,wescaleuptheRNDcoefficientbythehorizonlength(4)toaccountfordifferentreward
+scale. FollowingtheBC+JSRLbaselineusedinExPLORe(Lietal.,2024),weuseaSACagent
+withanensembleof10criticnetworks,oneactornetwork,withnoentropybackupandLayerNorm
+inthecriticnetworks.Thisconfigurationisusedforallbaselinesonallenvironments.OnAntMaze,
+We perform a hyperparameter sweep on both p = {0.5,0.75,0.9} and the geometric distribution
+parameterγ = {0.99,0.995,0.997}onthelargemazewiththetoprightgoalandfindthatp = 0.9
+and γ = 0.99 works the best. We also use these parameters for the Visual AntMaze experiments.
+ForKitchen,weperformasweepontheparameterp={0.2,0.5,0.75,0.9}andfindthat0.75works
+best. We still use γ = 0.99. We take the minimum of one random critic for AntMaze and Visual
+AntMaze, and the minimum of two random critics for Kitchen. For all methods, we use the same
+imageencoderusedinRLPD(Balletal.,2023)fortheVisualAntMazetask,withalatentdimension
+of50(encodedimageisa50dimensionalvector), whichisthenconcatenatedwithproprioceptive
+stateobservations.
+ExPLORe. We directly use the open-source implementation from https://github.com/
+facebookresearch/ExPLORe/. The only difference we make is to adjust the RND coef-
+ficient from 1.0 to 2.0 and additionally add such bonus to the online replay buffer (the original
+17method only adds to the offline data). Empirically, we find a slightly higher RND coefficient im-
+provesperformanceslightly. Settingthevaluetoohigh(e.g.,10)caninturnhurtperformance. The
+SACconfigurationisthesameasthatoftheDiffusionBC+JSRLagent. Wefoundthattakingthe
+minimum of one random critic on Visual AntMaze worked better for ExPLORe than taking the
+minimumoftwo,soallnon-skillbasedbaselinesusethishyperparametervalue.
+Online RL with trajectory skills. This baseline is essentially our method but without using the
+trajectory encoder in the VAE to label trajectory segments (with high-level skill action labels), so
+allstatedimplementationdecisionsalsoapplytoOurs. Instead,wetreatitdirectlyasahigh-level
+RL problem with the low-level skill policy completely frozen. The SAC agent is the same as the
+previous agents, except for on Visual AntMaze, where taking the minimum of 2 critics from the
+ensembleleadstobetterperformanceforOurs,soweusethisparametersettingforallskill-based
+benchmarks.Wecomputethehigh-levelrewardasthediscountedsumoftherewardsreceivedevery
+H environment steps. During the 5 × 103 steps before the start of training, we sample random
+actionsfromthestate-basedprior. ForVisualAntMaze,weusethelearnedimageencoderfromthe
+VAEtoinitializeboththecriticimageencoderandtheRNDnetwork. IfusingICVF,weinitialize
+theRNDnetworkwiththeICVFencoderinstead.
+OnlineRLwithHILPskills. Thisbaselineisthesameastheoneabovebutwiththeskillsfrom
+arecentunsupervisedofflineskilldiscoverymethod, HILP(Parketal.,2024). Weusetheofficial
+open-source implementation https://github.com/seohongpark/HILP and run the pre-
+training to obtain the skill policies. Then, we freeze the skill policies and learn a high-level RL
+agenttoselectskillseveryH steps.
+HILPw/offlinedata. Thisnovelbaselineisthesameas Onlinew/HILPSkills, exceptthatwe
+alsorelabeltheofflinetrajectoriesandusethemasadditionaldataforlearningthehigh-levelpolicy
+online(similartoourproposedmethod). TorelabeltrajectorieswiththeestimatedHILPskill, we
+compute the difference in the latent representation of the final state s and initial state s in the
+H 0
+trajectory,sozˆ← ϕHILP(sH)−ϕHILP(s0) . WenormalizetheskillvectorsincethepretrainedHILP
+∥ϕHILP(sH)−ϕHILP(s0)∥2
+policiesuseanormalizedvectorasinput.Thehigh-levelRLagentisthesameasourmethod,except
+theskillrelabelingisdoneusingthelatentdifferenceratherthanthetrajectoryencoder.
+Ours.WefollowLietal.(2024)(ExPLORe)torelabelofflinedatawithoptimisticrewardestimates
+usingRNDandarewardmodel. Forcompleteness,wedescribethedetailsbelow. Weinitializetwo
+networksg (s,z),g¯(s,z)thateachoutputsanL-dimensionalfeaturevectorpredictedfromthestate
+ϕ
+and(tanh-squashed)high-levelaction. Duringonlinelearning,g¯(s,z)isfixedandweonlyupdate
+theparametersoftheothernetworkg (s,z)tominimizetheL distancebetweenthefeaturevectors
+ϕ 2
+predictedbythetwonetworksonthenewhigh-leveltransition(snew,znew,rnew,snew):
+0 H
+L(ϕ)=∥g (snew,znew)−g¯(snew,znew)∥2.
+ϕ 0 0 2
+In addition to the two networks, we also learn a reward model r (s,z) that minimizes the reward
+ψ
+lossbelowonthetransitions(s ,z,r,s )fromonlinereplaybuffer:
+0 H
+L(ψ)=∥r (s ,z)−r∥2.
+ψ 0 2
+Wethenformanoptimisticestimateoftherewardvaluefortheofflinedataasfollows:
+r (s,z)←r (s ,z)+α∥g (s ,z)−g¯(s ,z)∥2,
+UCB ψ 0 ϕ 0 0 2
+where α controls the strength of the exploration tendency (RND coefficient). For AntMaze envi-
+ronments(bothstate-basedandvisual),wefindthatitissufficienttousetheminimumreward,−1,
+to label the offline data without a performance drop, so we opt for such a simpler design for our
+experiments.
+D ICVF IMPLEMENTATION DETAILS AND ABLATION EXPERIMENTS FOR
+VISUAL ANTMAZE
+Weusethepublicimplementationfromtheauthorsof(Ghoshetal.,2023)athttps://github.
+com/dibyaghosh/icvf_releaseandruntheICVFtrainingfor75,000gradientstepstoob-
+tainthepre-trainedencoderweights,following(Lietal.,2024). Then,weinitializetheencoderof
+theRNDnetworkwiththeseweightsbeforeonlinelearning. Itisworthnotingthatthisisslightly
+18Ours (ICVF) Online w/ Traj. Skills (No ICVF) ExPLORe (ICVF, RND Only)
+Ours (No ICVF) ExPLORe (ICVF, Critic + RND) ExPLORe (No ICVF)
+Online w/ Traj. Skills (ICVF)
+Visual AntMaze
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure6: SuccessrateonVisualAntMazeenvironmentwithandwithoutICVF.Oursworkswellwithout
+ICVF,almostmatchingtheoriginalperformance. However,theotherbaselinesOnlinew/TrajectorySkills
+andExPLOReachievefarworseperformancewithoutICVF,whichshowsthatusingofflinedatabothforex-
+tractingskillsandonlinelearningleadstobetterutilizationofnoisyexplorationbonuses.InitializingExPLORe
+criticwithICVFhelps,butdoesnotsubstantiallychangeperformance.
+different from the prior work (Li et al., 2024) that initializes both the RND network and the critic
+network. In Figure 6, we examine the performance of Ours, Online w/ Trajectory Skills, and
+ExPLORe with and without ICVF. Both of the baselines perform much better with the ICVF ini-
+tialization,suggestingthatICVFmightplayanimportantroleinprovidingmoreinformativeexplo-
+rationsignal. Ours,withoutusingICVF,canalreadyoutperformthebaselineswithICVF.Byboth
+extractingskillsfromofflinedataandtrainingwithofflinedata,weareabletolearnbetterfromless
+informative exploration signals. We also observe that initializing the critic with ICVF (as done in
+theoriginalpaper(Lietal.,2024))helpsimprovetheperformanceofExPLOResome,butdoesnot
+substantiallychangeperformance.
+E KL PENALTY ABLATION
+In Figure 7, we compare the performance of Ours with a version of our method that uses a KL-
+divergence penalty with the state-based prior (as used in a previous skill-based method (Pertsch
+etal.,2021)),Ours(KL).InOurs,asdiscussedinSection4,weborrowthepolicyparameteriza-
+tionfromHaarnojaetal.(2018)andadoptatanhpolicyparameterizationwithentropyregulariza-
+tion on the squashed space. Pertsch et al. (2021) parameterize the higher level policy as a normal
+distribution and is explicitly constrained to a learned state-dependent prior using a KL-divergence
+penalty, with a temperature parameter that is auto-tuned to match some target value by using dual
+gradient descent on the temperature parameter. They do not use entropy regularization. Keeping
+everythingelseaboutourmethodthesame,weinstantiatethisalternativepolicyparameterizationin
+Ours (KL). We sweep over possible target KL-divergence values (5,10,20,50) and initial values
+for the temperature parameter (100,1,0.1) using the performance on antmaze-large, but find
+thattheseparametersdonotsubstantiallyalterperformance. AsshowninFigure7,Oursperforms
+at least as well as Ours (KL) in the initial learning phase, and has better asymptotic performance
+on all three mazes, matching or beating ExPLORe, on all three mazes. It seems likely that not
+having entropy regularization makes it difficult to appropriately explore online, and that explicitly
+constraining to the prior may prevent further optimization of the policy. Attempts at combining
+19
+nruteR
+dezilamroNOurs Ours (KL) ExPLORe
+Medium Large Ultra
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure7: NormalizedreturnonthreeAntMazemazes,comparingOurswithaKLregularizedalterna-
+tive(Ours(KL)). WethatOursconsistentlyoutperformsOurs(KL)onallthreemazes,withinitiallearning
+thatisatleastasfastandsignificantlyimprovedasymptoticperformance.OnlyOursisabletomeetorsurpass
+theasymptoticperformanceofExPLOReonallmazes.
+anentropybonusandKL-penaltyleadtoinstabilityanddifficultytuningtwoseparatetemperature
+parameters. Additionally,intheKitchendomain,theKLobjectiveisunstable,sinceatsomestates
+thepriorstandarddeviationisquitesmall,leadingtonumericalinstability. Incontrast,adoptingthe
+tanhpolicyparameterizationfromHaarnojaetal.(2018)issimple,performsbetter,andencounters
+noneoftheseissuesinourexperiments.
+F ANTMAZE RESULTS BY DIFFERENT MAZE LAYOUTS AND GOAL
+LOCATIONS
+Weevaluatethesuccessrateoftheouralgorithmcomparedtothesamebaselinesuiteasinthemain
+resultssectionforeachindividualgoalandmazelayoutandreporttheresultsinFigure8. Wealso
+includeExPLORebothwithandwithoutanonlineRNDbonus. OnlineRNDhelpsExPLORethe
+mostfortheantmaze-mediumbottom-rightgoal,wherethereissparseofflinedatacoveragefor
+a considerable radius around the goal. We hypothesize that with the absence of online RND, the
+agentisencouragedtoonlystayclosetotheofflinedataset,makingitmoredifficulttofindgoalsin
+lesswell-coveredregions. Ontheflipside, forsomeothergoalswithbetterofflinedatacoverage,
+liketheantmaze-largetop-rightgoal,onlineRNDcanmaketheperformanceworse. Forevery
+goallocation,Oursconsistentlymatchesoroutperformsallothermethodsthroughoutthetraining
+process.
+We also evaluate the coverage at every goal location for every method for each maze layout and
+show the result in Figure 9. The coverage varies from goal location to goal location as some goal
+locationsarehardertoreach. Generally, theagentstopsexploringonceithaslearnedtoreachthe
+goal consistently. Ours consistently has the best initial coverage for 11 out of 12 goals, though
+sometimeshaslowercoveragecomparedtoothermethodslaterintraining. However,thisislikely
+due in large part to successfully learning how to reach that goal quickly, and thus not exploring
+further.
+G ROBUSTNESS AGAINST OFFLINE DATA CORRUPTIONS
+To study how robust our method is, we perform an ablation study on the AntMaze domain on the
+largemazelayoutwithtwotypesofdatacorruptionappliedtotheofflinedata:
+1. InsufficientCoverage: Allthetransitionsclosetothegoal(withinacirclewitharadiusof
+5)areremoved.
+2. 5% Data: We subsample the dataset where only 5% of the trajectories are used for skill
+pretrainingandonlinelearning.
+20
+nruteR
+dezilamroNOurs ExPLORe Diffusion BC + JSRL HILP w/ Offline Data
+Online w/ Traj. Skills ExPLORe (No Online RND) Online w/ HILP Skills Online
+Medium Top Right Medium Bottom Right Medium Top Left
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Medium Top Center Large Top Right Large Top Left
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Large Bottom Right Large Top Center Ultra Top Right
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Ultra Bottom Right Ultra Top Left Ultra Top Center
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure 8: Successratebygoallocation. TheadditionofonlineRNDinExPLOReleadstobetterperfor-
+manceongoalswithlessofflinedatacoverage,andslightlyworseperformanceongoalswell-representedin
+thedataset.Oursconsistentlymatchesareoutperformsallothermethodsonallgoalsthroughouttraining.
+21
+etaR
+sseccuSOurs ExPLORe Diffusion BC + JSRL HILP w/ Offline Data
+Online w/ Traj. Skills ExPLORe (No Online RND) Online w/ HILP Skills Online
+Medium Top Right Medium Bottom Right Medium Top Left
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Medium Top Center Large Top Right Large Top Left
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Large Bottom Right Large Top Center Ultra Top Right
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Ultra Bottom Right Ultra Top Left Ultra Top Center
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure9: Coverageforeverygoallocationonthreeantmazeenvironments. Thereissignificantvariation
+betweengoals,andOursconsistentlyhasthebestinitialcoverageperformanceon11of12goals. Flattening
+coveragecomparedtoothermethodscanbeatleastpartiallyattributedtohavingalreadyfoundthegoal,and
+sucessfullyoptimizingreachingthatgoal,ratherthancontinuingtoexploreafteralreadyfindingthegoal.
+22
+egarevoCWereporttheperformanceonbothsettingsinFigure10. FortheInsufficientCoveragesetting,our
+method learns somewhat slower than the full data setting, but can still reach the same asymptotic
+performance, and outperforms or matches all baselines in the same data regime throughout the
+trainingprocess.Forthe5%Datasetting,ourmethodalsoreachesthesameasymptoticperformance
+as in the full data regime, and outperforms or matches all baselines throughout training. The gap
+betweenOursandbaselineperformance(inparticular, ExPLORe)issmallerthaninthefulldata
+regime,whichistobeexpectedaswehavelessdatatolearnthepriorskills,sotheskillsarelikely
+notasgood. Overall,amongthetopperformingmethodsintheAntMazedomain,ourmethodisthe
+mostrobust,consistentlyoutperformingtheotherbaselinesthateitherdonotusepre-trainedskills
+(ExPLORe)ordonotusetheofflinedataduringonlinelearning(Onlinew/TrajectorySkills)in
+thesedatacorruptionsettings.
+Ours ExPLORe Online
+Online w/ Traj. Skills Online w/ HILP Skills Ours (Full Dataset)
+5% Data Insufficient Coverage
+1.00
+0.75
+0.50
+0.25
+0.00
+0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.00 0.05 0.10 0.15 0.20 0.25 0.30
+Environment Steps (×106)
+Figure10: Datacorruptionablationonstate-basedantmaze-large. Top: Thesuccessrateofdifferent
+methodsonthesedatacorruptionsettings. Bottom: Visualizationofthedatadistributionforeachcorruption
+setting.Weexperimentwithtwodatacorruptionsettings.Ourmethodperformsworsethanthefulldatasetting
+butstillconsistentlyoutperformsallbaselines.
+23
+etaR
+sseccuS

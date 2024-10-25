@@ -1,0 +1,657 @@
+PRIORITIZED GENERATIVE REPLAY
+RenhaoWang, KevinFrans, PieterAbbeel, SergeyLevine, andAlexeiA.Efros
+DepartmentofElectricalEngineeringandComputerScience
+UniversityofCalifornia,Berkeley
+ABSTRACT
+Sample-efficientonlinereinforcementlearningoftenusesreplaybufferstostore
+experienceforreusewhenupdatingthevaluefunction. However,uniformreplay
+isinefficient,sincecertainclassesoftransitionscanbemorerelevanttolearning.
+Whileprioritizationofmoreusefulsamplesishelpful,thisstrategycanalsoleadto
+overfitting,asusefulsamplesarelikelytobemorerare. Inthiswork,weinstead
+proposeaprioritized,parametricversionofanagent’smemory,usinggenerative
+modelstocaptureonlineexperience. Thisparadigmenables(1)densificationof
+past experience, with new generations that benefit from the generative model’s
+generalizationcapacityand(2)guidanceviaafamilyof“relevancefunctions”that
+pushthesegenerationstowardsmoreusefulpartsofanagent’sacquiredhistory.
+Weshowthisrecipecanbeinstantiatedusingconditionaldiffusionmodelsand
+simplerelevancefunctionssuchascuriosity-orvalue-basedmetrics. Ourapproach
+consistentlyimprovesperformanceandsampleefficiencyinbothstate-andpixel-
+baseddomains. Weexposethemechanismsunderlyingthesegains,showinghow
+guidancepromotesdiversityinourgeneratedtransitionsandreducesoverfitting.
+Wealsoshowcasehowourapproachcantrainpolicieswithevenhigherupdate-to-
+dataratiosthanbefore,openingupavenuestobetterscaleonlineRLagents.
+1 INTRODUCTION
+Onecentralproblemofonlinereinforcementlearning(RL)liesinextractingsignalfromacontinuous
+streamofexperience. Notonlydoesthenon-i.i.d. formofthisdatainducelearninginstabilities,but
+agentsmayloseoutonnear-termexperiencethatisnotimmediatelyuseful,butbecomesimportant
+muchlater. ThestandardsolutiontotheseproblemsistouseareplaybufferLin(1992);Mnihetal.
+(2015)asaformofmemory. Bystoringadatasetoftransitionstoenablebatch-wisesampling,the
+algorithmcandecorrelateonlineobservationsandrevisitpastexperiencelaterintraining.
+However,theideathatanagent’smemorymustidenticallyreproducepasttransitions,andatuniform
+frequency,islimiting. Ingeneral,thedistributionofstatesanagentvisitsisdifferentfromtheoptimal
+distribution of states the agent should train on. Certain classes of transitions are more relevant
+tolearning,i.e.dataatcriticaldecisionboundariesordatathattheagenthasseenlessfrequently.
+Locatingsuchlong-taileddataistricky,yetclearlyimportantforefficientlearning. Thechallengeis
+thustodesignascalablememorysystemthatreplaysrelevantdata,andatlargequantities.
+Inthiswork,weproposeasimple,plug-and-playformulationofanagent’sonlinememorythatcan
+beconstructedusingagenerativemodel. Wetrainaconditionalgenerativemodelinanend-to-end
+mannertofaithfullycaptureonlinetransitionsfromtheagent. Thisparadigmgrantstwokeybenefits,
+enabling1)thedensificationofpastexperience,allowingustocreatenewtrainingdatathatgoes
+beyondthedatadistributionobservedonline,and2)guidanceviaafamilyof“relevancefunctions“
+F thatpushthesegenerationstowardsmoreusefulpartsofanagent’sacquiredexperience.
+AnidealrelevancefunctionF shouldbeeasytocompute,andnaturallyidentifythemostrelevant
+experience. Intuitively, weshouldgeneratetransitionsatthe“frontier”oftheagent’sexperience.
+These are regions of transition space that our generative model can accurately capture from the
+agent’smemory,butourpolicyhasnotyetcompletelymastered. Weinvestigateaseriesofpossible
+functions,concludingthatintrinsiccuriosityreliablyapproximatesthisdistribution.
+Ourmaincontributionisthisframeworkforascalable,guidablegenerativereplay,whichweterm
+“Prioritized Generative Replay” (PGR). We instantiate this framework by making use of strong
+1
+4202
+tcO
+32
+]GL.sc[
+1v28081.0142:viXraHigh RelevanceSyntheticTransitions
+Relevance
+Condition
+Physical Generative
+World
+Memory Memory
+Agent
+Mixed Relevance RealTransitions
+Figure 1: We model an agent’s online memory using a conditional diffusion model. By
+conditioningonmeasuresofdatarelevance,wecangeneratesamplesmoreusefulforpolicylearning.
+diffusionmodelarchitectures. Experimentsonbothstate-basedandpixel-basedRLtasksshowPGR
+isconsistentlymoresample-efficientthanbothmodel-freeRLalgorithmsandgenerativeapproaches
+thatdonotuseanyguidance. Infact, bydensifyingthemorerelevanttransitions, PGR isableto
+succeedincaseswhereunconditionalgenerationstrugglessignificantly. Moreover,weempirically
+demonstratethatPGRgoesbeyondsimpleprioritizedexperiencereplay;inparticular,weshowthat
+conditioningoncuriosityleadstomorediverseandmorelearning-relevantgenerations. Finally,we
+showhowPGRimproveswithlargerpolicynetworks,andcontinueslearningreliablywithhigher
+synthetic-to-realdataratios,settingupapromisingrecipefordata-efficientscaling.
+2 RELATED WORK
+Model-basedRL.Model-basedreinforcementlearninginvolvesinteractingwithapredictivemodel
+oftheenvironment,sometimesreferredtoasaworldmodel(Ha&Schmidhuber,2018),tolearn
+a policy (Sutton, 1991). Two classes of approaches dominate: planning with the learned world
+modeldirectly(Hafneretal.,2019b;Schrittwieseretal.,2020;Yeetal.,2021;Chuaetal.,2018;
+Ebertetal.,2018),oroptimizingapolicybyunrollingtrajectories“intheimagination”oftheworld
+model(Janneretal.,2019;2020;Hafneretal.,2019a;Ohetal.,2017;Feinbergetal.,2018). This
+latterapproachismostrelevanttoourproblemsetting. Onedistinctioniswedonotbackproporplan
+actionsthroughamodeldirectly,butratherwhollysynthesizeadditional,high-relevancetransitions.
+Closely related is PolyGRAD (Rigter et al., 2023) which generates entire on-policy trajectories.
+However,bygeneratingindependentoff-policytransitionsratherthanattemptingtoapproximate
+trajectoriesfromthecurrentpolicy,weavoidtheissueofcompoundingerrorsinourmodel(Guetal.,
+2016),andalsoenableeasierplug-and-playwithpopularexistingonlineRLmethods.
+Prioritized replay. Agents often benefit significantly more by learning from important experi-
+ences(Moore&Atkeson,1993;Andreetal.,1997). Oneofthemostwell-knownstrategieswhich
+leveragesthisinsightisprioritizedexperiencereplay(PER),whichusestemporaldifference(TD)
+errorasaprioritycriteriontodeterminetherelativeimportancebetweentransitions(Schauletal.,
+2015). Sincethen,anumberofworkshaveproposedmanydifferentcriteriatodeterminetransition
+importance,includingstateentropy(Ramicic&Bonarini,2017),learnability(Sujitetal.,2023),or
+somecombinationofvalue/rewardandTD-error(Caoetal.,2019;Gaoetal.,2021). Toalleviate
+thecomputationalcostassociatedwithevaluatingthepriorityofallexperiencesinthereplaybuffer,
+different flavors of algorithmic improvements (Kapturowski et al., 2018; Schaul et al., 2015) or
+approximateparametricmodelsofpriorexperience(Shinetal.,2017;Novati&Koumoutsakos,2019)
+havebeenproposed. Ourproposaltomodelthereplaybufferasaparametricgenerativemodelis
+closertothissecondclassofworks. However,distinctfromthesemethodswhichseektorelabel
+existingdata,ourmethodusesprioritytogenerateentirelynewdataformoregeneralizablelearning.
+2RLfromsyntheticdata. Theuseofgenerativetrainingdatahasalonghistoryinreinforcement
+learning(Shinetal.,2017;Raghavanetal.,2019;Imre,2021;Hafneretal.,2019a). Butonlywith
+therecentadventofpowerfuldiffusionmodelshavesuchmethodsachievedparitywithmethods
+trainedonrealdata(Janneretal.,2022;Ajayetal.,2022;Zhuetal.,2023). Theuseofdiffusionfor
+RLwasfirstintroducedbyDiffuser(Janneretal.,2022). Theauthorsproposeanofflinediffusion
+modelforgeneratingtrajectoriesofstatesandactions,anddirectlygenerateplanswhichreachgoal
+statesorachievehighrewards. DecisionDiffuser(Ajayetal.,2022)generatesstate-onlytrajectories,
+andemploysaninversekinematicsmodeltogeneratecorrespondingactions. Morerecently,works
+like(Dingetal.,2024;Heetal.,2024)leveragediffusionmodelstoaugmentdatasetsforoffline
+RL,improvingtrainingstability. MostsimilartoourapproachisSYNTHER(Luetal.,2024),which
+augmentsthereplaybufferonlineandcanbeseenasanunguidedformofourframework. Incontrast
+tothesepreviousworks,wepositthatthestrengthofsyntheticdatamodelsisthattheycanbeguided
+towardsnoveltransitionsthatareoff-policyyetmorerelevantforlearning.
+3 BACKGROUND
+Thissectionoffersaprimerononlinereinforcementlearninganddiffusionmodels. Here,detailson
+conditionalgenerationviaguidanceareespeciallyimportanttoourmethodexpositioninSection4.
+Reinforcementlearning. Wemodeltheenvironmentasafully-observable,infinite-horizonMarkov
+DecisionProcess(MDP)(Sutton&Barto,2018)definedbythetupleM=(S,A,P,R,p 0,γ). Here,
+S,Adenotethestateandactionspaces,respectively. P(s′ ∣s,a)fors,s′ ∈S anda∈Adescribes
+thetransitiondynamics,whicharegenerallynotknown. R(s,a)isarewardfunction,p 0istheinitial
+distributionoverstatess 0,andγ isthediscountfunction. InonlineRL,apolicyπ∶S →Ainteracts
+withtheenvironmentMandobservestuplesτ =(s,a,s′,r)(i.e.transitions),whicharestoredina
+replaybufferD. Theaction-value,orQ,functionisgivenby:
+∞
+Q π(s,a)=E at∼π(⋅∣st),st+1∼P(⋅∣st,at)[∑γt R(s t,a t∣s 0=s,a 0=a)]. (1)
+t=0
+The Q-function describes the expected return after taking action a in state s, under the policy π.
+Thenourgoalistolearntheoptimalpolicyπ∗suchthatπ∗ (a∣s)=argmax πQ π(s,a).
+Conditionaldiffusionmodels. Diffusionmodelsareapowerfulclassofgenerativemodelswhich
+employaniterativedenoisingprocedureforgeneration(Sohl-Dicksteinetal.,2015;Hoetal.,2020).
+Diffusion first involves a forward process q(xn+1 ∣ xn ) iteratively adding Gaussian noise to xn
+startingfromsomeinitialdatapointx0. Areverseprocessp θ(xn−1 ∣xn )thentransformsrandom
+Gaussiannoiseintoasamplefromtheoriginaldistribution. Inparticular,welearnaneuralnetwork
+ϵ
+θ
+whichpredictstheamountofnoiseϵ∼N(0,I)injectedforsomeparticularforwardstepx n.
+For additional controllability, diffusion models naturally enable conditioning on some signal y,
+simplybyformulatingtheforwardandreverseprocessesasq(xn+1 ∣xn,y)andp θ(xn−1 ∣xn,y),
+respectively. Classifier-free guidance (CFG) is a common post-training technique which further
+promotes sample fidelity to the condition y in exchange for more complete mode coverage (Ho
+&Salimans,2022). TofacilitateCFGatsampling-time,duringtraining,weoptimizeϵ withthe
+θ
+followingobjective:
+E x0∼D,ϵ∼N(0,I),y,n∼Unif(1,N),p∼Bernoulli(puncond)∥ϵ θ(xn,n,(1−p)⋅y+p⋅∅)∥2 2, (2)
+where p
+uncond
+is the probability of dropping condition y in favor of a null condition ∅. During
+sampling, we take a convex combination of the conditional and unconditional predictions, i.e.
+ω⋅ϵ θ(xn,n,y)+(1−ω)⋅ϵ θ(xn,n,∅),whereωisahyperparametercalledtheguidancescale.
+4 PRIORITIZED GENERATIVE REPLAY
+In this section, we introduce Prioritized Generative Replay (PGR). At its core, PGR involves a
+parametricgenerativereplaybufferthatcanbeguidedbyavarietyofrelevancecriteria. Wefirst
+provideintuitionandmotivationforsuchaframework,andconcretizehowitcanbeinstantiated.
+Next,wecompareandcontrastbetweenvariousinstantiationsofrelevancefunctions. Wearguethat
+weshouldusefunctionswhichpromotegeneratinghigher-noveltystatesastheyimplicitlyincrease
+thediversityofrelevanttransitionsourreplaybuffer,leadingtomoresample-efficientlearning.
+3Performance on Finger-Turn-Hard-v0 B
+A
+C
+EnvironmentSteps
+PGR Generations (ours)
+SynthERGenerations
+Figure2: PGRimprovesperformancebydensifyingsubspacesofdatawheretransitionsmore
+relevantforlearningreside. Weproject10KgenerationsforbothourPGRandtheunconditional
+baselineSYNTHERtothesametSNEplot. A:Atepoch1,thedistributionofdatageneratedbyPGR
+andSYNTHERaresimilar. B:Attheinflectionpointofperformancenearepoch130,PGRgeneratesa
+distinctsub-portionofthedataspacefromSYNTHER(i.e.redandbluedotsarelargelyseparate.)
+C:Attheendoflearning,PGRstilldenselycoversadistinctsubspaceoftheSYNTHERtransitions.
+4.1 MOTIVATION
+ConsideranagentwithpolicyπinteractingonlinewithsomeenvironmentM. Theagentobserves
+andstorestransitionsτ =(s,a,s′,r)insomefinitereplaybufferD. Twomainissuesarise:
+1. ∣D∣mustbesufficientlylargeanddiversetopreventoverfitting(hardtoguaranteeonline)
+2. Transitionsmorerelevantforupdatingπmightberare(andthusheavilyundersampled)
+Toaddressthefirstproblem,wecandensifythereplaydistributionpD(τ)bylearningagenerative
+worldmodelusingthebuffer. Thiseffectivelytradesinourfinitely-sized, non-parametricreplay
+bufferforaninfinitely-sized,parametricone. Byleveragingthegeneralizationcapabilitiesof,e.g.,
+diffusionmodels,wecaninterpolatethereplaydistributiontomoreimpoverishedregionsofdata.
+However,uniformlysamplingfromthisparametricbuffer,inexpectation,impliessimplyreplaying
+pasttransitionsatthesamefrequencyatwhichtheywereobserved.Inmorechallengingenvironments,
+theremayonlyasmallfractionofdatawhichismostrelevanttoupdatingthecurrentpolicyπ. Thus,
+toaddressthesecondproblemandenablesample-efficientlearning,weneedsomemechanismtonot
+onlydensifypD(τ),butactuallyguideittowardsthemoreimmediatelyusefulsetoftransitions.
+Ourkeyinsightistoframethisproblemviathelensofconditionalgeneration. Specifically,weseek
+tomodelpD(τ ∣c),forsomeconditionc. Bychoosingtherightc,we“marginalizeout”partsofthe
+unconditionaldistributionpD(τ)whicharelessrelevantunderc(seeFig.2.) Moreconcretely,we
+proposetolearnarelevancefunctionF(τ)=cjointlywiththepolicyπ. Intuitively,thisrelevance
+functionmeasuresthe“priority”cofτ. Overall,wecanachievebothmorecompleteaswellasmore
+relevantcoverageofp D(τ). Clearly,thechoiceofF inourframeworkiscritical. Wenowexplorea
+numberofinstantiationsforF,andperformananalysisontheirstrengthsandweaknesses.
+4.2 RELEVANCEFUNCTIONS
+Webeginbyoutliningtwodesiderataforourrelevancefunctions. First,givenouronlinesetting,these
+functionsshouldincurminimalcomputationcost. Thisremovesconditioningonstrongpriorswhich
+demandextensivepretraining(e.g.priorworksinofflineRL(Du&Narasimhan,2019;Schwarzer
+et al., 2021)). Second, we want a guidance signal that will not overfit easily, thereby collapsing
+generationtostaleorlow-qualitytransitionsevenastheagent’sexperienceevolvesovertime.
+Return. Ourfirstproposalisoneofthemostnatural: weconsiderarelevancefunctionbasedon
+episodicreturn. Concretely,weusethevalueestimateofthelearnedQ-functionandcurrentpolicyπ:
+′
+F(s,a,s,r)=Q(s,π(s)). (3)
+4
+nruteR
+egarevAAlgorithm1Overviewofourouterloop+innerloopframework.
+Input:syntheticdataratior∈[0,1],conditionalguidancescaleω
+Initialize: D = ∅realreplaybuffer,π agent,D = ∅syntheticreplaybuffer,Ggenerativemodel,
+real syn
+“relevancefunction”F
+1: whileforeverdo ▷perpetualouterloop
+2: Collecttransitionsτ withπintheenvironmentandaddtoD
+real real
+3: UpdateF usingD andEqs.(3)to(5)
+real
+4: for1,...,Tdo ▷periodicinnerloop
+5: Sampleτ fromD andoptimizeG(τ ∣F(τ))usingEq.(2)
+real real
+6: Conditionallygenerateτ fromGwithguidancescaleωandaddtoD
+syn syn
+7: TrainπonsamplesfromD ∪D mixedwithratior
+real syn
+8: endfor
+9: endwhile
+Return-as-relevancesensiblypushesgenerationstobemoreon-policy,sinceπbyconstructionseeks
+outhighQ-estimatesstates. Also,manyonlineRLalgorithmsalreadylearnaQ-function,andsowe
+readilysatisfythefirstcondition(Mnihetal.,2015). However,thesecondconditionisnotadequately
+addressedbythischoiceofF. Inparticular,thediversityofhigh-returntransitionsmightinpractice
+bequitelow,makingoverfittingtotheconditionalgenerationsmorelikely.
+Temporaldifference(TD)error. AnotherpossiblechoiceforourrelevancefunctionisTD-error,
+firstproposedforreplayprioritizationbySchauletal.(2015). Ourrelevancefunctioninthiscaseis
+givenbythedifferencebetweenthecurrentQ-valueestimateandthebootstrappednext-stepestimate:
+′ ′ ′ ′
+F(s,a,s,r)=r+γQ target(s,argmaxQ(s,a))−Q(s,a), (4)
+a′
+OneimmediateshortcomingisthatinpracticewehavenoguaranteesontheQ-estimatesforrarer,
+out-of-distributiontransitions. Infact,overlygreedyprioritizationofhighTD-errortransitionscan
+leadtolow-quality,myopicQ-estimates(Schauletal.,2015).
+Curiosity. Aglaringproblemwithbothreturn-basedandTDerror-basedrelevancefunctionsistheir
+relianceonhigh-qualityQ-functions. EstimationerrorscanthusleadtoF providingapoorcondi-
+tioningsignal. Moreover,onlineRLagentstendtooverfitQ-functionstoearlyexperience(Nikishin
+etal.,2022),whichwillinturnleadtoarapidlyoverfittedF underthesetwochoices.
+Wearguethatanaturalwaytoreduceoverfittingisviasomerelevancefunctionwhichpromotes
+generationdiversity. Aspriorworkhasshown,aneffectivewaytodecreaseoverfittingtoearly,noisy
+signalinonlineRListoleveragediverseexperience(Zhangetal.,2018). Toachievethisdiversity,
+wemodelF afterexplorationobjectiveswhichpromoteengagingwith“higher-novelty”transitions
+thataremorerarelyseen(Strehl&Littman,2008). Moreover,bylearningaseparatefunctionentirely,
+wedecorrelateourrelevancefunctionfromtheQ-function,makingoverfittinglesslikely.
+Wethusturntopriorworkonintrinsicmotivation(Schmidhuber,1991;Oudeyer&Kaplan,2007)
+tooperationalizetheseinsights. Concretely,wetakeinspirationfromtheintrinsiccuriositymod-
+ule(Pathaketal.,2017)toparameterizeF. Givenafeatureencoderh,welearnaforwarddynamics
+modelgwhichmodelstheenvironmenttransitionfunctionP(s′ ∣s,a),inthelatentspaceofh. Then
+F isgivenbytheerrorofthisforwarddynamicsmodel:
+1
+F(s,a,s′ ,r)= ∣∣g(h(s),a)−h(s′ )∣∣2. (5)
+2
+4.3 PGRFRAMEWORKSUMMARY
+Finally,weprovideaconcreteoverviewofourframeworkinAlgorithm1. Intheouterloop,the
+agentinteractswiththeenvironment,receivingastreamofrealdataandbuildingareplaybufferDreal,
+asinregularonlineRL.Intheeventthatweareusingacuriosity-basedrelevancefunction,wealso
+performanappropriategradientupdateforF usingsamplesfromDreal,viathelossfunctiongiven
+byEq.(5). Thenperiodicallyintheinnerloop,welearnaconditionalgenerativemodelGofDreal
+andgenerativelydensifythesetransitionstoobtainoursyntheticreplaybufferDsyn. Concretely,we
+takeGtobeaconditionaldiffusionmodel. ToleveragetheconditioningsignalgivenbyF,weuse
+5DMC-100k(Online) Pixel-DMC-100k(Online)
+Quadruped- Cheetah- Reacher- Finger-Turn- Walker- Cheetah-
+Environment
+Walk Run Hard Hard* Walk Run
+MBPO 505.91±252.55 450.47±132.09 777.24±98.59 631.19±98.77 - -
+DREAMER-V3 389.63±168.47 362.01±30.69 807.58±156.38 745.27±90.30 353.40±114.12 298.13±86.37
+SAC 178.31±36.85 346.61±61.94 654.23±211.84 591.11±41.44 - -
+REDQ 496.75±151.00 606.86±99.77 733.54±79.66 520.53±114.88 - -
+REDQ+CURIOSITY 687.14±93.12 682.64±52.89 725.70±87.78 777.66±116.96 - -
+DRQ-V2 - - - - 514.11±81.42 489.30±69.26
+SYNTHER 727.01±86.66 729.35±49.59 838.60±131.15 554.01±220.77 468.53±28.65 465.09±28.27
+PGR(Reward) 510.39±121.11 660.87±87.54 715.43±97.56 540.85±73.29 - -
+PGR(Return) 737.62±20.13 779.42±30.00 893.65±55.71 805.42±92.07 - -
+PGR(TDError) 802.18±116.52 704.17±96.49 917.61±37.32 839.26±49.90 - -
+PGR(Curiosity) 927.98±25.18 817.36±35.93 915.21±48.24 885.98±67.29 570.99±41.44 529.70±27.76
+Table1:Averagereturnsonstateandpixel-basedDMCafter100Kenvironmentsteps(5seeds,1std.dev.
+err.).*isaharderenvironmentwithsparserrewards,andsowepresentresultsover300Ktimesteps.
+Walker2d-v2 HalfCheetah-v2 Hopper-v2 REDQ SYNTHER PGR
+MBPO 3781.34±912.44 8612.49±407.53 3007.83±511.57 ModelSize(x106params.) 9.86 7.12 7.39(+3.7%)
+DREAMER-V3 4104.67±349.74 7126.84±539.22 3083.41±138.90 GenerationVRAM(GB) - 4.31 6.67(+54.7%)
+SAC 879.98±217.52 5065.61±467.73 2033.39±793.96 TrainTime,hours(Diffusion) - 1.57 1.61(+2.5%)
+REDQ 3819.17±906.34 6330.85±433.47 3275.66±171.90 GenerationTime,hours - 0.62 0.63(+1.6%)
+SYNTHER 4829.32±191.16 8165.35±1534.24 3395.21±117.50 TrainTime,hours(RL) 5.69 1.98 2.11(+6.5%)
+PGR(Curiosity) 5682.33±370.04 9234.61±658.77 4101.79±244.05 TrainTime,hours(Total) 5.69 4.17 4.35(+4.3%)
+Table2:Resultsonstate-basedOpenAIgymtasks. Table 3: Model runtime and latency. PGR incurs
+Wereportaveragereturnafter100Kenvironmentsteps. <5% additional training time compared to SynthER.
+Resultsareover3seeds,with1std.dev.err. GenerationalsofitseasilyonmodernGPUs(<12GB).
+CFGanda“prompting”strategyinspiredbyPeeblesetal.(2022). Wechoosesomeratiokofthe
+transitionsintherealreplaybufferDrealwiththehighestvaluesforF(s,a,s′,r),andsampletheir
+conditioningvaluesrandomlytopasstoG. Implementation-wise,wekeepbothDrealandDsynat1M
+transitions,andrandomlysamplesyntheticandrealdatamixedaccordingtosomeratiortotrainour
+policyπ. Here,anyoff-policyRLalgorithmcanbeusedtolearnπ. Forfaircomparisontopriorart,
+weinstantiateourframeworkwithbothSAC(Haarnojaetal.,2018)andREDQ(Chenetal.,2021).
+5 EXPERIMENTS
+In this section, we answer three main questions. (1) First, to what extent does our PGR improve
+performance and sample efficiency in online RL settings? (2) Second, what are the underlying
+mechanismsbywhichPGRbringsaboutperformancegains? (3)Third,whatkindofscalingbehavior
+doesPGRexhibit,ifindeedconditionally-generatedsyntheticdataunderPGRisbetter?
+Environment and tasks. Our results span a range of state-based and pixel-based tasks in the
+DeepMindControlSuite(DMC)(Tunyasuvunakooletal.,2020)andOpenAIGym(Brockman,2016)
+environments. Inparticular,ourbenchmarkfollowsexactlytheonlineRLevaluationsuiteofprior
+workingenerativeRLbyLuetal.(2024),facilitatingdirectcomparison. Inalltasks,weallow100K
+environmentinteractions,astandardchoiceinonlineRL(Lietal.,2023;Kostrikovetal.,2020).
+Modeldetails,trainingandevaluation. Forstate-basedtasks,inadditionaltotheSACandREDQ
+model-freebaselines,wealsoincludetwostrongmodel-basedonlineRLbaselinesinMBPO(Janner
+etal.,2019)andDREAMER-V3(Hafneretal.,2023). WealsocompareagainstSYNTHER(Luetal.,
+2024),arecentworkwhichlearnsanunconditionalgenerativereplaymodel,allowing SAC tobe
+trainedwithanupdate-to-data(UTD)ratioof20. Tofacilitateconditionalsampling,duringtraining
+werandomlydiscardthescalargivenbyourrelevancefunctionF withprobability0.25.
+Forpixel-basedtasks,ourpolicyisbasedonDRQ-V2(Yaratsetal.,2021)asinLuetal.(2022). To
+maintainthesameapproachandarchitectureforourgenerativemodel,wefollowLuetal.(2024);
+Esseretal.(2021)andgeneratedatainthelatentspaceofthepolicy’sCNNvisualencoder. Thatis,
+givenavisualencoderf θ,andatransition(s,a,s′,r)forpixelobservationss,s′ ∈R3×h×w ofheight
+handwidthw,welearnto(conditionally)generatetransitions(f θ(s),a,f θ(s′ ),r).
+Intheinterestoffaircomparison,ourdiffusionandpolicyarchitecturesmirrorSYNTHERexactly.
+Thus,trainingFLOPs,parametercountandgenerationtimeaspresentedinTable3arealldirectly
+comparabletoSYNTHER. Ouronlyadditionalparameterslieinalightweightcuriosityhead,whichis
+updatedforonly5%ofallpolicygradientsteps. PGRthusincursminimaladditionaloverhead.
+6Cheetah-Run Quadruped-Walk Cheetah-Run Quadruped-Walk
+Environment Steps Environment Steps Environment Steps Environment Steps
+Curiosity-PGR PER w/ TD-Error-PGR PER w/ REDQ Curiosity-PGR SynthER SynthERw/ REDQ REDQ w/
+(ours) Curiosity (ours) TD-Error (ours) Curiosity Curiosity
+(a) Prioritized Experience Replay (PER) (b) Exploration Bonus
+Figure 3: Comparison to baselines that use (a) prioritized experience replay (PER) and (b)
+explorationrewardbonuses. REDQusingPER,withprioritydeterminedbycuriosityEq.(5)or
+TD-errorEq.(4),stillunderperformtheirPGRcounterparts. PGRalsoremainssuperiorafterdirectly
+addinganexplorationbonusintheformofcuriositytoeitherSYNTHERorREDQ.
+Cheetah-Run Quadruped-Walk Walker-Walk
+Reacher-Hard Finger-Turn-Hard Cheetah-Run
+Environment Steps Environment Steps Environment Steps
+Curiosity-PGR (ours) Reward-PGR (ours) Unconditional (SynthER) REDQ SAC DrQ-v2
+(a) State-Based (b) Pixel-Based
+Figure4: SampleefficiencyonDMC(a)state-basedand(b)pixel-basedtasks. Weshowmean
+andstandarddeviationoverfiveseeds. Curiosity-PGR consistentlydemonstratesthebestsample
+efficiency. SYNTHER,whichusesunconditionalgenerationtoaugmentreplay,underperformsmodel-
+freealgorithmslikeSACandREDQonhardersparse-rewardtasks,likefinger-turn-hard.
+5.1 RESULTS
+As shown in Table 1 and Table 2, all variants of PGR successfully solve the tasks, with curiosity
+guidanceconsistentlyoutperformingbothmodel-free(SAC,REDQandDRQ-V2),andmodel-based
+(MBPOandDREAMER-V3)algorithms,aswellastheunconditionalgenerationbaseline(SYNTHER).
+Comparisontoprioritizedexperiencereplay(PER).WealsocomparePGRtoPERbaselinesthat
+usedifferentmeasuresofpriority. Inparticular,wetrainREDQwithaprioritizedreplaybuffer,using
+the classic TD-error (Schaul et al., 2015), or a priority function based on Eq. (5). The former is
+comparabletoourPGRapproachusingEq.(4)asrelevance,andthelattertousingEq.(5). Asshown
+in Fig.3a,PGRdemonstratessuperiorperformanceinbothcases. Thisemphasizestheimportanceof
+densifyingthereplaydistributionwithgenerations,andnotsimplyreweightingpastexperience.
+Comparisontoexplorationbonuses. Weexaminehowbaselinesimprovewhengivenabonusinthe
+formofanintrinsiccuriosityreward(c.f.Eq.(5)). InFig.3b,weseethatcuriosity-PGRcontinuesto
+outperformSYNTHERorREDQwheneitherisaugmentedthisway. ThissuggestsPGRgoesbeyond
+justimprovingexploration. Weproposeourgainsarearesultofgeneratinghighernoveltytransitions
+7
+nruteR
+egarevA
+nruteR
+egarevA
+nruteR
+egarevAWalker2d-v2 HalfCheetah-v2 Hopper-v2
+SYNTHER 4.228 0.814 0.178
+PGR 6.683(+58.1%) 0.699(-14.1%) 0.171(-3.9%)
+Walker2d-v2 HalfCheetah-v2 Hopper-v2
+Dynamics MSE (log) Dynamics MSE (log) Dynamics MSE (log)
+Figure5: PGRdoesnotoutperformbaselinesduetoimprovedgenerationquality. Wecompute
+mean-squarederror(MSE)ofdynamicsover10KgeneratedtransitionsforSYNTHERandcuriosity-
+PGRacross3OpenAIgymenvironments. Top: AverageMSE.Bottom: HistogramsofMSEvalues.
+fromthereplaybufferwithhigherdiversity. Thisadditionaldiversitytherebyreducesoverfittingof
+theQ-functiontosynthetictransitions. WeprovidefurtherevidenceforthisideainSection5.2.
+5.2 SAMPLEEFFICIENCY
+Inthissection,weshowPGRachievesitsstrongperformanceinasample-efficientmanner,andreveal
+themechanismsunderlyingthissample-efficiency. AsseeninFig.4a, fortaskswithstate-based
+inputs, SYNTHER oftenattainsitsbestperformancearound100K environmentsteps. Incontrast,
+curiosity-PGRisabletomatchthisperformanceinboththecheetah-runandquadruped-walktasks
+afteronly∼50K steps. Especiallynoteworthyisthefinger-turn-hardtask,whereSYNTHERactually
+underperformscomparedtothevanillamodel-freeREDQbaseline,whileourcuriosity-PGRcontinues
+outperforming. Weargueconditioningisparticularlyvaluableinsparserewardtasks,whereefficient
+explorationoftheenvironmentpresentsasignificantchallenge. Theseobservationsholdforpixel-
+based tasks. As we see in Fig. 4b, while SYNTHER is eventually overtaken by DRQ-V2 in both
+environments,ourcuriosity-PGRcontinuestoconsistentlyimproveoverDRQ-V2.
+Isthesolutiontosimplyreplaceunconditionalwithconditionalgeneration? Conditionalgenera-
+tioniswell-knowntoimprovesamplequalityinthegenerativemodelingliterature(Ho&Salimans,
+2022;Chenetal.,2023). Thus,onesensibleassumptionisthatPGRexhibitsstrongerperformance
+simplybecauseourgeneratedsamplesarebetterinquality. Weshowthisisnotthecase.
+Specifically,weborrowthemethodologyofLuetal.(2024)andmeasurefaithfulnessofgenerated
+transitionstoenvironmentdynamics. Givenageneratedtransition(s,a,s′,r),werollouttheaction
+agiventhecurrentstatesintheenvironmentsimulatortoobtainthegroundtruthnextstateand
+reward. Wethenmeasurethemean-squarederror(MSE)onthesetwovalues,comparingagainst
+generatednextstates′andrewardr,respectively. Thisanalysisisperformedatepoch50(halfway
+throughonlinepolicylearning),over10Kgeneratedtransitions,andacross3differentenvironments.
+As seen in Fig. 5, SYNTHER and PGR are highly similar in terms of generation quality. Thus,
+ourmotivationsforusingconditionalgenerationhavenothingtodowithtraditionalargumentsin
+generativemodelingsurroundingenhancedgenerationquality. Generationsunder PGR arebetter
+because what matters is not simply quality, but generating the right classes/kinds of transitions.
+Moregenerally,ourcorecontributionistoelegantlycastwidely-usedprioritizedreplayinonlineRL
+throughthislensofconditionalgeneration.
+Moreover,na¨ıvechoicesforconditioningfailentirely. Forexample,trainingonalargerquantityof
+higherrewardtransitionsshouldintuitivelyyieldahigh-rewardpolicy.However,asweshowin Fig.4
+andTable1,na¨ıvelyconditioningonhighreward(Reward-PGR)actuallyresultsinworseperformance
+thananyoftheotherPGRvariantswepropose,andinfactdoesworsethanunconditionalgeneration
+(SYNTHER). Thisisbecausegreedilydensifyinghighrewardtransitionsdoesnotactuallyprovide
+thepolicywithanydataonhowtonavigatetothosehighrewardenvironmentregions. Thus,itis
+non-trivialtoevenknowwhatthecorrectconditioningsignalshouldbetoobtainstrongperformance.
+8
+selpmaS
+fo
+rebmuN10K Timesteps 30K Timesteps
+Quadruped-Walk
+50K Timesteps 100K Timesteps
+Environment Steps
+Curiosity Score Curiosity Score
+(a) Dormant Ratio (b) Curiosity Score Over Training
+Figure6: Curiosity-PGRreducesoverfittingandimprovesdiversityofreplaydata. (a)Dormant
+ratio(Xuetal.,2023)(DR)ofpolicynetworksfordifferentapproaches. DRisconsistentlylower
+forPGR,indicatingaminimallyoverfittingpolicy. (b)CuriosityF-valuesthroughouttrainingfor
+unconditionalbaselineandPGR. Weshowthatthedistributionofstatesaccessedbythecuriosity-PGR
+policyissignificantlyshiftedtowardshighernoveltyenvironmenttransitions.
+What is the mechanism underlying our performance gains? We now validate our argument
+inSection4.2forconditioningonrelevancefunctionswhichmitigateoverfitting. Wequantifythe
+“dormantratio”(DR) (Sokaretal.,2023)overthecourseoflearningonthequadruped-walktask.
+DRisthefractionofinactiveneuronsinthepolicynetwork(i.e.activationsbelowsomethreshold).
+Priorworkhasshownthismetriceffectivelyquantifiesoverfittinginvalue-basedRL,wherehigher
+DRcorrelateswithpoliciesthatexecuteunmeaningfulactions(Sokaretal.,2023;Xuetal.,2023).
+AsweseeinFig.6a,theREDQbaselineexhibitshighandincreasingDRovertraining,indicating
+aggressiveoverfitting.ThisreflectstheunderperformanceofREDQonquadruped-walk.Crucially,our
+curiosity-PGRdisplaysalowandstableDR,whichincreasesonlymarginally(aftertaskperformance
+hassaturated,asseeninFig.4.) Moreover,ourDRremainsconsistentlybelowthatoftheuncondi-
+tionalSYNTHERbaseline. ThisfurthersuggestsourPGRgenerateshigher-relevancetransitionswith
+morediversity,andbetteraddressestheissueofoverfittingQ-functionstothesyntheticdata.
+HowdoescuriosityleadtoPGR’sreductioninoverfitting? Toshowthatconditioningoncuriosity
+contributestomitigatingoverfitting,wecharacterizethesignalweobtainfromF overtime. Specifi-
+cally,weexaminethecuriosity-PGRvariantonthequadruped-walktask,measuringthedistribution
+of F(s,a,s′,r) using Eq. (5) over 10K real transitions. We perform this evaluation every 10K
+timesteps,whichisthefrequencyatwhichweretrainourgenerativemodel. Forcomparison,wealso
+evaluatethistrainedF on10K realtransitionsencounteredbytheunconditionalSYNTHERbaseline.
+As we see in Fig. 6b, as early as 10K timesteps, immediately after the policy has been trained
+onthefirstbatchofsyntheticdata,thedistributionofcuriosityvaluesismoreleft-skewedforthe
+conditionalmodel. Thisdistributionbecomesincreasinglylong-tailedovertraining,suggestinga
+growingdiversityintheobservedstatesastrainingprogresses. Thisiscontrastedbytheincreased
+biasednessoftheunconditionaldistributiontowardslow-curiositytransitions. Thus,theagenttrained
+onsyntheticdatafromPGRislearningtomovetowardsenvironmentstatesthataremore“novel”over
+time,improvingdiversityinboththerealreplaybufferDrealaswellassyntheticreplaybufferDsyn.
+Asfurtherconfirmation,weseethat100K timesteps,theenvironmentisrelativelywell-explored,and
+curiosityvaluesfromF diminish,whichcorrelateswiththetaskrewardsaturationthatweobserve.
+WeconcludethatthisisultimatelythemechanismunderlyingtheimprovedsampleefficiencyofPGR.
+5.3 SCALINGPROPERTIES
+Finally,weperformaseriesofexperimentsexaminingthescalingbehaviorofourPGR,incomparison
+to the unconditional SYNTHER baseline. For baselines, we reduce the capacity of the diffusion
+modelinbothPGRandSYNTHERsuchthattheresultantpoliciesattainthesameperformanceasthe
+model-freeREDQbaselineonthequadruped-walktaskinDMC-100K(c.f.dashedlinesinFig.7).We
+9
+oitaR
+tnamroD
+ytisneD
+ytilibaborP
+ytisneD
+ytilibaborPBaseline Larger r = 0.5 r = 0.75 r = 0.875 Baseline UTD = 40
+Environment Steps Environment Steps Environment Steps
+Curiosity-PGR (ours) Unconditional Baseline (SynthER) REDQ
+(a) Larger Policy Network (b) Higher Synthetic Data Ratio 𝑟 (c) Combined, with higher UTD
+Figure7: ScalingbehavioronDMC-100Kquadruped-walk. PGR caneffectivelycombine(a)
+largernetworkswith(b)higherratiosofsyntheticdata,(c)allowingustotrainwithamuchhigher
+UTDof40. Incomparison,theunconditionalSYNTHERdoesnotscaleaswell,andcombining(a)
+and(b)actuallyunderperformsusingeitherindependently. Runsshownareaveragedover3seeds.
+thenintroduceasequenceofexperiments—firstincreasingthesizeofthepolicynetwork,holding
+syntheticdataconstant,thenincreasingboththeamountofsyntheticdataaswellashowaggressively
+werelyonthisdatafortraining. ResultsshowthatPGRleveragesconditionallygeneratedsynthetic
+datainamorescalablefashionthanSYNTHERisabletouseitsunconditionallygenerateddata.
+Networksize.WeemploytheexperimentalprotocolofSYNTHER(Luetal.,2024):forbothnetworks,
+weincreasethenumberofhiddenlayersfrom2to3,andtheirwidthsfrom256to512. Thisresults
+in∼6xmoreparameters,sowealsoincreasebatchsizefrom256to1024tomaintainper-parameter
+throughput. WeseeinFig.7athatthisimprovesboth PGR and SYNTHER, commensuratelywith
+REDQtrainedwithrealdata. Thisaffirmsthatthesyntheticdataisareasonablestand-inforrealdata.
+Amountofgenerativedata. Next,weanalyzethebehaviorofPGRandSYNTHERwhenvaryingthe
+fractionofgenerativedatausedperbatch. Thisbetteranswersthefullextenttowhichsyntheticdata
+canreplacerealdata. Recallourbaselinemodelsuseabatchsizeof256andasyntheticdataratior
+of0.5(i.e.everybatchhas128realand128generatedtransitions). Wenowdoublethebatchsizeto
+512andthento1024,eachtimescalingrto0.75and0.875,respectively. Thiskeepsthenumberof
+realtransitionsper-batchfixedat128,increasingonlythenumberofgeneratedtransitionsused.
+Wehypothesizethatourgeneratedtransitionsconditionedoncuriosityaremoreeffectiveforlearning
+thanSYNTHER’sunconditionalsynthetictransitions. Indeed,weobserveinFig.7bthatatr=0.75,
+PGRcontinuestoenjoysample-efficientlearning,whereasSYNTHERfailstoimproveassignificantly.
+Surprisingly,wefindthatbothPGRandSYNTHERfailcatastrophicallywhenthesyntheticdataratio
+ispushedto0.875. Whileusefulasamechanismtoaugmentpastonlineexperience,furtherworkis
+neededtocompletelysupplantrealenvironmentinteractionswithsyntheticones.
+Merging insights. Finally, we combine the above two insights, and show that this allows us to
+pushtheUTDratioofPGRtonewheights. ForbothSYNTHERandPGR,weagainuselargerMLPs
+toparameterizethepolicies,andasyntheticdataratioof0.75andbatchsizeof512. Finally,we
+double the UTD from 20 to 40, and the size of the synthetic data buffer Dsyn, from 1M to 2M
+transitions. Theideahereistopreserveaveragediversityofthesampledsynthetictransitions. We
+showinFig.7cPGRclearlyleveragesbothcomponents—largernetworksandmoregenerativedata—
+inacomplementaryfashiontoscalemoreeffectivelywithoutadditionalrealinteractions. Incontrast,
+SYNTHERactuallydegradesinperformancecomparedwithusingeithercomponentindependently.
+6 CONCLUSION
+Inthiswork,weproposePrioritizedGenerativeReplay(PGR): aparametric,prioritizedformulation
+ofanonlineagent’smemorybasedonanend-to-endlearnedconditionalgenerativemodel. PGRcon-
+ditionsonarelevancefunctionF toguidegenerationtowardsmorelearning-informativetransitions,
+improvingsampleefficiencyinbothstate-andpixel-basedtasks. Weshowthatitisnotconditional
+generationitself,butratherconditioningonthecorrectF thatiscritical. Weidentifycuriosityasthe
+rightchoiceforF,andprovideadecisiveanswerforwhy: curiosity-PGRimprovesthediversityof
+generativereplay,therebyreducingoverfittingtosyntheticdata. PGRalsoshowcasesapromising
+formulaforscalabletrainingusingsyntheticdata,openingupnewdirectionsingenerativeRL.
+10
+nruteR
+egarevAACKNOWLEDGMENTS
+TheauthorswouldliketothankQiyangLifordiscussiononexperimentaldesignforSection5.2.
+TheauthorswouldalsoliketothankQianqianWang,YifeiZhou,YossiGandelsmanandAlexPan
+forhelpfuleditsofpriordrafts. AmyLuandChungMinKimalsoprovidedcommentsonFig.1.
+RWissupportedinpartbytheNSERCPGS-DFellowship(no. 587282). KFissupportedinpartby
+anNationalScienceFoundationFellowshipforKF,undergrantNo. DGE2146752. Anyopinions,
+findings,andconclusionsorrecommendationsexpressedinthismaterialarethoseoftheauthor(s)
+anddonotnecessarilyreflecttheviewsoftheNSF.PAholdsconcurrentappointmentsasaProfessor
+atUCBerkeleyandasanAmazonScholar. ThispaperdescribesworkperformedatUCBerkeley
+andisnotassociatedwithAmazon.
+REFERENCES
+AnuragAjay,YilunDu,AbhiGupta,JoshuaTenenbaum,TommiJaakkola,andPulkitAgrawal.Iscon-
+ditionalgenerativemodelingallyouneedfordecision-making? arXivpreprintarXiv:2211.15657,
+2022. 3
+DavidAndre,NirFriedman,andRonaldParr. Generalizedprioritizedsweeping. Advancesinneural
+informationprocessingsystems,10,1997. 2
+GBrockman. Openaigym. arXivpreprintarXiv:1606.01540,2016. 6
+XiCao,HuaiyuWan,YoufangLin,andShengHan. High-valueprioritizedexperiencereplayfor
+off-policy reinforcement learning. In 2019 IEEE 31st International Conference on Tools with
+ArtificialIntelligence(ICTAI),pp.1510–1514.IEEE,2019. 2
+TingChen,RuixiangZHANG,andGeoffreyHinton. Analogbits: Generatingdiscretedatausing
+diffusionmodelswithself-conditioning. InTheEleventhInternationalConferenceonLearning
+Representations,2023. URLhttps://openreview.net/forum?id=3itjR9QxFw. 8
+XinyueChen,CheWang,ZijianZhou,andKeithRoss. Randomizedensembleddoubleq-learning:
+Learningfastwithoutamodel. arXivpreprintarXiv:2101.05982,2021. 6
+Kurtland Chua, Roberto Calandra, Rowan McAllister, and Sergey Levine. Deep reinforcement
+learninginahandfuloftrialsusingprobabilisticdynamicsmodels. Advancesinneuralinformation
+processingsystems,31,2018. 2
+ZihanDing,AmyZhang,YuandongTian,andQinqingZheng. Diffusionworldmodel. arXivpreprint
+arXiv:2402.03570,2024. 3
+YilunDuandKarthicNarasimhan. Task-agnosticdynamicspriorsfordeepreinforcementlearning.
+InInternationalConferenceonMachineLearning,pp.1696–1705.PMLR,2019. 4
+Frederik Ebert, Chelsea Finn, Sudeep Dasari, Annie Xie, Alex Lee, and Sergey Levine. Visual
+foresight: Model-based deep reinforcement learning for vision-based robotic control. arXiv
+preprintarXiv:1812.00568,2018. 2
+PatrickEsser,RobinRombach,andBjornOmmer. Tamingtransformersforhigh-resolutionimage
+synthesis. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,
+pp.12873–12883,2021. 6
+VladimirFeinberg,AlvinWan,IonStoica,MichaelIJordan,JosephEGonzalez,andSergeyLevine.
+Model-based value estimation for efficient model-free reinforcement learning. arXiv preprint
+arXiv:1803.00101,2018. 2
+JiashanGao,XiaohuiLi,WeihuiLiu,andJingchaoZhao. Prioritizedexperiencereplaymethodbased
+onexperiencereward. In2021InternationalConferenceonMachineLearningandIntelligent
+SystemsEngineering(MLISE),pp.214–219.IEEE,2021. 2
+ShixiangGu, TimothyLillicrap, IlyaSutskever, andSergeyLevine. Continuousdeepq-learning
+withmodel-basedacceleration. InInternationalconferenceonmachinelearning,pp.2829–2838.
+PMLR,2016. 2
+11DavidHaandJu¨rgenSchmidhuber. Worldmodels. arXivpreprintarXiv:1803.10122,2018. 2
+TuomasHaarnoja, AurickZhou, Pieter Abbeel, andSergey Levine. Softactor-critic: Off-policy
+maximumentropydeepreinforcementlearningwithastochasticactor. InInternationalconference
+onmachinelearning,pp.1861–1870.PMLR,2018. 6
+DanijarHafner,TimothyLillicrap,JimmyBa,andMohammadNorouzi. Dreamtocontrol: Learning
+behaviorsbylatentimagination. arXivpreprintarXiv:1912.01603,2019a. 2,3
+DanijarHafner,TimothyLillicrap,IanFischer,RubenVillegas,DavidHa,HonglakLee,andJames
+Davidson. Learninglatentdynamicsforplanningfrompixels. InInternationalconferenceon
+machinelearning,pp.2555–2565.PMLR,2019b. 2
+DanijarHafner, JurgisPasukonis, JimmyBa, andTimothyLillicrap. Masteringdiversedomains
+throughworldmodels. arXivpreprintarXiv:2301.04104,2023. 6
+HaoranHe,ChenjiaBai,KangXu,ZhuoranYang,WeinanZhang,DongWang,BinZhao,andXue-
+longLi. Diffusionmodelisaneffectiveplanneranddatasynthesizerformulti-taskreinforcement
+learning. Advancesinneuralinformationprocessingsystems,36,2024. 3
+JonathanHoandTimSalimans. Classifier-freediffusionguidance. arXivpreprintarXiv:2207.12598,
+2022. 3,8
+JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. Advancesin
+neuralinformationprocessingsystems,33:6840–6851,2020. 3
+Baris Imre. An investigation of generative replay in deep reinforcement learning. B.S. thesis,
+UniversityofTwente,2021. 3
+MichaelJanner,JustinFu,MarvinZhang,andSergeyLevine.Whentotrustyourmodel:Model-based
+policyoptimization. Advancesinneuralinformationprocessingsystems,32,2019. 2,6
+MichaelJanner,IgorMordatch,andSergeyLevine. gamma-models: Generativetemporaldifference
+learningforinfinite-horizonprediction. AdvancesinNeuralInformationProcessingSystems,33:
+1724–1735,2020. 2
+MichaelJanner,YilunDu,JoshuaBTenenbaum,andSergeyLevine. Planningwithdiffusionfor
+flexiblebehaviorsynthesis. arXivpreprintarXiv:2205.09991,2022. 3
+Steven Kapturowski, Georg Ostrovski, John Quan, Remi Munos, and Will Dabney. Recurrent
+experiencereplayindistributedreinforcementlearning. InInternationalconferenceonlearning
+representations,2018. 2
+IlyaKostrikov,DenisYarats,andRobFergus. Imageaugmentationisallyouneed: Regularizing
+deepreinforcementlearningfrompixels. arXivpreprintarXiv:2004.13649,2020. 6
+QiyangLi,AviralKumar,IlyaKostrikov,andSergeyLevine. Efficientdeepreinforcementlearning
+requiresregulatingoverfitting. arXivpreprintarXiv:2304.10466,2023. 6
+Long-JiLin. Self-improvingreactiveagentsbasedonreinforcementlearning,planningandteaching.
+Machinelearning,8:293–321,1992. 1
+CongLu,PhilipJBall,TimGJRudner,JackParker-Holder,MichaelAOsborne,andYeeWhyeTeh.
+Challengesandopportunitiesinofflinereinforcementlearningfromvisualobservations. arXiv
+preprintarXiv:2206.04779,2022. 6
+CongLu,PhilipBall,YeeWhyeTeh,andJackParker-Holder. Syntheticexperiencereplay. Advances
+inNeuralInformationProcessingSystems,36,2024. 3,6,8,10
+VolodymyrMnih,KorayKavukcuoglu,DavidSilver,AndreiARusu,JoelVeness,MarcGBellemare,
+AlexGraves,MartinRiedmiller,AndreasKFidjeland,GeorgOstrovski,etal. Human-levelcontrol
+throughdeepreinforcementlearning. nature,518(7540):529–533,2015. 1,5
+AndrewWMooreandChristopherGAtkeson. Prioritizedsweeping: Reinforcementlearningwith
+lessdataandlesstime. Machinelearning,13:103–130,1993. 2
+12EvgeniiNikishin,MaxSchwarzer,PierlucaD’Oro,Pierre-LucBacon,andAaronCourville. The
+primacybiasindeepreinforcementlearning. InInternationalconferenceonmachinelearning,pp.
+16828–16847.PMLR,2022. 5
+GuidoNovatiandPetrosKoumoutsakos.Rememberandforgetforexperiencereplay.InInternational
+ConferenceonMachineLearning,pp.4851–4860.PMLR,2019. 2
+Junhyuk Oh, Satinder Singh, and Honglak Lee. Value prediction network. Advances in neural
+informationprocessingsystems,30,2017. 2
+Pierre-YvesOudeyerandFredericKaplan. Whatisintrinsicmotivation? atypologyofcomputational
+approaches. Frontiersinneurorobotics,1:108,2007. 5
+DeepakPathak,PulkitAgrawal,AlexeiAEfros,andTrevorDarrell. Curiosity-drivenexploration
+byself-supervisedprediction. InInternationalconferenceonmachinelearning,pp.2778–2787.
+PMLR,2017. 5
+WilliamPeebles,IlijaRadosavovic,TimBrooks,AlexeiAEfros,andJitendraMalik. Learningto
+learnwithgenerativemodelsofneuralnetworkcheckpoints. arXivpreprintarXiv:2209.12892,
+2022. 6
+Aswin Raghavan, Jesse Hostetler, and Sek Chai. Generative memory for lifelong reinforcement
+learning. arXivpreprintarXiv:1902.08349,2019. 3
+MirzaRamicicandAndreaBonarini. Entropy-basedprioritizedsamplingindeepq-learning. In
+20172ndinternationalconferenceonimage,visionandcomputing(ICIVC),pp.1068–1072.IEEE,
+2017. 2
+MarcRigter,JunYamada,andIngmarPosner. Worldmodelsviapolicy-guidedtrajectorydiffusion.
+arXivpreprintarXiv:2312.08533,2023. 2
+TomSchaul,JohnQuan,IoannisAntonoglou,andDavidSilver. Prioritizedexperiencereplay. arXiv
+preprintarXiv:1511.05952,2015. 2,5,7
+Ju¨rgenSchmidhuber. Apossibilityforimplementingcuriosityandboredominmodel-buildingneural
+controllers. ProceedingsoftheFirstInternationalConferenceonSimulationofAdaptiveBehavior,
+1991. 5
+JulianSchrittwieser,IoannisAntonoglou,ThomasHubert,KarenSimonyan,LaurentSifre,Simon
+Schmitt,ArthurGuez,EdwardLockhart,DemisHassabis,ThoreGraepel,etal. Masteringatari,
+go,chessandshogibyplanningwithalearnedmodel. Nature,588(7839):604–609,2020. 2
+MaxSchwarzer,NitarshanRajkumar,MichaelNoukhovitch,AnkeshAnand,LaurentCharlin,RDe-
+vonHjelm,PhilipBachman,andAaronCCourville. Pretrainingrepresentationsfordata-efficient
+reinforcementlearning. AdvancesinNeuralInformationProcessingSystems,34:12686–12699,
+2021. 4
+HanulShin,JungKwonLee,JaehongKim,andJiwonKim. Continuallearningwithdeepgenerative
+replay. Advancesinneuralinformationprocessingsystems,30,2017. 2,3
+JaschaSohl-Dickstein,EricWeiss,NiruMaheswaranathan,andSuryaGanguli. Deepunsupervised
+learningusingnonequilibriumthermodynamics. InInternationalconferenceonmachinelearning,
+pp.2256–2265.PMLR,2015. 3
+GhadaSokar,RishabhAgarwal,PabloSamuelCastro,andUtkuEvci. Thedormantneuronphe-
+nomenonindeepreinforcementlearning. InInternationalConferenceonMachineLearning,pp.
+32145–32168.PMLR,2023. 9
+Alexander L Strehl and Michael L Littman. An analysis of model-based interval estimation for
+markovdecisionprocesses. JournalofComputerandSystemSciences,74(8):1309–1331,2008. 5
+ShivakanthSujit,SomjitNath,PedroBraga,andSamiraEbrahimiKahou. Prioritizingsamplesin
+reinforcementlearningwithreducibleloss. AdvancesinNeuralInformationProcessingSystems,
+36:23237–23258,2023. 2
+13RichardSSutton. Dyna,anintegratedarchitectureforlearning,planning,andreacting. ACMSigart
+Bulletin,2(4):160–163,1991. 2
+RichardSSuttonandAndrewGBarto. Reinforcementlearning: Anintroduction. MITpress,2018. 3
+SaranTunyasuvunakool,AlistairMuldal,YotamDoron,SiqiLiu,StevenBohez,JoshMerel,Tom
+Erez, Timothy Lillicrap, Nicolas Heess, and Yuval Tassa. dm control: Software and tasks for
+continuouscontrol. SoftwareImpacts,6:100022,2020. 6
+GuoweiXu, RuijieZheng, YongyuanLiang, XiyaoWang, ZhechengYuan, TianyingJi, YuLuo,
+XiaoyuLiu,JiaxinYuan,PuHua,etal. Drm: Masteringvisualreinforcementlearningthrough
+dormantratiominimization. arXivpreprintarXiv:2310.19668,2023. 9
+DenisYarats,RobFergus,AlessandroLazaric,andLerrelPinto. Masteringvisualcontinuouscontrol:
+Improveddata-augmentedreinforcementlearning. arXivpreprintarXiv:2107.09645,2021. 6
+WeiruiYe,ShaohuaiLiu,ThanardKurutach,PieterAbbeel,andYangGao. Masteringatarigames
+withlimiteddata. Advancesinneuralinformationprocessingsystems,34:25476–25488,2021. 2
+Chiyuan Zhang, Oriol Vinyals, Remi Munos, and Samy Bengio. A study on overfitting in deep
+reinforcementlearning. arXivpreprintarXiv:1804.06893,2018. 5
+ZhengbangZhu, HanyeZhao, HaoranHe, YichaoZhong, ShenyuZhang, YongYu, andWeinan
+Zhang. Diffusionmodelsforreinforcementlearning: Asurvey. arXivpreprintarXiv:2311.01223,
+2023. 3
+14
