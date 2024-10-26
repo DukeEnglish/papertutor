@@ -2,315 +2,345 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18077v1 |
-|title| ALTA: Compiler-Based Analysis of Transformers |
-|authors| Peter ShawJames CohanJacob EisensteinKenton LeeJonathan BerantKristina Toutanova
-|links| http://arxiv.org/abs/2410.18077v1 |
-|updated| 2024-10-23 17:58:49 UTC |
-|summary| We propose a new programming language called ALTA and a compiler that can mapALTA programs to Transformer weights. ALTA is inspired by RASP a languageproposed by Weiss et al. 2021 and Tracr Lindner et al. 2023 a compilerfrom RASP programs to Transformer weights. ALTA complements and extends thisprior work offering the ability to express loops and to compile programs toUniversal Transformers among other advantages. ALTA allows us toconstructively show how Transformers can represent length-invariant algorithmsfor computing parity and addition as well as a solution to the SCAN benchmarkof compositional generalization tasks without requiring intermediatescratchpad decoding steps. We also propose tools to analyze cases where theexpressibility of an algorithm is established but end-to-end training on agiven training set fails to induce behavior consistent with the desiredalgorithm. To this end we explore training from ALTA execution traces as amore fine-grained supervision signal. This enables additional experiments andtheoretical analyses relating the learnability of various algorithms to dataavailability and modeling decisions such as positional encodings. We make theALTA framework -- language specification symbolic interpreter and weightcompiler -- available to the community to enable further applications andinsights. |
+|idx| 2410.18976v1 |
+|title| CAMEL-Bench: A Comprehensive Arabic LMM Benchmark |
+|authors| Sara GhabouraAhmed HeaklOmkar ThawakarAli AlharthiInes RiahiAbduljalil SaifJorma LaaksonenFahad S. KhanSalman KhanRao M. Anwer
+|links| http://arxiv.org/abs/2410.18976v1 |
+|updated| 2024-10-24 17:59:38 UTC |
+|summary| Recent years have witnessed a significant interest in developing largemultimodal models LMMs capable of performing various visual reasoning andunderstanding tasks. This has led to the introduction of multiple LMMbenchmarks to evaluate LMMs on different tasks. However most existing LMMevaluation benchmarks are predominantly English-centric. In this work wedevelop a comprehensive LMM evaluation benchmark for the Arabic language torepresent a large population of over 400 million speakers. The proposedbenchmark named CAMEL-Bench comprises eight diverse domains and 38sub-domains including multi-image understanding complex visual perceptionhandwritten document understanding video understanding medical imaging plantdiseases and remote sensing-based land use understanding to evaluate broadscenario generalizability. Our CAMEL-Bench comprises around 29036 questionsthat are filtered from a larger pool of samples where the quality is manuallyverified by native speakers to ensure reliable model assessment. We conductevaluations of both closed-source including GPT-4 series and open-sourceLMMs. Our analysis reveals the need for substantial improvement especiallyamong the best open-source models with even the closed-source GPT-4o achievingan overall score of 62. Our benchmark and evaluation scripts are open-sourced. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18071v1 |
-|title| TP-Eval: Tap Multimodal LLMs' Potential in Evaluation by Customizing Prompts |
-|authors| Yuxuan XieTianhua LiWenqi ShaoKaipeng Zhang
-|links| http://arxiv.org/abs/2410.18071v1 |
-|updated| 2024-10-23 17:54:43 UTC |
-|summary| Recently multimodal large language models MLLMs have received muchattention for their impressive capabilities. The evaluation of MLLMs isbecoming critical to analyzing attributes of MLLMs and providing valuableinsights. However current benchmarks overlook the problem of promptsensitivity - minor prompt variations may lead to significant performancefluctuations. Thus inappropriate prompts may obscure the models capabilitiesunderestimating the models performance. Moreover different models havedifferent preferences for different prompts and thus using the same promptfor all models will cause evaluation bias. This paper analyzes this deficiencyin existing benchmarks and further introduces a new evaluation framework namedTP-Eval which introduces a prompt customization method to reduce evaluationbiases and tap models potential. TP-Eval will rewrite the original prompts todifferent customized prompts for different models. In particular we proposesome well-designed modules for prompt customization tailored to the scenario ofMLLM evaluation. Extensive experiments demonstrate the effectiveness of ourapproach to uncovering models capabilities and TP-Eval should benefit thecommunity in developing more comprehensive and convincing MLLM evaluationbenchmarks. |
+|idx| 2410.18975v1 |
+|title| Unbounded: A Generative Infinite Game of Character Life Simulation |
+|authors| Jialu LiYuanzhen LiNeal WadhwaYael PritchDavid E. JacobsMichael RubinsteinMohit BansalNataniel Ruiz
+|links| http://arxiv.org/abs/2410.18975v1 |
+|updated| 2024-10-24 17:59:31 UTC |
+|summary| We introduce the concept of a generative infinite game a video game thattranscends the traditional boundaries of finite hard-coded systems by usinggenerative models. Inspired by James P. Carses distinction between finite andinfinite games we leverage recent advances in generative AI to createUnbounded: a game of character life simulation that is fully encapsulated ingenerative models. Specifically Unbounded draws inspiration from sandbox lifesimulations and allows you to interact with your autonomous virtual characterin a virtual world by feeding playing with and guiding it - with open-endedmechanics generated by an LLM some of which can be emergent. In order todevelop Unbounded we propose technical innovations in both the LLM and visualgeneration domains. Specifically we present: 1 a specialized distilledlarge language model LLM that dynamically generates game mechanicsnarratives and character interactions in real-time and 2 a new dynamicregional image prompt Adapter IP-Adapter for vision models that ensuresconsistent yet flexible visual generation of a character across multipleenvironments. We evaluate our system through both qualitative and quantitativeanalysis showing significant improvements in character life simulation userinstruction following narrative coherence and visual consistency for bothcharacters and the environments compared to traditional related approaches. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18057v1 |
-|title| CLEAR: Character Unlearning in Textual and Visual Modalities |
-|authors| Alexey DontsovDmitrii KorzhAlexey ZhavoronkinBoris MikheevDenis BobkovAibek AlanovOleg Y. RogovIvan OseledetsElena Tutubalina
-|links| http://arxiv.org/abs/2410.18057v1 |
-|updated| 2024-10-23 17:30:50 UTC |
-|summary| Machine Unlearning MU is critical for enhancing privacy and security indeep learning models particularly in large multimodal language models MLLMsby removing specific private or hazardous information. While MU has madesignificant progress in textual and visual modalities multimodal unlearningMMU remains significantly underexplored partially due to the absence of asuitable open-source benchmark. To address this we introduce CLEAR a newbenchmark designed to evaluate MMU methods. CLEAR contains 200 fictitiousindividuals and 3700 images linked with corresponding question-answer pairsenabling a thorough evaluation across modalities. We assess 10 MU methodsadapting them for MMU and highlight new challenges specific to multimodalforgetting. We also demonstrate that simple ell_1 regularization on LoRAweights significantly mitigates catastrophic forgetting preserving modelperformance on retained data. The dataset is available athttps://huggingface.co/datasets/therem/CLEAR |
+|idx| 2410.18967v1 |
+|title| Ferret-UI 2: Mastering Universal User Interface Understanding Across Platforms |
+|authors| Zhangheng LiKeen YouHaotian ZhangDi FengHarsh AgrawalXiujun LiMohana Prasad Sathya MoorthyJeff NicholsYinfei YangZhe Gan
+|links| http://arxiv.org/abs/2410.18967v1 |
+|updated| 2024-10-24 17:58:31 UTC |
+|summary| Building a generalist model for user interface UI understanding ischallenging due to various foundational issues such as platform diversityresolution variation and data limitation. In this paper we introduceFerret-UI 2 a multimodal large language model MLLM designed for universal UIunderstanding across a wide range of platforms including iPhone AndroidiPad Webpage and AppleTV. Building on the foundation of Ferret-UI Ferret-UI2 introduces three key innovations: support for multiple platform typeshigh-resolution perception through adaptive scaling and advanced task trainingdata generation powered by GPT-4o with set-of-mark visual prompting. Theseadvancements enable Ferret-UI 2 to perform complex user-centered interactionsmaking it highly versatile and adaptable for the expanding diversity ofplatform ecosystems. Extensive empirical experiments on referring groundinguser-centric advanced tasks comprising 9 subtasks times 5 platforms GUIDEnext-action prediction dataset and GUI-World multi-platform benchmarkdemonstrate that Ferret-UI 2 significantly outperforms Ferret-UI and alsoshows strong cross-platform transfer capabilities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18050v1 |
-|title| LongRAG: A Dual-Perspective Retrieval-Augmented Generation Paradigm for Long-Context Question Answering |
-|authors| Qingfei ZhaoRuobing WangYukuo CenDaren ZhaShicheng TanYuxiao DongJie Tang
-|links| http://arxiv.org/abs/2410.18050v1 |
-|updated| 2024-10-23 17:24:58 UTC |
-|summary| Long-Context Question Answering LCQA a challenging task aims to reasonover long-context documents to yield accurate answers to questions. Existinglong-context Large Language Models LLMs for LCQA often struggle with thelost in the middle issue. Retrieval-Augmented Generation RAG mitigates thisissue by providing external factual evidence. However its chunking strategydisrupts the global long-context information and its low-quality retrieval inlong contexts hinders LLMs from identifying effective factual details due tosubstantial noise. To this end we propose LongRAG a generaldual-perspective and robust LLM-based RAG system paradigm for LCQA to enhanceRAGs understanding of complex long-context knowledge i.e. global informationand factual details. We design LongRAG as a plug-and-play paradigmfacilitating adaptation to various domains and LLMs. Extensive experiments onthree multi-hop datasets demonstrate that LongRAG significantly outperformslong-context LLMs up by 6.94 advanced RAG up by 6.16 and Vanilla RAGup by 17.25. Furthermore we conduct quantitative ablation studies andmulti-dimensional analyses highlighting the effectiveness of the systemscomponents and fine-tuning strategies. Data and code are available athttps://github.com/QingFei1/LongRAG. |
+|idx| 2410.18966v1 |
+|title| Does Data Contamination Detection Work (Well) for LLMs? A Survey and Evaluation on Detection Assumptions |
+|authors| Yujuan FuOzlem UzunerMeliha YetisgenFei Xia
+|links| http://arxiv.org/abs/2410.18966v1 |
+|updated| 2024-10-24 17:58:22 UTC |
+|summary| Large language models LLMs have demonstrated great performance acrossvarious benchmarks showing potential as general-purpose task solvers. Howeveras LLMs are typically trained on vast amounts of data a significant concern intheir evaluation is data contamination where overlap between training data andevaluation datasets inflates performance assessments. While multiple approacheshave been developed to identify data contamination these approaches rely onspecific assumptions that may not hold universally across different settings.To bridge this gap we systematically review 47 papers on data contaminationdetection categorize the underlying assumptions and assess whether they havebeen rigorously validated. We identify and analyze eight categories ofassumptions and test three of them as case studies. Our analysis reveals thatwhen classifying instances used for pretraining LLMs detection approachesbased on these three assumptions perform close to random guessing suggestingthat current LLMs learn data distributions rather than memorizing individualinstances. Overall this work underscores the importance of approaches clearlystating their underlying assumptions and testing their validity across variousscenarios. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18040v1 |
-|title| Key Algorithms for Keyphrase Generation: Instruction-Based LLMs for Russian Scientific Keyphrases |
-|authors| Anna GlazkovaDmitry MorozovTimur Garipov
-|links| http://arxiv.org/abs/2410.18040v1 |
-|updated| 2024-10-23 17:07:32 UTC |
-|summary| Keyphrase selection is a challenging task in natural language processing thathas a wide range of applications. Adapting existing supervised and unsupervisedsolutions for the Russian language faces several limitations due to the richmorphology of Russian and the limited number of training datasets available.Recent studies conducted on English texts show that large language modelsLLMs successfully address the task of generating keyphrases. LLMs allowachieving impressive results without task-specific fine-tuning using textprompts instead. In this work we access the performance of prompt-basedmethods for generating keyphrases for Russian scientific abstracts. First wecompare the performance of zero-shot and few-shot prompt-based methodsfine-tuned models and unsupervised methods. Then we assess strategies forselecting keyphrase examples in a few-shot setting. We present the outcomes ofhuman evaluation of the generated keyphrases and analyze the strengths andweaknesses of the models through expert assessment. Our results suggest thatprompt-based methods can outperform common baselines even using simple textprompts. |
+|idx| 2410.18963v1 |
+|title| OSCAR: Operating System Control via State-Aware Reasoning and Re-Planning |
+|authors| Xiaoqiang WangBang Liu
+|links| http://arxiv.org/abs/2410.18963v1 |
+|updated| 2024-10-24 17:58:08 UTC |
+|summary| Large language models LLMs and large multimodal models LMMs have showngreat potential in automating complex tasks like web browsing and gaming.However their ability to generalize across diverse applications remainslimited hindering broader utility. To address this challenge we presentOSCAR: Operating System Control via state-Aware reasoning and Re-planning.OSCAR is a generalist agent designed to autonomously navigate and interact withvarious desktop and mobile applications through standardized controls such asmouse and keyboard inputs while processing screen images to fulfill usercommands. OSCAR translates human instructions into executable Python codeenabling precise control over graphical user interfaces GUIs. To enhancestability and adaptability OSCAR operates as a state machine equipped witherror-handling mechanisms and dynamic task re-planning allowing it toefficiently adjust to real-time feedback and exceptions. We demonstrate OSCARseffectiveness through extensive experiments on diverse benchmarks acrossdesktop and mobile platforms where it transforms complex workflows into simplenatural language commands significantly boosting user productivity. Our codewill be open-source upon publication. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18077v1 |
-|title| ALTA: Compiler-Based Analysis of Transformers |
-|authors| Peter ShawJames CohanJacob EisensteinKenton LeeJonathan BerantKristina Toutanova
-|links| http://arxiv.org/abs/2410.18077v1 |
-|updated| 2024-10-23 17:58:49 UTC |
-|summary| We propose a new programming language called ALTA and a compiler that can mapALTA programs to Transformer weights. ALTA is inspired by RASP a languageproposed by Weiss et al. 2021 and Tracr Lindner et al. 2023 a compilerfrom RASP programs to Transformer weights. ALTA complements and extends thisprior work offering the ability to express loops and to compile programs toUniversal Transformers among other advantages. ALTA allows us toconstructively show how Transformers can represent length-invariant algorithmsfor computing parity and addition as well as a solution to the SCAN benchmarkof compositional generalization tasks without requiring intermediatescratchpad decoding steps. We also propose tools to analyze cases where theexpressibility of an algorithm is established but end-to-end training on agiven training set fails to induce behavior consistent with the desiredalgorithm. To this end we explore training from ALTA execution traces as amore fine-grained supervision signal. This enables additional experiments andtheoretical analyses relating the learnability of various algorithms to dataavailability and modeling decisions such as positional encodings. We make theALTA framework -- language specification symbolic interpreter and weightcompiler -- available to the community to enable further applications andinsights. |
+|idx| 2410.18979v1 |
+|title| PixelGaussian: Generalizable 3D Gaussian Reconstruction from Arbitrary Views |
+|authors| Xin FeiWenzhao ZhengYueqi DuanWei ZhanMasayoshi TomizukaKurt KeutzerJiwen Lu
+|links| http://arxiv.org/abs/2410.18979v1 |
+|updated| 2024-10-24 17:59:58 UTC |
+|summary| We propose PixelGaussian an efficient feed-forward framework for learninggeneralizable 3D Gaussian reconstruction from arbitrary views. Most existingmethods rely on uniform pixel-wise Gaussian representations which learn afixed number of 3D Gaussians for each view and cannot generalize well to moreinput views. Differently our PixelGaussian dynamically adapts both theGaussian distribution and quantity based on geometric complexity leading tomore efficient representations and significant improvements in reconstructionquality. Specifically we introduce a Cascade Gaussian Adapter to adjustGaussian distribution according to local geometry complexity identified by akeypoint scorer. CGA leverages deformable attention in context-awarehypernetworks to guide Gaussian pruning and splitting ensuring accuraterepresentation in complex regions while reducing redundancy. Furthermore wedesign a transformer-based Iterative Gaussian Refiner module that refinesGaussian representations through direct image-Gaussian interactions. OurPixelGaussian can effectively reduce Gaussian redundancy as input viewsincrease. We conduct extensive experiments on the large-scale ACID andRealEstate10K datasets where our method achieves state-of-the-art performancewith good generalization to various numbers of views. Code:https://github.com/Barrybarry-Smith/PixelGaussian. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18076v1 |
-|title| Leveraging Skills from Unlabeled Prior Data for Efficient Online Exploration |
-|authors| Max WilcoxsonQiyang LiKevin FransSergey Levine
-|links| http://arxiv.org/abs/2410.18076v1 |
-|updated| 2024-10-23 17:58:45 UTC |
-|summary| Unsupervised pretraining has been transformative in many supervised domains.However applying such ideas to reinforcement learning RL presents a uniquechallenge in that fine-tuning does not involve mimicking task-specific databut rather exploring and locating the solution through iterativeself-improvement. In this work we study how unlabeled prior trajectory datacan be leveraged to learn efficient exploration strategies. While prior datacan be used to pretrain a set of low-level skills or as additional off-policydata for online RL it has been unclear how to combine these ideas effectivelyfor online exploration. Our method SUPE Skills from Unlabeled Prior data forExploration demonstrates that a careful combination of these ideas compoundstheir benefits. Our method first extracts low-level skills using a variationalautoencoder VAE and then pseudo-relabels unlabeled trajectories using anoptimistic reward model transforming prior data into high-level task-relevantexamples. Finally SUPE uses these transformed examples as additionaloff-policy data for online RL to learn a high-level policy that composespretrained low-level skills to explore efficiently. We empirically show thatSUPE reliably outperforms prior strategies successfully solving a suite oflong-horizon sparse-reward tasks. Code: https://github.com/rail-berkeley/supe. |
+|idx| 2410.18976v1 |
+|title| CAMEL-Bench: A Comprehensive Arabic LMM Benchmark |
+|authors| Sara GhabouraAhmed HeaklOmkar ThawakarAli AlharthiInes RiahiAbduljalil SaifJorma LaaksonenFahad S. KhanSalman KhanRao M. Anwer
+|links| http://arxiv.org/abs/2410.18976v1 |
+|updated| 2024-10-24 17:59:38 UTC |
+|summary| Recent years have witnessed a significant interest in developing largemultimodal models LMMs capable of performing various visual reasoning andunderstanding tasks. This has led to the introduction of multiple LMMbenchmarks to evaluate LMMs on different tasks. However most existing LMMevaluation benchmarks are predominantly English-centric. In this work wedevelop a comprehensive LMM evaluation benchmark for the Arabic language torepresent a large population of over 400 million speakers. The proposedbenchmark named CAMEL-Bench comprises eight diverse domains and 38sub-domains including multi-image understanding complex visual perceptionhandwritten document understanding video understanding medical imaging plantdiseases and remote sensing-based land use understanding to evaluate broadscenario generalizability. Our CAMEL-Bench comprises around 29036 questionsthat are filtered from a larger pool of samples where the quality is manuallyverified by native speakers to ensure reliable model assessment. We conductevaluations of both closed-source including GPT-4 series and open-sourceLMMs. Our analysis reveals the need for substantial improvement especiallyamong the best open-source models with even the closed-source GPT-4o achievingan overall score of 62. Our benchmark and evaluation scripts are open-sourced. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18071v1 |
-|title| TP-Eval: Tap Multimodal LLMs' Potential in Evaluation by Customizing Prompts |
-|authors| Yuxuan XieTianhua LiWenqi ShaoKaipeng Zhang
-|links| http://arxiv.org/abs/2410.18071v1 |
-|updated| 2024-10-23 17:54:43 UTC |
-|summary| Recently multimodal large language models MLLMs have received muchattention for their impressive capabilities. The evaluation of MLLMs isbecoming critical to analyzing attributes of MLLMs and providing valuableinsights. However current benchmarks overlook the problem of promptsensitivity - minor prompt variations may lead to significant performancefluctuations. Thus inappropriate prompts may obscure the models capabilitiesunderestimating the models performance. Moreover different models havedifferent preferences for different prompts and thus using the same promptfor all models will cause evaluation bias. This paper analyzes this deficiencyin existing benchmarks and further introduces a new evaluation framework namedTP-Eval which introduces a prompt customization method to reduce evaluationbiases and tap models potential. TP-Eval will rewrite the original prompts todifferent customized prompts for different models. In particular we proposesome well-designed modules for prompt customization tailored to the scenario ofMLLM evaluation. Extensive experiments demonstrate the effectiveness of ourapproach to uncovering models capabilities and TP-Eval should benefit thecommunity in developing more comprehensive and convincing MLLM evaluationbenchmarks. |
+|idx| 2410.18975v1 |
+|title| Unbounded: A Generative Infinite Game of Character Life Simulation |
+|authors| Jialu LiYuanzhen LiNeal WadhwaYael PritchDavid E. JacobsMichael RubinsteinMohit BansalNataniel Ruiz
+|links| http://arxiv.org/abs/2410.18975v1 |
+|updated| 2024-10-24 17:59:31 UTC |
+|summary| We introduce the concept of a generative infinite game a video game thattranscends the traditional boundaries of finite hard-coded systems by usinggenerative models. Inspired by James P. Carses distinction between finite andinfinite games we leverage recent advances in generative AI to createUnbounded: a game of character life simulation that is fully encapsulated ingenerative models. Specifically Unbounded draws inspiration from sandbox lifesimulations and allows you to interact with your autonomous virtual characterin a virtual world by feeding playing with and guiding it - with open-endedmechanics generated by an LLM some of which can be emergent. In order todevelop Unbounded we propose technical innovations in both the LLM and visualgeneration domains. Specifically we present: 1 a specialized distilledlarge language model LLM that dynamically generates game mechanicsnarratives and character interactions in real-time and 2 a new dynamicregional image prompt Adapter IP-Adapter for vision models that ensuresconsistent yet flexible visual generation of a character across multipleenvironments. We evaluate our system through both qualitative and quantitativeanalysis showing significant improvements in character life simulation userinstruction following narrative coherence and visual consistency for bothcharacters and the environments compared to traditional related approaches. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18070v1 |
-|title| Training Free Guided Flow Matching with Optimal Control |
-|authors| Luran WangChaoran ChengYizhen LiaoYanru QuGe Liu
-|links| http://arxiv.org/abs/2410.18070v1 |
-|updated| 2024-10-23 17:53:11 UTC |
-|summary| Controlled generation with pre-trained Diffusion and Flow Matching models hasvast applications. One strategy for guiding ODE-based generative models isthrough optimizing a target loss Rx_1 while staying close to the priordistribution. Along this line some recent work showed the effectiveness ofguiding flow model by differentiating through its ODE sampling process. Despitethe superior performance the theoretical understanding of this line of methodsis still preliminary leaving space for algorithm improvement. Moreoverexisting methods predominately focus on Euclidean data manifold and there is acompelling need for guided flow methods on complex geometries such as SO3which prevails in high-stake scientific applications like protein design. Wepresent OC-Flow a general and theoretically grounded training-free frameworkfor guided flow matching using optimal control. Building upon advances inoptimal control theory we develop effective and practical algorithms forsolving optimal control in guided ODE-based generation and provide a systematictheoretical analysis of the convergence guarantee in both Euclidean and SO3.We show that existing backprop-through-ODE methods can be interpreted asspecial cases of Euclidean OC-Flow. OC-Flow achieved superior performance inextensive experiments on text-guided image manipulation conditional moleculegeneration and all-atom peptide design. |
+|idx| 2410.18974v1 |
+|title| 3D-Adapter: Geometry-Consistent Multi-View Diffusion for High-Quality 3D Generation |
+|authors| Hansheng ChenBokui ShenYulin LiuRuoxi ShiLinqi ZhouConnor Z. LinJiayuan GuHao SuGordon WetzsteinLeonidas Guibas
+|links| http://arxiv.org/abs/2410.18974v1 |
+|updated| 2024-10-24 17:59:30 UTC |
+|summary| Multi-view image diffusion models have significantly advanced open-domain 3Dobject generation. However most existing models rely on 2D networkarchitectures that lack inherent 3D biases resulting in compromised geometricconsistency. To address this challenge we introduce 3D-Adapter a plug-inmodule designed to infuse 3D geometry awareness into pretrained image diffusionmodels. Central to our approach is the idea of 3D feedback augmentation: foreach denoising step in the sampling loop 3D-Adapter decodes intermediatemulti-view features into a coherent 3D representation then re-encodes therendered RGBD views to augment the pretrained base model through featureaddition. We study two variants of 3D-Adapter: a fast feed-forward versionbased on Gaussian splatting and a versatile training-free version utilizingneural fields and meshes. Our extensive experiments demonstrate that 3D-Adapternot only greatly enhances the geometry quality of text-to-multi-view modelssuch as Instant3D and Zero123 but also enables high-quality 3D generationusing the plain text-to-image Stable Diffusion. Furthermore we showcase thebroad application potential of 3D-Adapter by presenting high quality results intext-to-3D image-to-3D text-to-texture and text-to-avatar tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18067v1 |
-|title| Beyond position: how rotary embeddings shape representations and memory in autoregressive transfomers |
-|authors| Valeria RuscioFabrizio Silvestri
-|links| http://arxiv.org/abs/2410.18067v1 |
-|updated| 2024-10-23 17:48:28 UTC |
-|summary| Rotary Positional Embeddings RoPE enhance positional encoding inTransformer models yet their full impact on model dynamics remainsunderexplored. This paper studies how RoPE introduces position-dependentrotations causing phase shifts in token embeddings that influencehigher-frequency components within the models internal representations.Through spectral analysis we demonstrate that RoPEs rotation matrices induceoscillatory behaviors in embeddings affecting information retention acrosslayers and shaping temporal modeling capabilities. We show that activationfunctions in feed-forward networks interact with RoPE-modulated embeddings togenerate harmonics leading to constructive or destructive interference basedon phase alignment. Our findings reveal that phase alignment amplifiesactivations and sharpens attention while misalignment weakens activations anddisrupts focus on positional patterns. This study underscores the importance offrequency components as intrinsic elements of model behavior offering newinsights beyond traditional analyses. |
+|idx| 2410.18972v1 |
+|title| Deep Insights into Cognitive Decline: A Survey of Leveraging Non-Intrusive Modalities with Deep Learning Techniques |
+|authors| David Ortiz-PerezManuel Benavent-LledoJose Garcia-RodriguezDavid TomásM. Flores Vizcaya-Moreno
+|links| http://arxiv.org/abs/2410.18972v1 |
+|updated| 2024-10-24 17:59:21 UTC |
+|summary| Cognitive decline is a natural part of aging often resulting in reducedcognitive abilities. In some cases however this decline is more pronouncedtypically due to disorders such as Alzheimers disease. Early detection ofanomalous cognitive decline is crucial as it can facilitate timelyprofessional intervention. While medical data can help in this detection itoften involves invasive procedures. An alternative approach is to employnon-intrusive techniques such as speech or handwriting analysis which do notnecessarily affect daily activities. This survey reviews the most relevantmethodologies that use deep learning techniques to automate the cognitivedecline estimation task including audio text and visual processing. Wediscuss the key features and advantages of each modality and methodologyincluding state-of-the-art approaches like Transformer architecture andfoundation models. In addition we present works that integrate differentmodalities to develop multimodal models. We also highlight the most significantdatasets and the quantitative results from studies using these resources. Fromthis review several conclusions emerge. In most cases the textual modalityachieves the best results and is the most relevant for detecting cognitivedecline. Moreover combining various approaches from individual modalities intoa multimodal model consistently enhances performance across nearly allscenarios. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18082v1 |
-|title| Prioritized Generative Replay |
-|authors| Renhao WangKevin FransPieter AbbeelSergey LevineAlexei A. Efros
-|links| http://arxiv.org/abs/2410.18082v1 |
-|updated| 2024-10-23 17:59:52 UTC |
-|summary| Sample-efficient online reinforcement learning often uses replay buffers tostore experience for reuse when updating the value function. However uniformreplay is inefficient since certain classes of transitions can be morerelevant to learning. While prioritization of more useful samples is helpfulthis strategy can also lead to overfitting as useful samples are likely to bemore rare. In this work we instead propose a prioritized parametric versionof an agents memory using generative models to capture online experience.This paradigm enables 1 densification of past experience with newgenerations that benefit from the generative models generalization capacityand 2 guidance via a family of relevance functions that push thesegenerations towards more useful parts of an agents acquired history. We showthis recipe can be instantiated using conditional diffusion models and simplerelevance functions such as curiosity- or value-based metrics. Our approachconsistently improves performance and sample efficiency in both state- andpixel-based domains. We expose the mechanisms underlying these gains showinghow guidance promotes diversity in our generated transitions and reducesoverfitting. We also showcase how our approach can train policies with evenhigher update-to-data ratios than before opening up avenues to better scaleonline RL agents. |
+|idx| 2410.18979v1 |
+|title| PixelGaussian: Generalizable 3D Gaussian Reconstruction from Arbitrary Views |
+|authors| Xin FeiWenzhao ZhengYueqi DuanWei ZhanMasayoshi TomizukaKurt KeutzerJiwen Lu
+|links| http://arxiv.org/abs/2410.18979v1 |
+|updated| 2024-10-24 17:59:58 UTC |
+|summary| We propose PixelGaussian an efficient feed-forward framework for learninggeneralizable 3D Gaussian reconstruction from arbitrary views. Most existingmethods rely on uniform pixel-wise Gaussian representations which learn afixed number of 3D Gaussians for each view and cannot generalize well to moreinput views. Differently our PixelGaussian dynamically adapts both theGaussian distribution and quantity based on geometric complexity leading tomore efficient representations and significant improvements in reconstructionquality. Specifically we introduce a Cascade Gaussian Adapter to adjustGaussian distribution according to local geometry complexity identified by akeypoint scorer. CGA leverages deformable attention in context-awarehypernetworks to guide Gaussian pruning and splitting ensuring accuraterepresentation in complex regions while reducing redundancy. Furthermore wedesign a transformer-based Iterative Gaussian Refiner module that refinesGaussian representations through direct image-Gaussian interactions. OurPixelGaussian can effectively reduce Gaussian redundancy as input viewsincrease. We conduct extensive experiments on the large-scale ACID andRealEstate10K datasets where our method achieves state-of-the-art performancewith good generalization to various numbers of views. Code:https://github.com/Barrybarry-Smith/PixelGaussian. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18077v1 |
-|title| ALTA: Compiler-Based Analysis of Transformers |
-|authors| Peter ShawJames CohanJacob EisensteinKenton LeeJonathan BerantKristina Toutanova
-|links| http://arxiv.org/abs/2410.18077v1 |
-|updated| 2024-10-23 17:58:49 UTC |
-|summary| We propose a new programming language called ALTA and a compiler that can mapALTA programs to Transformer weights. ALTA is inspired by RASP a languageproposed by Weiss et al. 2021 and Tracr Lindner et al. 2023 a compilerfrom RASP programs to Transformer weights. ALTA complements and extends thisprior work offering the ability to express loops and to compile programs toUniversal Transformers among other advantages. ALTA allows us toconstructively show how Transformers can represent length-invariant algorithmsfor computing parity and addition as well as a solution to the SCAN benchmarkof compositional generalization tasks without requiring intermediatescratchpad decoding steps. We also propose tools to analyze cases where theexpressibility of an algorithm is established but end-to-end training on agiven training set fails to induce behavior consistent with the desiredalgorithm. To this end we explore training from ALTA execution traces as amore fine-grained supervision signal. This enables additional experiments andtheoretical analyses relating the learnability of various algorithms to dataavailability and modeling decisions such as positional encodings. We make theALTA framework -- language specification symbolic interpreter and weightcompiler -- available to the community to enable further applications andinsights. |
+|idx| 2410.18976v1 |
+|title| CAMEL-Bench: A Comprehensive Arabic LMM Benchmark |
+|authors| Sara GhabouraAhmed HeaklOmkar ThawakarAli AlharthiInes RiahiAbduljalil SaifJorma LaaksonenFahad S. KhanSalman KhanRao M. Anwer
+|links| http://arxiv.org/abs/2410.18976v1 |
+|updated| 2024-10-24 17:59:38 UTC |
+|summary| Recent years have witnessed a significant interest in developing largemultimodal models LMMs capable of performing various visual reasoning andunderstanding tasks. This has led to the introduction of multiple LMMbenchmarks to evaluate LMMs on different tasks. However most existing LMMevaluation benchmarks are predominantly English-centric. In this work wedevelop a comprehensive LMM evaluation benchmark for the Arabic language torepresent a large population of over 400 million speakers. The proposedbenchmark named CAMEL-Bench comprises eight diverse domains and 38sub-domains including multi-image understanding complex visual perceptionhandwritten document understanding video understanding medical imaging plantdiseases and remote sensing-based land use understanding to evaluate broadscenario generalizability. Our CAMEL-Bench comprises around 29036 questionsthat are filtered from a larger pool of samples where the quality is manuallyverified by native speakers to ensure reliable model assessment. We conductevaluations of both closed-source including GPT-4 series and open-sourceLMMs. Our analysis reveals the need for substantial improvement especiallyamong the best open-source models with even the closed-source GPT-4o achievingan overall score of 62. Our benchmark and evaluation scripts are open-sourced. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18076v1 |
-|title| Leveraging Skills from Unlabeled Prior Data for Efficient Online Exploration |
-|authors| Max WilcoxsonQiyang LiKevin FransSergey Levine
-|links| http://arxiv.org/abs/2410.18076v1 |
-|updated| 2024-10-23 17:58:45 UTC |
-|summary| Unsupervised pretraining has been transformative in many supervised domains.However applying such ideas to reinforcement learning RL presents a uniquechallenge in that fine-tuning does not involve mimicking task-specific databut rather exploring and locating the solution through iterativeself-improvement. In this work we study how unlabeled prior trajectory datacan be leveraged to learn efficient exploration strategies. While prior datacan be used to pretrain a set of low-level skills or as additional off-policydata for online RL it has been unclear how to combine these ideas effectivelyfor online exploration. Our method SUPE Skills from Unlabeled Prior data forExploration demonstrates that a careful combination of these ideas compoundstheir benefits. Our method first extracts low-level skills using a variationalautoencoder VAE and then pseudo-relabels unlabeled trajectories using anoptimistic reward model transforming prior data into high-level task-relevantexamples. Finally SUPE uses these transformed examples as additionaloff-policy data for online RL to learn a high-level policy that composespretrained low-level skills to explore efficiently. We empirically show thatSUPE reliably outperforms prior strategies successfully solving a suite oflong-horizon sparse-reward tasks. Code: https://github.com/rail-berkeley/supe. |
+|idx| 2410.18975v1 |
+|title| Unbounded: A Generative Infinite Game of Character Life Simulation |
+|authors| Jialu LiYuanzhen LiNeal WadhwaYael PritchDavid E. JacobsMichael RubinsteinMohit BansalNataniel Ruiz
+|links| http://arxiv.org/abs/2410.18975v1 |
+|updated| 2024-10-24 17:59:31 UTC |
+|summary| We introduce the concept of a generative infinite game a video game thattranscends the traditional boundaries of finite hard-coded systems by usinggenerative models. Inspired by James P. Carses distinction between finite andinfinite games we leverage recent advances in generative AI to createUnbounded: a game of character life simulation that is fully encapsulated ingenerative models. Specifically Unbounded draws inspiration from sandbox lifesimulations and allows you to interact with your autonomous virtual characterin a virtual world by feeding playing with and guiding it - with open-endedmechanics generated by an LLM some of which can be emergent. In order todevelop Unbounded we propose technical innovations in both the LLM and visualgeneration domains. Specifically we present: 1 a specialized distilledlarge language model LLM that dynamically generates game mechanicsnarratives and character interactions in real-time and 2 a new dynamicregional image prompt Adapter IP-Adapter for vision models that ensuresconsistent yet flexible visual generation of a character across multipleenvironments. We evaluate our system through both qualitative and quantitativeanalysis showing significant improvements in character life simulation userinstruction following narrative coherence and visual consistency for bothcharacters and the environments compared to traditional related approaches. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18075v1 |
-|title| ProFL: Performative Robust Optimal Federated Learning |
-|authors| Xue ZhengTian XieXuwei TanAylin YenerXueru ZhangAli PayaniMyungjin Lee
-|links| http://arxiv.org/abs/2410.18075v1 |
-|updated| 2024-10-23 17:57:14 UTC |
-|summary| Performative prediction PP is a framework that captures distribution shiftsthat occur during the training of machine learning models due to theirdeployment. As the trained model is used its generated data could cause themodel to evolve leading to deviations from the original data distribution. Theimpact of such model-induced distribution shifts in the federated learning FLsetup remains unexplored despite being increasingly likely to transpire inreal-life use cases. Although Jin et al. 2024 recently extended PP to FL in astraightforward manner the resulting model only converges to a performativestable point which may be far from optimal. The methods in Izzo et al. 2021Miller et al. 2021 can find a performative optimal point in centralizedsettings but they require the performative risk to be convex and the trainingdata to be noiseless assumptions often violated in realistic FL systems. Thispaper overcomes all of these shortcomings and proposes Performative robustoptimal Federated Learning ProFL an algorithm that finds performativeoptimal points in FL from noisy and contaminated data. We present theconvergence analysis under the Polyak-Lojasiewicz condition which applies tonon-convex objectives. Extensive experiments on multiple datasets validate ourproposed algorithms efficiency. |
+|idx| 2410.18973v1 |
+|title| Tuning-free coreset Markov chain Monte Carlo |
+|authors| Naitong ChenJonathan H. HugginsTrevor Campbell
+|links| http://arxiv.org/abs/2410.18973v1 |
+|updated| 2024-10-24 17:59:23 UTC |
+|summary| A Bayesian coreset is a small weighted subset of a data set that replacesthe full data during inference to reduce computational cost. Thestate-of-the-art coreset construction algorithm Coreset Markov chain MonteCarlo Coreset MCMC uses draws from an adaptive Markov chain targeting thecoreset posterior to train the coreset weights via stochastic gradientoptimization. However the quality of the constructed coreset and thus thequality of its posterior approximation is sensitive to the stochasticoptimization learning rate. In this work we propose a learning-rate-freestochastic gradient optimization procedure Hot-start Distance over GradientHot DoG for training coreset weights in Coreset MCMC without user tuningeffort. Empirical results demonstrate that Hot DoG provides higher qualityposterior approximations than other learning-rate-free stochastic gradientmethods and performs competitively to optimally-tuned ADAM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18074v1 |
-|title| UnCLe: Unsupervised Continual Learning of Depth Completion |
-|authors| Suchisrit GangopadhyayXien ChenMichael ChuPatrick RimHyoungseob ParkAlex Wong
-|links| http://arxiv.org/abs/2410.18074v1 |
-|updated| 2024-10-23 17:56:33 UTC |
-|summary| We propose UnCLe a standardized benchmark for Unsupervised ContinualLearning of a multimodal depth estimation task: Depth completion aims to infera dense depth map from a pair of synchronized RGB image and sparse depth map.We benchmark depth completion models under the practical scenario ofunsupervised learning over continuous streams of data. Existing methods aretypically trained on a static or stationary dataset. However when adaptingto novel non-stationary distributions they catastrophically forgetpreviously learned information. UnCLe simulates these non-stationarydistributions by adapting depth completion models to sequences of datasetscontaining diverse scenes captured from distinct domains using different visualand range sensors. We adopt representative methods from continual learningparadigms and translate them to enable unsupervised continual learning of depthcompletion. We benchmark these models for indoor and outdoor and investigatethe degree of catastrophic forgetting through standard quantitative metrics.Furthermore we introduce model inversion quality as an additional measure offorgetting. We find that unsupervised continual learning of depth completion isan open problem and we invite researchers to leverage UnCLe as a developmentplatform. |
+|idx| 2410.18972v1 |
+|title| Deep Insights into Cognitive Decline: A Survey of Leveraging Non-Intrusive Modalities with Deep Learning Techniques |
+|authors| David Ortiz-PerezManuel Benavent-LledoJose Garcia-RodriguezDavid TomásM. Flores Vizcaya-Moreno
+|links| http://arxiv.org/abs/2410.18972v1 |
+|updated| 2024-10-24 17:59:21 UTC |
+|summary| Cognitive decline is a natural part of aging often resulting in reducedcognitive abilities. In some cases however this decline is more pronouncedtypically due to disorders such as Alzheimers disease. Early detection ofanomalous cognitive decline is crucial as it can facilitate timelyprofessional intervention. While medical data can help in this detection itoften involves invasive procedures. An alternative approach is to employnon-intrusive techniques such as speech or handwriting analysis which do notnecessarily affect daily activities. This survey reviews the most relevantmethodologies that use deep learning techniques to automate the cognitivedecline estimation task including audio text and visual processing. Wediscuss the key features and advantages of each modality and methodologyincluding state-of-the-art approaches like Transformer architecture andfoundation models. In addition we present works that integrate differentmodalities to develop multimodal models. We also highlight the most significantdatasets and the quantitative results from studies using these resources. Fromthis review several conclusions emerge. In most cases the textual modalityachieves the best results and is the most relevant for detecting cognitivedecline. Moreover combining various approaches from individual modalities intoa multimodal model consistently enhances performance across nearly allscenarios. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18084v1 |
-|title| DynamicCity: Large-Scale LiDAR Generation from Dynamic Scenes |
-|authors| Hengwei BianLingdong KongHaozhe XieLiang PanYu QiaoZiwei Liu
-|links| http://arxiv.org/abs/2410.18084v1 |
-|updated| 2024-10-23 17:59:58 UTC |
-|summary| LiDAR scene generation has been developing rapidly recently. Howeverexisting methods primarily focus on generating static and single-frame scenesoverlooking the inherently dynamic nature of real-world driving environments.In this work we introduce DynamicCity a novel 4D LiDAR generation frameworkcapable of generating large-scale high-quality LiDAR scenes that capture thetemporal evolution of dynamic environments. DynamicCity mainly consists of twokey models. 1 A VAE model for learning HexPlane as the compact 4Drepresentation. Instead of using naive averaging operations DynamicCityemploys a novel Projection Module to effectively compress 4D LiDAR featuresinto six 2D feature maps for HexPlane construction which significantlyenhances HexPlane fitting quality up to 12.56 mIoU gain. Furthermore weutilize an Expansion  Squeeze Strategy to reconstruct 3D feature volumes inparallel which improves both network training efficiency and reconstructionaccuracy than naively querying each 3D point up to 7.05 mIoU gain 2.06xtraining speedup and 70.84 memory reduction. 2 A DiT-based diffusion modelfor HexPlane generation. To make HexPlane feasible for DiT generation a PaddedRollout Operation is proposed to reorganize all six feature planes of theHexPlane as a squared 2D feature map. In particular various conditions couldbe introduced in the diffusion or sampling process supporting versatile 4Dgeneration applications such as trajectory- and command-driven generationinpainting and layout-conditioned generation. Extensive experiments on theCarlaSC and Waymo datasets demonstrate that DynamicCity significantlyoutperforms existing state-of-the-art 4D LiDAR generation methods acrossmultiple metrics. The code will be released to facilitate future research. |
+|idx| 2410.18979v1 |
+|title| PixelGaussian: Generalizable 3D Gaussian Reconstruction from Arbitrary Views |
+|authors| Xin FeiWenzhao ZhengYueqi DuanWei ZhanMasayoshi TomizukaKurt KeutzerJiwen Lu
+|links| http://arxiv.org/abs/2410.18979v1 |
+|updated| 2024-10-24 17:59:58 UTC |
+|summary| We propose PixelGaussian an efficient feed-forward framework for learninggeneralizable 3D Gaussian reconstruction from arbitrary views. Most existingmethods rely on uniform pixel-wise Gaussian representations which learn afixed number of 3D Gaussians for each view and cannot generalize well to moreinput views. Differently our PixelGaussian dynamically adapts both theGaussian distribution and quantity based on geometric complexity leading tomore efficient representations and significant improvements in reconstructionquality. Specifically we introduce a Cascade Gaussian Adapter to adjustGaussian distribution according to local geometry complexity identified by akeypoint scorer. CGA leverages deformable attention in context-awarehypernetworks to guide Gaussian pruning and splitting ensuring accuraterepresentation in complex regions while reducing redundancy. Furthermore wedesign a transformer-based Iterative Gaussian Refiner module that refinesGaussian representations through direct image-Gaussian interactions. OurPixelGaussian can effectively reduce Gaussian redundancy as input viewsincrease. We conduct extensive experiments on the large-scale ACID andRealEstate10K datasets where our method achieves state-of-the-art performancewith good generalization to various numbers of views. Code:https://github.com/Barrybarry-Smith/PixelGaussian. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18083v1 |
-|title| FIPER: Generalizable Factorized Fields for Joint Image Compression and Super-Resolution |
-|authors| Yang-Che SunCheng Yu YeoErnie ChuJun-Cheng ChenYu-Lun Liu
-|links| http://arxiv.org/abs/2410.18083v1 |
-|updated| 2024-10-23 17:59:57 UTC |
-|summary| In this work we propose a unified representation for Super-Resolution SRand Image Compression termed Factorized Fields motivated by the sharedprinciples between these two tasks. Both SISR and Image Compression requirerecovering and preserving fine image details--whether by enhancing resolutionor reconstructing compressed data. Unlike previous methods that mainly focus onnetwork architecture our proposed approach utilizes a basis-coefficientdecomposition to explicitly capture multi-scale visual features and structuralcomponents in images addressing the core challenges of both tasks. We firstderive our SR model which includes a Coefficient Backbone and Basis SwinTransformer for generalizable Factorized Fields. Then to further unify thesetwo tasks we leverage the strong information-recovery capabilities of thetrained SR modules as priors in the compression pipeline improving bothcompression efficiency and detail reconstruction. Additionally we introduce amerged-basis compression branch that consolidates shared structures furtheroptimizing the compression process. Extensive experiments show that our unifiedrepresentation delivers state-of-the-art performance achieving an averagerelative improvement of 204.4 in PSNR over the baseline in Super-ResolutionSR and 9.35 BD-rate reduction in Image Compression compared to the previousSOTA. |
+|idx| 2410.18978v1 |
+|title| Framer: Interactive Frame Interpolation |
+|authors| Wen WangQiuyu WangKecheng ZhengHao OuyangZhekai ChenBiao GongHao ChenYujun ShenChunhua Shen
+|links| http://arxiv.org/abs/2410.18978v1 |
+|updated| 2024-10-24 17:59:51 UTC |
+|summary| We propose Framer for interactive frame interpolation which targetsproducing smoothly transitioning frames between two images as per usercreativity. Concretely besides taking the start and end frames as inputs ourapproach supports customizing the transition process by tailoring thetrajectory of some selected keypoints. Such a design enjoys two clear benefits.First incorporating human interaction mitigates the issue arising fromnumerous possibilities of transforming one image to another and in turnenables finer control of local motions. Second as the most basic form ofinteraction keypoints help establish the correspondence across framesenhancing the model to handle challenging cases e.g. objects on the start andend frames are of different shapes and styles. It is noteworthy that oursystem also offers an autopilot mode where we introduce a module to estimatethe keypoints and refine the trajectory automatically to simplify the usage inpractice. Extensive experimental results demonstrate the appealing performanceof Framer on various applications such as image morphing time-lapse videogeneration cartoon interpolation etc. The code the model and the interfacewill be released to facilitate further research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18079v1 |
-|title| FreeVS: Generative View Synthesis on Free Driving Trajectory |
-|authors| Qitai WangLue FanYuqi WangYuntao ChenZhaoxiang Zhang
-|links| http://arxiv.org/abs/2410.18079v1 |
-|updated| 2024-10-23 17:59:11 UTC |
-|summary| Existing reconstruction-based novel view synthesis methods for driving scenesfocus on synthesizing camera views along the recorded trajectory of the egovehicle. Their image rendering performance will severely degrade on viewpointsfalling out of the recorded trajectory where camera rays are untrained. Wepropose FreeVS a novel fully generative approach that can synthesize cameraviews on free new trajectories in real driving scenes. To control thegeneration results to be 3D consistent with the real scenes and accurate inviewpoint pose we propose the pseudo-image representation of view priors tocontrol the generation process. Viewpoint transformation simulation is appliedon pseudo-images to simulate camera movement in each direction. Once trainedFreeVS can be applied to any validation sequences without reconstructionprocess and synthesis views on novel trajectories. Moreover we propose two newchallenging benchmarks tailored to driving scenes which are novel camerasynthesis and novel trajectory synthesis emphasizing the freedom ofviewpoints. Given that no ground truth images are available on noveltrajectories we also propose to evaluate the consistency of images synthesizedon novel trajectories with 3D perception models. Experiments on the Waymo OpenDataset show that FreeVS has a strong image synthesis performance on both therecorded trajectories and novel trajectories. Project Page:https://freevs24.github.io/ |
+|idx| 2410.18977v1 |
+|title| MotionCLR: Motion Generation and Training-free Editing via Understanding Attention Mechanisms |
+|authors| Ling-Hao ChenWenxun DaiXuan JuShunlin LuLei Zhang
+|links| http://arxiv.org/abs/2410.18977v1 |
+|updated| 2024-10-24 17:59:45 UTC |
+|summary| This research delves into the problem of interactive editing of human motiongeneration. Previous motion diffusion models lack explicit modeling of theword-level text-motion correspondence and good explainability hencerestricting their fine-grained editing ability. To address this issue wepropose an attention-based motion diffusion model namely MotionCLR with CLeaRmodeling of attention mechanisms. Technically MotionCLR models the in-modalityand cross-modality interactions with self-attention and cross-attentionrespectively. More specifically the self-attention mechanism aims to measurethe sequential similarity between frames and impacts the order of motionfeatures. By contrast the cross-attention mechanism works to find thefine-grained word-sequence correspondence and activate the correspondingtimesteps in the motion sequence. Based on these key properties we develop aversatile set of simple yet effective motion editing methods via manipulatingattention maps such as motion de-emphasizing in-place motion replacementand example-based motion generation etc. For further verification of theexplainability of the attention mechanism we additionally explore thepotential of action-counting and grounded motion generation ability viaattention maps. Our experimental results show that our method enjoys goodgeneration and editing ability with good explainability. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18074v1 |
-|title| UnCLe: Unsupervised Continual Learning of Depth Completion |
-|authors| Suchisrit GangopadhyayXien ChenMichael ChuPatrick RimHyoungseob ParkAlex Wong
-|links| http://arxiv.org/abs/2410.18074v1 |
-|updated| 2024-10-23 17:56:33 UTC |
-|summary| We propose UnCLe a standardized benchmark for Unsupervised ContinualLearning of a multimodal depth estimation task: Depth completion aims to infera dense depth map from a pair of synchronized RGB image and sparse depth map.We benchmark depth completion models under the practical scenario ofunsupervised learning over continuous streams of data. Existing methods aretypically trained on a static or stationary dataset. However when adaptingto novel non-stationary distributions they catastrophically forgetpreviously learned information. UnCLe simulates these non-stationarydistributions by adapting depth completion models to sequences of datasetscontaining diverse scenes captured from distinct domains using different visualand range sensors. We adopt representative methods from continual learningparadigms and translate them to enable unsupervised continual learning of depthcompletion. We benchmark these models for indoor and outdoor and investigatethe degree of catastrophic forgetting through standard quantitative metrics.Furthermore we introduce model inversion quality as an additional measure offorgetting. We find that unsupervised continual learning of depth completion isan open problem and we invite researchers to leverage UnCLe as a developmentplatform. |
+|idx| 2410.18976v1 |
+|title| CAMEL-Bench: A Comprehensive Arabic LMM Benchmark |
+|authors| Sara GhabouraAhmed HeaklOmkar ThawakarAli AlharthiInes RiahiAbduljalil SaifJorma LaaksonenFahad S. KhanSalman KhanRao M. Anwer
+|links| http://arxiv.org/abs/2410.18976v1 |
+|updated| 2024-10-24 17:59:38 UTC |
+|summary| Recent years have witnessed a significant interest in developing largemultimodal models LMMs capable of performing various visual reasoning andunderstanding tasks. This has led to the introduction of multiple LMMbenchmarks to evaluate LMMs on different tasks. However most existing LMMevaluation benchmarks are predominantly English-centric. In this work wedevelop a comprehensive LMM evaluation benchmark for the Arabic language torepresent a large population of over 400 million speakers. The proposedbenchmark named CAMEL-Bench comprises eight diverse domains and 38sub-domains including multi-image understanding complex visual perceptionhandwritten document understanding video understanding medical imaging plantdiseases and remote sensing-based land use understanding to evaluate broadscenario generalizability. Our CAMEL-Bench comprises around 29036 questionsthat are filtered from a larger pool of samples where the quality is manuallyverified by native speakers to ensure reliable model assessment. We conductevaluations of both closed-source including GPT-4 series and open-sourceLMMs. Our analysis reveals the need for substantial improvement especiallyamong the best open-source models with even the closed-source GPT-4o achievingan overall score of 62. Our benchmark and evaluation scripts are open-sourced. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18072v1 |
-|title| WorldSimBench: Towards Video Generation Models as World Simulators |
-|authors| Yiran QinZhelun ShiJiwen YuXijun WangEnshen ZhouLijun LiZhenfei YinXihui LiuLu ShengJing ShaoLei BaiWanli OuyangRuimao Zhang
-|links| http://arxiv.org/abs/2410.18072v1 |
-|updated| 2024-10-23 17:56:11 UTC |
-|summary| Recent advancements in predictive models have demonstrated exceptionalcapabilities in predicting the future state of objects and scenes. However thelack of categorization based on inherent characteristics continues to hinderthe progress of predictive model development. Additionally existing benchmarksare unable to effectively evaluate higher-capability highly embodiedpredictive models from an embodied perspective. In this work we classify thefunctionalities of predictive models into a hierarchy and take the first stepin evaluating World Simulators by proposing a dual evaluation framework calledWorldSimBench. WorldSimBench includes Explicit Perceptual Evaluation andImplicit Manipulative Evaluation encompassing human preference assessmentsfrom the visual perspective and action-level evaluations in embodied taskscovering three representative embodied scenarios: Open-Ended EmbodiedEnvironment Autonomous Driving and Robot Manipulation. In the ExplicitPerceptual Evaluation we introduce the HF-Embodied Dataset a video assessmentdataset based on fine-grained human feedback which we use to train a HumanPreference Evaluator that aligns with human perception and explicitly assessesthe visual fidelity of World Simulators. In the Implicit ManipulativeEvaluation we assess the video-action consistency of World Simulators byevaluating whether the generated situation-aware video can be accuratelytranslated into the correct control signals in dynamic environments. Ourcomprehensive evaluation offers key insights that can drive further innovationin video generation models positioning World Simulators as a pivotaladvancement toward embodied artificial intelligence. |
+|idx| 2410.18975v1 |
+|title| Unbounded: A Generative Infinite Game of Character Life Simulation |
+|authors| Jialu LiYuanzhen LiNeal WadhwaYael PritchDavid E. JacobsMichael RubinsteinMohit BansalNataniel Ruiz
+|links| http://arxiv.org/abs/2410.18975v1 |
+|updated| 2024-10-24 17:59:31 UTC |
+|summary| We introduce the concept of a generative infinite game a video game thattranscends the traditional boundaries of finite hard-coded systems by usinggenerative models. Inspired by James P. Carses distinction between finite andinfinite games we leverage recent advances in generative AI to createUnbounded: a game of character life simulation that is fully encapsulated ingenerative models. Specifically Unbounded draws inspiration from sandbox lifesimulations and allows you to interact with your autonomous virtual characterin a virtual world by feeding playing with and guiding it - with open-endedmechanics generated by an LLM some of which can be emergent. In order todevelop Unbounded we propose technical innovations in both the LLM and visualgeneration domains. Specifically we present: 1 a specialized distilledlarge language model LLM that dynamically generates game mechanicsnarratives and character interactions in real-time and 2 a new dynamicregional image prompt Adapter IP-Adapter for vision models that ensuresconsistent yet flexible visual generation of a character across multipleenvironments. We evaluate our system through both qualitative and quantitativeanalysis showing significant improvements in character life simulation userinstruction following narrative coherence and visual consistency for bothcharacters and the environments compared to traditional related approaches. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18076v1 |
-|title| Leveraging Skills from Unlabeled Prior Data for Efficient Online Exploration |
-|authors| Max WilcoxsonQiyang LiKevin FransSergey Levine
-|links| http://arxiv.org/abs/2410.18076v1 |
-|updated| 2024-10-23 17:58:45 UTC |
-|summary| Unsupervised pretraining has been transformative in many supervised domains.However applying such ideas to reinforcement learning RL presents a uniquechallenge in that fine-tuning does not involve mimicking task-specific databut rather exploring and locating the solution through iterativeself-improvement. In this work we study how unlabeled prior trajectory datacan be leveraged to learn efficient exploration strategies. While prior datacan be used to pretrain a set of low-level skills or as additional off-policydata for online RL it has been unclear how to combine these ideas effectivelyfor online exploration. Our method SUPE Skills from Unlabeled Prior data forExploration demonstrates that a careful combination of these ideas compoundstheir benefits. Our method first extracts low-level skills using a variationalautoencoder VAE and then pseudo-relabels unlabeled trajectories using anoptimistic reward model transforming prior data into high-level task-relevantexamples. Finally SUPE uses these transformed examples as additionaloff-policy data for online RL to learn a high-level policy that composespretrained low-level skills to explore efficiently. We empirically show thatSUPE reliably outperforms prior strategies successfully solving a suite oflong-horizon sparse-reward tasks. Code: https://github.com/rail-berkeley/supe. |
+|idx| 2410.18959v1 |
+|title| Context is Key: A Benchmark for Forecasting with Essential Textual Information |
+|authors| Andrew Robert WilliamsArjun AshokÉtienne MarcotteValentina ZantedeschiJithendaraa SubramanianRoland RiachiJames RequeimaAlexandre LacosteIrina RishNicolas ChapadosAlexandre Drouin
+|links| http://arxiv.org/abs/2410.18959v1 |
+|updated| 2024-10-24 17:56:08 UTC |
+|summary| Forecasting is a critical task in decision making across various domains.While numerical data provides a foundation it often lacks crucial contextnecessary for accurate predictions. Human forecasters frequently rely onadditional information such as background knowledge or constraints which canbe efficiently communicated through natural language. However the ability ofexisting forecasting models to effectively integrate this textual informationremains an open question. To address this we introduce Context is Key CiKa time series forecasting benchmark that pairs numerical data with diversetypes of carefully crafted textual context requiring models to integrate bothmodalities. We evaluate a range of approaches including statistical modelstime series foundation models and LLM-based forecasters and propose a simpleyet effective LLM prompting method that outperforms all other tested methods onour benchmark. Our experiments highlight the importance of incorporatingcontextual information demonstrate surprising performance when using LLM-basedforecasting models and also reveal some of their critical shortcomings. Bypresenting this benchmark we aim to advance multimodal forecasting promotingmodels that are both accurate and accessible to decision-makers with variedtechnical expertise. The benchmark can be visualized athttps://servicenow.github.io/context-is-key-forecasting/v0/ . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17998v2 |
-|title| Estimating the Spectral Moments of the Kernel Integral Operator from Finite Sample Matrices |
-|authors| Chanwoo ChunSueYeon ChungDaniel D. Lee
-|links| http://arxiv.org/abs/2410.17998v2 |
-|updated| 2024-10-24 17:47:20 UTC |
-|summary| Analyzing the structure of sampled features from an input data distributionis challenging when constrained by limited measurements in both the number ofinputs and features. Traditional approaches often rely on the eigenvaluespectrum of the sample covariance matrix derived from finite measurementmatrices however these spectra are sensitive to the size of the measurementmatrix leading to biased insights. In this paper we introduce a novelalgorithm that provides unbiased estimates of the spectral moments of thekernel integral operator in the limit of infinite inputs and features fromfinitely sampled measurement matrices. Our method based on dynamicprogramming is efficient and capable of estimating the moments of the operatorspectrum. We demonstrate the accuracy of our estimator on radial basis functionRBF kernels highlighting its consistency with the theoretical spectra.Furthermore we showcase the practical utility and robustness of our method inunderstanding the geometry of learned representations in neural networks. |
+|idx| 2410.18938v1 |
+|title| A Random Matrix Theory Perspective on the Spectrum of Learned Features and Asymptotic Generalization Capabilities |
+|authors| Yatin DandiLuca PesceHugo CuiFlorent KrzakalaYue M. LuBruno Loureiro
+|links| http://arxiv.org/abs/2410.18938v1 |
+|updated| 2024-10-24 17:24:34 UTC |
+|summary| A key property of neural networks is their capacity of adapting to dataduring training. Yet our current mathematical understanding of featurelearning and its relationship to generalization remain limited. In this workwe provide a random matrix analysis of how fully-connected two-layer neuralnetworks adapt to the target function after a single but aggressive gradientdescent step. We rigorously establish the equivalence between the updatedfeatures and an isotropic spiked random feature model in the limit of largebatch size. For the latter model we derive a deterministic equivalentdescription of the feature empirical covariance matrix in terms of certainlow-dimensional operators. This allows us to sharply characterize the impact oftraining in the asymptotic feature spectrum and in particular provides atheoretical grounding for how the tails of the feature spectrum modify withtraining. The deterministic equivalent further yields the exact asymptoticgeneralization error shedding light on the mechanisms behind its improvementin the presence of feature learning. Our result goes beyond standard randommatrix ensembles and therefore we believe it is of independent technicalinterest. Different from previous work our result holds in the challengingmaximal learning rate regime is fully rigorous and allows for finitelysupported second layer initialization which turns out to be crucial forstudying the functional expressivity of the learned features. This provides asharp description of the impact of feature learning in the generalization oftwo-layer neural networks beyond the random features and lazy trainingregimes. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17935v1 |
-|title| Semi-Implicit Functional Gradient Flow |
-|authors| Shiyue ZhangZiheng ChengCheng Zhang
-|links| http://arxiv.org/abs/2410.17935v1 |
-|updated| 2024-10-23 15:00:30 UTC |
-|summary| Particle-based variational inference methods ParVIs use non-parametricvariational families represented by particles to approximate the targetdistribution according to the kernelized Wasserstein gradient flow for theKullback-Leibler KL divergence. Recent works introduce functional gradientflows to substitute the kernel for better flexibility. However thedeterministic updating mechanism may suffer from limited exploration andrequire expensive repetitive runs for new samples. In this paper we proposeSemi-Implicit Functional Gradient flow SIFG a functional gradient ParVImethod that uses perturbed particles as the approximation family. Thecorresponding functional gradient flow which can be estimated via denoisingscore matching exhibits strong theoretical convergence guarantee. We alsopresent an adaptive version of our method to automatically choose the suitablenoise magnitude. Extensive experiments demonstrate the effectiveness andefficiency of the proposed framework on both simulated and real data problems. |
+|idx| 2410.18929v1 |
+|title| AutoStep: Locally adaptive involutive MCMC |
+|authors| Tiange LiuNikola SurjanovicMiguel Biron-LattesAlexandre Bouchard-CôtéTrevor Campbell
+|links| http://arxiv.org/abs/2410.18929v1 |
+|updated| 2024-10-24 17:17:11 UTC |
+|summary| Many common Markov chain Monte Carlo MCMC kernels can be formulated using adeterministic involutive proposal with a step size parameter. Selecting anappropriate step size is often a challenging task in practice and for complexmultiscale targets there may not be one choice of step size that works wellglobally. In this work we address this problem with a novel class ofinvolutive MCMC methods -- AutoStep MCMC -- that selects an appropriate stepsize at each iteration adapted to the local geometry of the targetdistribution. We prove that AutoStep MCMC is pi-invariant and has otherdesirable properties under mild assumptions on the target distribution piand involutive proposal. Empirical results examine the effect of various stepsize selection design choices and show that AutoStep MCMC is competitive withstate-of-the-art methods in terms of effective sample size per unit cost on arange of challenging target distributions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17913v1 |
-|title| Deep learning for model correction of dynamical systems with data scarcity |
-|authors| Caroline TatsuokaDongbin Xiu
-|links| http://arxiv.org/abs/2410.17913v1 |
-|updated| 2024-10-23 14:33:11 UTC |
-|summary| We present a deep learning framework for correcting existing dynamical systemmodels utilizing only a scarce high-fidelity data set. In many practicalsituations one has a low-fidelity model that can capture the dynamicsreasonably well but lacks high resolution due to the inherent limitation ofthe model and the complexity of the underlying physics. When high resolutiondata become available it is natural to seek model correction to improve theresolution of the model predictions. We focus on the case when the amount ofhigh-fidelity data is so small that most of the existing data driven modelingmethods cannot be applied. In this paper we address these challenges with amodel-correction method which only requires a scarce high-fidelity data set.Our method first seeks a deep neural network DNN model to approximate theexisting low-fidelity model. By using the scarce high-fidelity data the methodthen corrects the DNN model via transfer learning TL. After TL an improvedDNN model with high prediction accuracy to the underlying dynamics is obtained.One distinct feature of the propose method is that it does not assume aspecific form of the model correction terms. Instead it offers an inherentcorrection to the low-fidelity model via TL. A set of numerical examples arepresented to demonstrate the effectiveness of the proposed method. |
+|idx| 2410.18918v1 |
+|title| MissNODAG: Differentiable Cyclic Causal Graph Learning from Incomplete Data |
+|authors| Muralikrishnna G. SethuramanRazieh NabiFaramarz Fekri
+|links| http://arxiv.org/abs/2410.18918v1 |
+|updated| 2024-10-24 17:09:10 UTC |
+|summary| Causal discovery in real-world systems such as biological networks is oftencomplicated by feedback loops and incomplete data. Standard algorithms whichassume acyclic structures or fully observed data struggle with thesechallenges. To address this gap we propose MissNODAG a differentiableframework for learning both the underlying cyclic causal graph and themissingness mechanism from partially observed data including data missing notat random. Our framework integrates an additive noise model with anexpectation-maximization procedure alternating between imputing missing valuesand optimizing the observed data likelihood to uncover both the cyclicstructures and the missingness mechanism. We demonstrate the effectiveness ofMissNODAG through synthetic experiments and an application to real-world geneperturbation data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17904v1 |
-|title| Reinforcement Learning under Latent Dynamics: Toward Statistical and Algorithmic Modularity |
-|authors| Philip AmortilaDylan J. FosterNan JiangAkshay KrishnamurthyZakaria Mhammedi
-|links| http://arxiv.org/abs/2410.17904v1 |
-|updated| 2024-10-23 14:22:49 UTC |
-|summary| Real-world applications of reinforcement learning often involve environmentswhere agents operate on complex high-dimensional observations but theunderlying latent dynamics are comparatively simple. However outside ofrestrictive settings such as small latent spaces the fundamental statisticalrequirements and algorithmic principles for reinforcement learning under latentdynamics are poorly understood.  This paper addresses the question of reinforcement learning undertextitgeneral latent dynamics from a statistical and algorithmicperspective. On the statistical side our main negative result shows that mostwell-studied settings for reinforcement learning with function approximationbecome intractable when composed with rich observations we complement thiswith a positive result identifying latent pushforward coverability as ageneral condition that enables statistical tractability. Algorithmically wedevelop provably efficient observable-to-latent reductions -- that isreductions that transform an arbitrary algorithm for the latent MDP into analgorithm that can operate on rich observations -- in two settings: one wherethe agent has access to hindsight observations of the latent dynamics LADZ23and one where the agent can estimate self-predictive latent models SAGHCB20.Together our results serve as a first step toward a unified statistical andalgorithmic theory for reinforcement learning under latent dynamics. |
+|idx| 2410.18844v1 |
+|title| Learning to Explore with Lagrangians for Bandits under Unknown Linear Constraints |
+|authors| Udvas DasDebabrota Basu
+|links| http://arxiv.org/abs/2410.18844v1 |
+|updated| 2024-10-24 15:26:14 UTC |
+|summary| Pure exploration in bandits models multiple real-world problems such astuning hyper-parameters or conducting user studies where different safetyresource and fairness constraints on the decision space naturally appear. Westudy these problems as pure exploration in multi-armed bandits with unknownlinear constraints where the aim is to identify an rtextit-good feasiblepolicy. First we propose a Lagrangian relaxation of the sample complexitylower bound for pure exploration under constraints. We show how this lowerbound evolves with the sequential estimation of constraints. Second weleverage the Lagrangian lower bound and the properties of convex optimisationto propose two computationally efficient extensions of Track-and-Stop andGamified Explorer namely LATS and LAGEX. To this end we propose aconstraint-adaptive stopping rule and while tracking the lower bound usepessimistic estimate of the feasible set at each step. We show that thesealgorithms achieve asymptotically optimal sample complexity upper bounds up toconstraint-dependent constants. Finally we conduct numerical experiments withdifferent reward distributions and constraints that validate efficientperformance of LAGEX and LATS with respect to baselines. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18066v1 |
-|title| The Double-Edged Sword of Behavioral Responses in Strategic Classification: Theory and User Studies |
-|authors| Raman EbrahimiKristen VaccaroParinaz Naghizadeh
-|links| http://arxiv.org/abs/2410.18066v1 |
-|updated| 2024-10-23 17:42:54 UTC |
-|summary| When humans are subject to an algorithmic decision system they canstrategically adjust their behavior accordingly game the system. While agrowing line of literature on strategic classification has used game-theoreticmodeling to understand and mitigate such gaming these existing works considerstandard models of fully rational agents. In this paper we propose a strategicclassification model that considers behavioral biases in human responses toalgorithms. We show how misperceptions of a classifier specifically of itsfeature weights can lead to different types of discrepancies between biasedand rational agents responses and identify when behavioral agents over- orunder-invest in different features. We also show that strategic agents withbehavioral biases can benefit or perhaps unexpectedly harm the firm comparedto fully rational strategic agents. We complement our analytical results withuser studies which support our hypothesis of behavioral biases in humanresponses to the algorithm. Together our findings highlight the need toaccount for human cognitive biases when designing AI systems and providingexplanations of them to strategic human in the loop. |
+|idx| 2410.18924v1 |
+|title| Swarm manipulation: An efficient and accurate technique for multi-object manipulation in virtual reality |
+|authors| Xiang LiJin-Du WangJohn J. DudleyPer Ola Kristensson
+|links| http://arxiv.org/abs/2410.18924v1 |
+|updated| 2024-10-24 17:12:51 UTC |
+|summary| The theory of swarm control shows promise for controlling multiple objectshowever scalability is hindered by cost constraints such as hardware andinfrastructure. Virtual Reality VR can overcome these limitations butresearch on swarm interaction in VR is limited. This paper introduces a novelSwarm Manipulation interaction technique and compares it with two baselinetechniques: Virtual Hand and Controller ray-casting. We evaluated thesetechniques in a user study N  12 in three tasks selection rotation andresizing across five conditions. Our results indicate that Swarm Manipulationyielded superior performance with significantly faster speeds in mostconditions across the three tasks. It notably reduced resizing size deviationsbut introduced a trade-off between speed and accuracy in the rotation task.Additionally we conducted a follow-up user study N  6 using SwarmManipulation in two complex VR scenarios and obtained insights throughsemi-structured interviews shedding light on optimized swarm controlmechanisms and perceptual changes induced by this interaction paradigm. Theseresults demonstrate the potential of the Swarm Manipulation technique toenhance the usability and user experience in VR compared to conventionalmanipulation techniques. In future studies we aim to understand and improveswarm interaction via internal swarm particle cooperation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.18048v1 |
-|title| A Comparative Assessment of Technology Acceptance and Learning Outcomes in Computer-based versus VR-based Pedagogical Agents |
-|authors| Aimilios HadjiliasiLouis NisiotisIrene Polycarpou
-|links| http://arxiv.org/abs/2410.18048v1 |
-|updated| 2024-10-23 17:20:35 UTC |
-|summary| As educational technology evolves the potential of Pedagogical Agents PAsin supporting education is extensively explored. Typically research on PAs hasprimarily focused on computer-based learning environments but their use inVR-based environments and integration into education is still in its infancy.To address this gap this paper presents a mixed method comparative study thathas been conducted to evaluate and examine how these computer-based PAs andVR-based PAs compare towards their learning efficacy and technologyacceptance. 92 Computing and Engineering undergraduate students were recruitedand participated in an educational experience focusing on computing machineryeducation. The findings of this study revealed that both approaches caneffectively facilitate learning acquisition and both technologies have beenpositively perceived by participants toward acceptance without any significantdifferences. The findings of this study shed light on the potential ofutilizing intelligent PAs to support education contributing towards theadvancement of our understanding of how to integrate such technologies todevelop learning interventions and establishing the foundation for futureinvestigations that aim to successfully integrate and use PAs in education. |
+|idx| 2410.18876v1 |
+|title| Guiding Empowerment Model: Liberating Neurodiversity in Online Higher Education |
+|authors| Hannah BeauxPegah KarimiOtilia PopRob Clark
+|links| http://arxiv.org/abs/2410.18876v1 |
+|updated| 2024-10-24 16:05:38 UTC |
+|summary| In this innovative practice full paper we address the equity gap forneurodivergent and situationally limited learners by identifying the spectrumof dynamic factors that impact learning and function. Educators have shown agrowing interest in identifying learners cognitive abilities and learningpreferences to measure their impact on academic achievement. Often institutionsemploy one-size-fits-all approaches leaving the burden on disabled students toself-advocate or tolerate inadequate support. Emerging frameworks guideneurodivergent learners through instructional approaches such as onlineeducation. However these frameworks fail to address holistic environmentalneeds or recommend technology interventions particularly for those withundisclosed learning or developmental disabilities and situational limitations.In this article we integrate a neurodivergent perspective through secondaryresearch of around 100 articles to introduce a Guiding Empowerment Modelinvolving key cognitive and situational factors that contextualize day-to-dayexperiences affecting learner ability. We synthesize three sample studentprofiles that highlight user problems in functioning. We use this model toevaluate sample learning platform features and other supportive technologysolutions. The proposed approach augments frameworks such as Universal Designfor Learning to consider factors including various sensory processingdifferences social connection challenges and environmental limitations. Wesuggest that by applying the mode through technology-enabled features such ascustomizable task management guided varied content access and guidedmulti-modal collaboration major learning barriers of neurodivergent andsituationally limited learners will be removed to activate the successfulpursuit of their academic goals. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17909v1 |
-|title| AI as a Bridge Across Ages: Exploring The Opportunities of Artificial Intelligence in Supporting Inter-Generational Communication in Virtual Reality |
-|authors| Qiuxin DuXiaoying WeiJiawei LiEmily KuangJie HaoDongdong WengMingming Fan
-|links| http://arxiv.org/abs/2410.17909v1 |
-|updated| 2024-10-23 14:28:16 UTC |
-|summary| Inter-generational communication is essential for bridging generational gapsand fostering mutual understanding. However maintaining it is complex due tocultural communicative and geographical differences. Recent researchindicated that while Virtual Reality VR creates a relaxed atmosphere andpromotes companionship it inadequately addresses the complexities ofinter-generational dialogue including variations in values and relationaldynamics. To address this gap we explored the opportunities of ArtificialIntelligence AI in supporting inter-generational communication in VR. Wedeveloped three technology probes e.g. Content Generator CommunicationFacilitator and Info Assistant in VR and employed them in a probe-basedparticipatory design study with twelve inter-generational pairs. Our resultsshow that AI-powered VR facilitates inter-generational communication byenhancing mutual understanding fostering conversation fluency and promotingactive participation. We also introduce several challenges when usingAI-powered VR in supporting inter-generational communication and derive designimplications for future VR platforms aiming to improve inter-generationalcommunication. |
+|idx| 2410.18875v1 |
+|title| Exploring the Universe with SNAD: Anomaly Detection in Astronomy |
+|authors| Alina A. VolnovaPatrick D. AleoAnastasia LavrukhinaEtienne RusseilTimofey SemenikhinEmmanuel GanglerEmille E. O. IshidaMatwey V. KornilovVladimir KorolevKonstantin MalanchevMaria V. PruzhinskayaSreevarsha Sreejith
+|links| http://dx.doi.org/10.1007/978-3-031-67826-4_15 |
+|updated| 2024-10-24 16:05:11 UTC |
+|summary| SNAD is an international project with a primary focus on detectingastronomical anomalies within large-scale surveys using active learning andother machine learning algorithms. The work carried out by SNAD not onlycontributes to the discovery and classification of various astronomicalphenomena but also enhances our understanding and implementation of machinelearning techniques within the field of astrophysics. This paper provides areview of the SNAD project and summarizes the advancements and achievementsmade by the team over several years. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17783v1 |
-|title| Leveraging the Domain Adaptation of Retrieval Augmented Generation Models for Question Answering and Reducing Hallucination |
-|authors| Salman RakinMd. A. R. ShiblyZahin M. HossainZeeshan KhanMd. Mostofa Akbar
-|links| http://arxiv.org/abs/2410.17783v1 |
-|updated| 2024-10-23 11:32:46 UTC |
-|summary| While ongoing advancements in Large Language Models have demonstratedremarkable success across various NLP tasks Retrieval Augmented GenerationModel stands out to be highly effective on downstream applications likeQuestion Answering. Recently RAG-end2end model further optimized thearchitecture and achieved notable performance improvements on domainadaptation. However the effectiveness of these RAG-based architectures remainsrelatively unexplored when fine-tuned on specialized domains such as customerservice for building a reliable conversational AI system. Furthermore acritical challenge persists in reducing the occurrence of hallucinations whilemaintaining high domain-specific accuracy. In this paper we investigated theperformance of diverse RAG and RAG-like architectures through domain adaptationand evaluated their ability to generate accurate and relevant response groundedin the contextual knowledge base. To facilitate the evaluation of the modelswe constructed a novel dataset HotelConvQA sourced from wide range ofhotel-related conversations and fine-tuned all the models on our domainspecific dataset. We also addressed a critical research gap on determining theimpact of domain adaptation on reducing hallucinations across different RAGarchitectures an aspect that was not properly measured in prior work. Ourevaluation shows positive results in all metrics by employing domainadaptation demonstrating strong performance on QA tasks and providing insightsinto their efficacy in reducing hallucinations. Our findings clearly indicatethat domain adaptation not only enhances the models performance on QA tasksbut also significantly reduces hallucination across all evaluated RAGarchitectures. |
+|idx| 2410.18851v1 |
+|title| Intention Is All You Need |
+|authors| Advait Sarkar
+|links| http://arxiv.org/abs/2410.18851v1 |
+|updated| 2024-10-24 15:33:34 UTC |
+|summary| Among the many narratives of the transformative power of Generative AI is onethat sees in the world a latent nation of programmers who need to wield nothingbut intentions and natural language to render their ideas in software. In thispaper this outlook is problematised in two ways. First it is observed thatgenerative AI is not a neutral vehicle of intention. Multiple recent studiespaint a picture of the mechanised convergence phenomenon namely thatgenerative AI has a homogenising effect on intention. Second it is observedthat the formation of intention itself is immensely challenging. Constraintsmateriality and resistance can offer paths to design metaphors for intentionaltools. Finally existentialist approaches to intention are discussed andpossible implications for programming are proposed in the form of aspeculative illustrative set of intentional programming practices. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2410.17586v1 |
-|title| Efficient and Aesthetic UI Design with a Deep Learning-Based Interface Generation Tree Algorithm |
-|authors| Shiyu DuanRunsheng ZhangMengmeng ChenZiyi WangShixiao Wang
-|links| http://arxiv.org/abs/2410.17586v1 |
-|updated| 2024-10-23 06:20:37 UTC |
-|summary| This paper presents a novel method for user interface UI generation basedon the Transformer architecture addressing the increasing demand for efficientand aesthetically pleasing UI designs in software development. Traditional UIdesign relies heavily on designers expertise which can be time-consuming andcostly. Leveraging the capabilities of Transformers particularly their abilityto capture complex design patterns and long-range dependencies we propose aTransformer-based interface generation tree algorithm. This method constructs ahierarchical representation of UI components as nodes in a tree structureutilizing pre-trained Transformer models for encoding and decoding. We define amarkup language to describe UI components and their properties and use a richdataset of real-world web and mobile application interfaces for training. Theexperimental results demonstrate that our approach not only significantlyenhances design quality and efficiency but also outperforms traditional modelsin user satisfaction and aesthetic appeal. We also provide a comparativeanalysis with existing models illustrating the advantages of our method interms of accuracy user ratings and design similarity. Overall our studyunderscores the potential of the Transformer based approach to revolutionizethe UI design process making it accessible for non-professionals whilemaintaining high standards of quality. |
+|idx| 2410.18845v1 |
+|title| Expanding AI Awareness Through Everyday Interactions with AI: A Reflective Journal Study |
+|authors| Ashish HingleAditya Johri
+|links| http://arxiv.org/abs/2410.18845v1 |
+|updated| 2024-10-24 15:26:34 UTC |
+|summary| As the application of AI continues to expand students in technology programsare poised to be both producers and users of the technologies. They are alsopositioned to engage with AI applications within and outside the classroom.While focusing on the curriculum when examining students AI knowledge iscommon extending this connection to students everyday interactions with AIprovides a more complete picture of their learning. In this paper we explorestudents awareness and engagement with AI in the context of school and theirdaily lives. Over six weeks 22 undergraduate students participated in areflective journal study and submitted a weekly journal entry about theirinteractions with AI. The participants were recruited from a technology andsociety course that focuses on the implications of technology on peoplecommunities and processes. In their weekly journal entries participantsreflected on interactions with AI on campus coursework advertises campusevents or seminars and beyond social media news or conversations withfriends and family. The journal prompts were designed to help them thinkthrough what they had read watched or been told and reflect on thedevelopment of their own perspectives knowledge and literacy on the topic.Overall students described nine categories of interactions: coursework newsand current events using software and applications university events socialmedia related to their work personal discussions with friends and familyinteracting with content and gaming. Students reported that completing thediaries allowed them time for reflection and made them more aware of thepresence of AI in their daily lives and of its potential benefits anddrawbacks. This research contributes to the ongoing work on AI awareness andliteracy by bringing in perspectives from beyond a formal educational context. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2410.18871v1 |
+|title| Learning Collusion in Episodic, Inventory-Constrained Markets |
+|authors| Paul FriedrichBarna PásztorGiorgia Ramponi
+|links| http://arxiv.org/abs/2410.18871v1 |
+|updated| 2024-10-24 15:58:14 UTC |
+|summary| Pricing algorithms have demonstrated the capability to learn tacit collusionthat is largely unaddressed by current regulations. Their increasing use inmarkets including oligopolistic industries with a history of collusion callsfor closer examination by competition authorities. In this paper we extend thestudy of tacit collusion in learning algorithms from basic pricing games tomore complex markets characterized by perishable goods with fixed supply andsell-by dates such as airline tickets perishables and hotel rooms. Weformalize collusion within this framework and introduce a metric based on pricelevels under both the competitive Nash equilibrium and collusivemonopolistic optimum. Since no analytical expressions for these price levelsexist we propose an efficient computational approach to derive them. Throughexperiments we demonstrate that deep reinforcement learning agents can learnto collude in this more complex domain. Additionally we analyze the underlyingmechanisms and structures of the collusive strategies these agents adopt. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2410.18631v1 |
+|title| Leveraging Graph Neural Networks and Multi-Agent Reinforcement Learning for Inventory Control in Supply Chains |
+|authors| Niki KotechaAntonio del Rio Chanona
+|links| http://arxiv.org/abs/2410.18631v1 |
+|updated| 2024-10-24 10:43:04 UTC |
+|summary| Inventory control in modern supply chains has attracted significant attentiondue to the increasing number of disruptive shocks and the challenges posed bycomplex dynamics uncertainties and limited collaboration. Traditionalmethods which often rely on static parameters struggle to adapt to changingenvironments. This paper proposes a Multi-Agent Reinforcement Learning MARLframework with Graph Neural Networks GNNs for state representation to addressthese limitations.  Our approach redefines the action space by parameterizing heuristic inventorycontrol policies making it adaptive as the parameters dynamically adjust basedon system conditions. By leveraging the inherent graph structure of supplychains our framework enables agents to learn the systems topology and weemploy a centralized learning decentralized execution scheme that allowsagents to learn collaboratively while overcoming information-sharingconstraints. Additionally we incorporate global mean pooling andregularization techniques to enhance performance.  We test the capabilities of our proposed approach on four different supplychain configurations and conduct a sensitivity analysis. This work paves theway for utilizing MARL-GNN frameworks to improve inventory management incomplex decentralized supply chain environments. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2410.18202v1 |
+|title| PyTSC: A Unified Platform for Multi-Agent Reinforcement Learning in Traffic Signal Control |
+|authors| Rohit BokadeXiaoning Jin
+|links| http://arxiv.org/abs/2410.18202v1 |
+|updated| 2024-10-23 18:10:38 UTC |
+|summary| Multi-Agent Reinforcement Learning MARL presents a promising approach foraddressing the complexity of Traffic Signal Control TSC in urbanenvironments. However existing platforms for MARL-based TSC research facechallenges such as slow simulation speeds and convoluted difficult-to-maintaincodebases. To address these limitations we introduce PyTSC a robust andflexible simulation environment that facilitates the training and evaluation ofMARL algorithms for TSC. PyTSC integrates multiple simulators such as SUMO andCityFlow and offers a streamlined API empowering researchers to explore abroad spectrum of MARL approaches efficiently. PyTSC acceleratesexperimentation and provides new opportunities for advancing intelligenttraffic management systems in real-world applications. |
+
 
 | Item |Content|
 | --- |---|
@@ -330,35 +360,5 @@
 |links| http://arxiv.org/abs/2410.17898v1 |
 |updated| 2024-10-23 14:16:34 UTC |
 |summary| Reinforcement learning algorithms for mean-field games offer a scalableframework for optimizing policies in large populations of interacting agents.Existing methods often depend on online interactions or access to systemdynamics limiting their practicality in real-world scenarios where suchinteractions are infeasible or difficult to model. In this paper we presentOffline Munchausen Mirror Descent Off-MMD a novel mean-field RL algorithmthat approximates equilibrium policies in mean-field games using purely offlinedata. By leveraging iterative mirror descent and importance samplingtechniques Off-MMD estimates the mean-field distribution from static datasetswithout relying on simulation or environment dynamics. Additionally weincorporate techniques from offline reinforcement learning to address commonissues like Q-value overestimation ensuring robust policy learning even withlimited data coverage. Our algorithm scales to complex environments anddemonstrates strong performance on benchmark tasks like crowd exploration ornavigation highlighting its applicability to real-world multi-agent systemswhere online experimentation is infeasible. We empirically demonstrate therobustness of Off-MMD to low-quality datasets and conduct experiments toinvestigate its sensitivity to hyperparameter choices. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2410.17785v1 |
-|title| TranSPORTmer: A Holistic Approach to Trajectory Understanding in Multi-Agent Sports |
-|authors| Guillem CapelleraLuis FerrazAntonio RubioAntonio AgudoFrancesc Moreno-Noguer
-|links| http://arxiv.org/abs/2410.17785v1 |
-|updated| 2024-10-23 11:35:44 UTC |
-|summary| Understanding trajectories in multi-agent scenarios requires addressingvarious tasks including predicting future movements imputing missingobservations inferring the status of unseen agents and classifying differentglobal states. Traditional data-driven approaches often handle these tasksseparately with specialized models. We introduce TranSPORTmer a unifiedtransformer-based framework capable of addressing all these tasks showcasingits application to the intricate dynamics of multi-agent sports scenarios likesoccer and basketball. Using Set Attention Blocks TranSPORTmer effectivelycaptures temporal dynamics and social interactions in an equivariant manner.The models tasks are guided by an input mask that conceals missing oryet-to-be-predicted observations. Additionally we introduce a CLS extra agentto classify states along soccer trajectories including passes possessionsuncontrolled states and out-of-play intervals contributing to an enhancementin modeling trajectories. Evaluations on soccer and basketball datasets showthat TranSPORTmer outperforms state-of-the-art task-specific models in playerforecasting player forecasting-imputation ball inference and ballimputation. https://youtu.be/8VtSRm8oGoE |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2410.17690v1 |
-|title| Markov Potential Game with Final-time Reach-Avoid Objectives |
-|authors| Sarah H. Q. LiAbraham P. Vinod
-|links| http://arxiv.org/abs/2410.17690v1 |
-|updated| 2024-10-23 09:13:02 UTC |
-|summary| We formulate a Markov potential game with final-time reach-avoid objectivesby integrating potential game theory with stochastic reach-avoid control. Ourfocus is on multi-player trajectory planning where players maximize the samemulti-player reach-avoid objective: the probability of all participantsreaching their designated target states by a specified time while avoidingcollisions with one another. Existing approaches require centralizedcomputation of actions via a global policy which may have prohibitivelyexpensive communication costs. Instead we focus on approximations of theglobal policy via local state feedback policies. First we adapt the recursivesingle player reach-avoid value iteration to the multi-player framework withlocal policies and show that the same recursion holds on the joint statespace. To find each players optimal local policy the multi-player reach-avoidvalue function is projected from the joint state to the local state using theother players occupancy measures. Then we propose an iterative best responsescheme for the multi-player value iteration to converge to a pure Nashequilibrium. We demonstrate the utility of our approach in findingcollision-free policies for multi-player motion planning in simulation. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2410.17517v1 |
-|title| Bridging Swarm Intelligence and Reinforcement Learning |
-|authors| Karthik SomaYann BouteillerHeiko HamannGiovanni Beltrame
-|links| http://arxiv.org/abs/2410.17517v1 |
-|updated| 2024-10-23 02:49:37 UTC |
-|summary| Swarm intelligence SI explores how large groups of simple individualse.g. insects fish birds collaborate to produce complex behaviorsexemplifying that the whole is greater than the sum of its parts. A fundamentaltask in SI is Collective Decision-Making CDM where a group selects the bestoption among several alternatives such as choosing an optimal foraging site.In this work we demonstrate a theoretical and empirical equivalence betweenCDM and single-agent reinforcement learning RL in multi-armed banditproblems utilizing concepts from opinion dynamics evolutionary game theoryand RL. This equivalence bridges the gap between SI and RL and leads us tointroduce a novel abstract RL update rule called Maynard-Cross Learning.Additionally it provides a new population-based perspective on common RLpractices like learning rate adjustment and batching. Our findings enablecross-disciplinary fertilization between RL and SI allowing techniques fromone field to enhance the understanding and methodologies of the other. |
 
 
