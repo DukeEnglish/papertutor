@@ -1,0 +1,1006 @@
+Preprint
+3D-ADAPTER: GEOMETRY-CONSISTENT
+MULTI-VIEW DIFFUSION FOR HIGH-QUALITY
+3D GENERATION
+HanshengChen1 BokuiShen2 YulinLiu3,4 RuoxiShi3 LinqiZhou2
+ConnorZ.Lin2 JiayuanGu3 HaoSu3,4 GordonWetzstein1 LeonidasGuibas1
+1StanfordUniversity 2ApparateLabs 3UCSanDiego 4Hillbot
+Projectpage: https://lakonik.github.io/3d-adapter
+ABSTRACT
+Multi-viewimagediffusionmodelshavesignificantlyadvancedopen-domain3D
+object generation. However, most existing models rely on 2D network architec-
+tures that lack inherent 3D biases, resulting in compromised geometric consis-
+tency. Toaddressthischallenge,weintroduce3D-Adapter,aplug-inmodulede-
+signedtoinfuse3Dgeometryawarenessintopretrainedimagediffusionmodels.
+Centraltoourapproachistheideaof3Dfeedbackaugmentation:foreachdenois-
+ing step in the sampling loop, 3D-Adapter decodes intermediate multi-view fea-
+turesintoacoherent3Drepresentation,thenre-encodestherenderedRGBDviews
+toaugmentthepretrainedbasemodelthroughfeatureaddition.Westudytwovari-
+antsof3D-Adapter: afastfeed-forwardversionbasedonGaussiansplattingand
+aversatiletraining-freeversionutilizingneuralfieldsandmeshes. Ourextensive
+experiments demonstrate that 3D-Adapter not only greatly enhances the geome-
+try quality of text-to-multi-view models such as Instant3D and Zero123++, but
+alsoenableshigh-quality3Dgenerationusingtheplaintext-to-imageStableDif-
+fusion. Furthermore,weshowcasethebroadapplicationpotentialof3D-Adapter
+bypresentinghighqualityresultsintext-to-3D,image-to-3D,text-to-texture,and
+text-to-avatartasks.
+1 INTRODUCTION
+Diffusionmodels(Hoetal.,2020;Songetal.,2021)haverecentlymadesignificantstridesinvisual
+synthesis, achieving production-quality results in image generation (Rombach et al., 2022). How-
+ever, the success of 2D diffusion does not easily translate to the 3D domain due to the scarcity
+of large-scale datasets and the lack of a unified, neural-network-friendly representation (Po et al.,
+2024). Tobridgethegapbetween2Dand3Dgeneration,novel-viewormulti-viewdiffusionmod-
+els (Liu et al., 2023b; Long et al., 2024; Shi et al., 2023; Li et al., 2024; Chen et al., 2024; Voleti
+etal.,2024)havebeenfinetunedfrompretrainedimageorvideomodels,facilitating3Dgeneration
+via a2-stage paradigminvolving multi-viewgeneration followedby 3Dreconstruction (Liuet al.,
+2023a; 2024a; Li et al., 2024; Wang et al., 2024; Xu et al., 2024a). While these models generally
+exhibit good global semantic consistency across different view angles, a pivotal challenge lies in
+achievinglocalgeometryconsistency. Thisentailsensuringprecise2D–3Dalignmentoflocalfea-
+tures and maintaining geometric plausibility. Consequently, these two-stage methods often suffer
+fromfloatingartifactsorproduceblurry,lessdetailed3Doutputs(Fig.1(c)).
+Toenhancelocalgeometryconsistency,previousworkshaveexploredinserting3Drepresentations
+andrenderingoperationsintothedenoisingsamplingloop, synchronizingeitherthedenoisedout-
+puts (Gu et al., 2023; Xu et al., 2024b; Zuo et al., 2024) or the noisy inputs (Liu et al., 2023c;
+Gao et al., 2024) of the network, a process we refer to as I/O sync. However, we observe that
+I/Osyncgenerallyleadstolessdetailed,overlysmoothedtexturesandgeometry(Fig.1(a)). This
+phenomenoncanbeattributedtotwofactors:
+1
+4202
+tcO
+42
+]VC.sc[
+1v47981.0142:viXraPreprint
+Text-to-3D
+w/ Instant3D
+A blue jay standing
+on a large basket of
+rainbow macarons
+Image-to-3D
+w/ Zero123++
+Text-to-Texture
+w/ DreamShaper (SDv1.5)
+A yellow
+robot with a
+black hat
+Text-to-Avatar
+w/ SDv1.5
+Color photo of
+Albert Einstein
+Input (a) 3D-Adapter (b) I/O sync (c) Two-stage
+Figure1: Comparisonbetweentheresultsgeneratedbydifferentarchitectures. Texturerefinement
+isenabledfortext-to-3D,image-to-3D,andtext-to-avatar.
+• Diffusionmodelstypicallyincorporateresidualconnections(asseeninU-Nets(Hoetal.,2020)
+andtransformers(Peebles&Xie,2023))toensurethatimportantinformationispreservedduring
+denoising. However,3Dreconstructionandrenderingarelossyoperationsthatdisruptresidual
+connections.
+• FortexturegenerationmethodsinLiuetal.(2023c);Gaoetal.(2024),I/Osyncisequivalentto
+multi-viewscoreaveraging,whichtheoreticallyleadstomodecollapse,causingthelossoffine
+detailsinthegeneratedoutputs. MoretheoreticalanalysiscanbefoundinAppendixA.
+ToovercomethelimitationsofI/Osync,weproposeanovelapproachtermed3Dfeedbackaugmen-
+tation, whichattachesa3D-awareparallelbranchtothebasemodel, whilepreservingtheoriginal
+networktopologyandavoidingscoreaveraging. Essentially,thisbranchdecodesintermediatefea-
+turesfromthebasemodeltoreconstructanintermediate3Drepresentation,whichisthenrendered,
+encoded, and fed back into the base model through feature addition, thus augmenting 3D aware-
+ness. Specifically, when using a denoising U-Net as the base model, we implement 3D feedback
+augmentationas3D-Adapter, whichreusesacopyoftheoriginalU-Netwithanadditional3Dre-
+constructionmoduletobuildtheparallelbranch. ThankstoitsControlNet-like(Zhangetal.,2023)
+modelreuse,3D-Adapterrequiresminimalor,incaseswheresuitableoff-the-shelfControlNetsare
+available,zerotraining.
+Todemonstrateitsflexibility,wepresenttwovariantsof3D-Adapterinthispaper.
+Fast 3D-Adapter using feed-forward Gaussian reconstruction. Given an off-the-shelf multi-
+viewdiffusionmodel,weuseitsoriginalU-NetandVAEtodecodeintermediatedenoisedimages,
+whicharethenfedintothefeed-forwardGaussianReconstructionModel(GRM)(Xuetal.,2024a)
+toobtaina3DGaussiansplatting(3DGS)(Kerbletal.,2023). Subsequently, therenderedRGBD
+imagesarere-encodedusingafinetunedU-Netencoder(ControlNet),withfeaturesfusedbackinto
+the original U-Net decoder to produce consistent denoised outputs. We finetune the GRM and
+2Preprint
+ControlNetmodelin2phases,anddemonstratethat3D-Adaptercangreatlyenhancethegeometry
+consistencyofthebasemodel,suchasInstant3D(Lietal.,2024)andZero123++(Shietal.,2023).
+Flexibletraining-free3D-Adapterusing3DoptimizationandpretrainedControlNets. Aside
+from using feed-forward reconstruction models, we also explore aggregating intermediate images
+ofmultipleindependentviewsbyoptimizinganInstant-NGPneuralradiancefield(NeRF)(Mu¨ller
+et al., 2022; Mildenhall et al., 2020) and DMTet mesh (Shen et al., 2021), which enables highly
+flexiblechoiceofcameralayouts. Forpopularbasemodels(e.g.,StableDiffusion(Rombachetal.,
+2022))withoff-the-shelfControlNets,therenderedRGBDimagescanbethenre-encodedusinga
+combinationof“tile”anddepthControlNets,eliminatingtheneedforfurtherfinetuning.Fortexture
+generation,optimizationcanbereplacedbythemoreefficienttexturebackprojectionapproach.
+2 RELATED WORK
+3D-nativediffusionmodels. Wedefine3D-nativediffusionmodelsasinjectingnoisedirectlyinto
+the 3D representations (or their latents) during the diffusion process. Early works (Bautista et al.,
+2022;Dupontetal.,2022)haveexploredtrainingdiffusionmodelsonlow-dimensionallatentvec-
+tors of 3D representations, but are highly limited in model capacity. A more expressive approach
+is training diffusion models on triplane representations (Chan et al., 2022), which works reason-
+ably well on closed-domain data (Chen et al., 2023b; Shue et al., 2023; Gupta et al., 2023; Wang
+et al., 2023). Directly working on 3D grid representations is more challenging due to the cubic
+computationcost(Mu¨lleretal.,2023),soanimprovedmulti-stagesparsevolumediffusionmodelis
+proposedinZhengetal.(2023).Ingeneral,3D-nativediffusionmodelsfacethechallengeoflimited
+data,andsometimestheextracostofpreprocessingthetrainingdatainto3Drepresentations(e.g.,
+NeRF),whichlimittheirscalability.
+Novel-/multi-viewdiffusionmodels. Trainedonmulti-viewimagesof3Dscenes,viewdiffusion
+models inject noise into the images (or their latents) and thus benefit from existing 2D diffusion
+research. Watson et al. (2023) have demonstrated the feasibility of training a conditioned novel
+viewgenerativemodelusingpurely2Darchitectures. Subsequentworks(Shietal.,2024;2023;Liu
+etal.,2023b;Longetal.,2024)achieveopen-domainnovel-/multi-viewgenerationbyfine-tuning
+the pre-trained 2D Stable Diffusion model (Rombach et al., 2022). However, 3D consistency in
+these models is generally limited to global semantic consistency because it is learned solely from
+data,withoutanyinherentarchitecturalbiastosupportdetailedlocalalignment.
+Two-stage 3D generation. Two-stage methods (Fig. 2 (a)) link view diffusion with multi-view
+3D reconstruction models, offering a significant speed advantage over score distillation sampling
+(SDS)(Pooleetal.,2023). Liuetal.(2023a)initiallycombineZero-1-to-3(Liuetal.,2023b)with
+SparseNeuS (Long et al., 2022), and subsequent works (Liu et al., 2024a; Xu et al., 2024a; Long
+et al., 2024; Tang et al., 2024a) have further explored more effective multi-view diffusion models
+andenhancedreconstructionmethods. Acommonissuewithtwo-stageapproachesisthatexisting
+reconstructionmethods,oftendesignedforortrainedunderconditionsofperfectconsistency,lack
+robustnesstolocalgeometricinconsistencies. Thismayresultinfloatersandblurrytextures.
+3D-aware view diffusion and I/O sync. To introduce 3D-awareness in single-image diffusion
+models, Anciukeviciusetal.(2023);Tewarietal.(2023)elevateimagefeaturesinto3DNeRFsto
+renderdenoisedviews. Extendingthisconcepttomulti-viewdiffusion,DMV3D(Xuetal.,2024b)
+representsanend-to-endfeed-forwardoutputsyncapproach.However,thesemethodsoftenproduce
+blurryoutputsduetotheinformationlossintheabsenceofresidualconnections. Liuetal.(2024b)
+attempttopreservetheseconnectionsthroughinputsyncandattention-basedfeaturefusion, yetit
+lacks a robust architecture, leading to subpar quality as noted in Liu et al. (2023a). Alternatively,
+employingfeed-forwardGaussianreconstructionmodels(Xuetal.,2024a;Tangetal.,2024a)for
+output sync preserves more information but often struggles to coherently fuse inconsistent views,
+resultinginonlymarginalimprovementsin3DconsistencyasseeninZuoetal.(2024).Ontheother
+hand,optimization-basedI/Osyncmethodsin Guetal.(2023);Liuetal.(2023c);Gaoetal.(2024)
+either require strong local conditioning or suffer from the pitfalls of score averaging, resulting in
+overlysmoothedtextures.
+3Preprint
+Solver Solver
+Init mB oa dse e l step 3D Init mB oa dse e l r3 eD c step
+rec
+Noisy Denoised Noisy DenoisedOutputRendered
+RGB RGB Output RGB RGB RGB
+(a) Two-stage (b) Typical output sync
+𝒙𝒙𝑡𝑡 �𝒙𝒙𝑡𝑡 𝒙𝒙𝑡𝑡 �𝒙𝒙𝑡𝑡 �𝒙𝒙𝑡𝑡
+Solver
+Encoder Decoder step
+Init
+(base) (base)
+Noisy Decoder 3D Encoder Denoised
+RGB (base) rec (ControlNet) RGB
+𝒙𝒙𝑡𝑡 �𝒙𝒙𝑡𝑡 ℒdiff
+IntermediateOutput Rendered
+RGB RGBD
+�𝒙𝒙𝑡𝑡′(c) 3D-Adapter (o �𝒙𝒙u𝑡𝑡rs) ℒrend
+Figure2: Comparisonbetweendifferentarchitectures. Forbrevityandgenerality,weomittheVAE
+decodersinLDMsRombachetal.(2022),theconditionencoderssuchastextencoders,therendered
+alphachannel,andthenoisyRGBinputfortheControlNet.
+3 PRELIMINARIES
+Let p(x|c) denote the real data distribution, where c is the condition (e.g., text prompts) and
+x ∈ RV×3×H×W denotes the V-view images of a 3D object. A Gaussian diffusion model de-
+finesadiffusionprocessthatprogressivelyperturbthedatapointbyaddinganincreasingamountof
+Gaussiannoiseϵ∼N(0,I),yieldingthenoisydatapointx :=α x +σ ϵatdiffusiontimestept,
+t t i t
+withpre-definednoiseschedulescalarsα ,σ .AdenoisingnetworkDisthentaskedwithremoving
+t t
+the noise from x to predict the denoised data point. The network is typically trained with an L2
+t
+denoisingloss:
+(cid:20) (cid:21)
+1
+L =E wdiff∥D(x ,c,t)−x∥2 , (1)
+diff t,c,x,ϵ 2 t t
+wheret∼U(0,T),andwdiffisanempiricaltime-dependentweightingfunction(e.g.,SNRweight-
+t
+ingwdiff =(α /σ )2). Atinferencetime,onecansamplefromthemodelusingefficientODE/SDE
+t t t
+solvers (Lu et al., 2022) that recursively denoise x , starting from an initial noisy state x , until
+t tinit
+reachingthedenoisedstatex . Notethatinlatentdiffusionmodels(LDM)(Rombachetal.,2022),
+0
+bothdiffusionanddenoisingoccurinthelatentspace. Forbrevity,wedonotdifferentiatebetween
+latentsandimagesintheequationsandfigures.
+I/O sync baseline. We broadly define I/O sync as inserting a 3D representation and a render-
+ing/projectingoperationattheinputoroutputendofthedenoisingnetworktosynchronizemultiple
+views. Inputsyncisprimarilyusedfortexturegeneration,anditisessentiallyequivalenttooutput
+sync,assuminglinearityandsynchronizedinitialization(detailedintheAppendixA).Therefore,for
+simplicity,thispaperconsidersonlyoutputsyncasthebaseline. AsdepictedinFig.2(b),atypical
+output sync model can be implemented by reconstructing a 3D representation from the denoised
+outputsxˆ ,andthenre-renderingtheviewsfrom3Dtoreplacetheoriginaloutputs.
+t
+4 3D-ADAPTER
+To overcome the limitations of I/O sync, our key idea is the 3D feedback augmentation architec-
+ture,whichinvolvesreconstructinga3Drepresentationmidwaythroughthedenoisingnetworkand
+feeding the rendered views back into the network using ControlNet-like feature addition. This ar-
+chitecture preserves the original flow of the base model while effectively leveraging its inherent
+priors.
+Basedonthisidea,weproposethe3D-Adapter,asillustratedinFig.2(c). Foreachdenoisingstep,
+after passing the input noisy views x through the base U-Net encoder, we use a copy of the base
+t
+4Preprint
+U-Netdecodertofirstoutputintermediatedenoisedviewsxˆ′. A3Dreconstructionmodelthenlifts
+t
+these intermediate views to a coherent 3D representation, from which consistent RGBD views x˜
+t
+arerenderedandfedbackintothenetworkthroughaControlNetencoder. Theoutputfeaturesfrom
+this encoder are added to the base encoder features, which are then processed again by the base
+decodertoproducethefinaldenoisedoutputxˆ . Thefulldenoisingstepcanbewrittenas:
+t
+xˆ′
+t
+(cid:122) (cid:125)(cid:124) (cid:123)
+xˆ =D (x ,c,t,R(D(x ,c,t))). (2)
+t aug t t
+(cid:124) (cid:123)(cid:122) (cid:125)
+x˜t
+where R denotes 3D reconstruction and rendering, and D denotes the augmented U-Net with
+aug
+feedbackControlNet.
+Various 3D-Adapters can be implemented depending on the choice of base model and 3D recon-
+structionmethod,asdescribedinthefollowingsubsections.
+4.1 3D-ADAPTERUSINGFEED-FORWARDGRM
+GRM (Xu et al., 2024a) is a feed-forward sparse-view 3D reconstruction model based on 3DGS.
+Inthissection,wedescribethemethodtotrainGRM-based3D-Adaptersforthetext-to-multi-view
+modelInstant3D(Lietal.,2024)andimage-to-multi-viewmodelZero123++(Shietal.,2023).
+Trainingphase1: finetuningGRM. GRMisoriginallytrainedonconsistentgroundtruthinput
+views,andisnotrobusttolow-qualityintermediateviews,whichareoftenhighlyinconsistentand
+blurry. To overcome this challenge, we first finetune GRM using the intermediate images xˆ′ as
+t
+inputs, wherethetimetisrandomlysampledjustlikeinthediffusionloss. Inthistrainingphase,
+wefreezethebaseencoderanddecoderoftheU-Net,andinitializeGRMwiththeofficialcheckpoint
+for finetuning. As shown in Fig. 2 (c), a rendering loss L is employed to supervise GRM with
+rend
+groundtruthnovelviews. Specifically,boththeappearanceandgeometryaresupervisedusingthe
+combination of an L1 loss LRGBAD on RGB/alpha/depth maps, and an LPIPS loss LRGB (Zhang
+1 LPIPS
+etal.,2018)onRGBonly. Thelossiscomputedon16renderedviewsX˜ ∈ R16×5×512×512 and
+t
+thecorrespondinggroundtruthviewsX ,givenby:
+gt
+(cid:104) (cid:16) (cid:16) (cid:17) (cid:16) (cid:17)(cid:17)(cid:105)
+L =E wrend LRGBAD X˜ ,X +LRGB X˜ ,X , (3)
+rend t,c,x,ϵ t 1 t gt LPIPS t gt
+√
+where wrend is a time-dependent weighting function. We use wrend = α (cid:14) α 2+σ 2. The L1
+t t t t t
+RGBADlossalsoemployschannel-wiseweights,whicharedetailedinourcode.
+Training phase 2: finetuning feedback ControlNet. In this training phase, we freeze all mod-
+ulesexceptthefeedbackControlNetencoder, whichisinitializedwiththebaseU-Netweightsfor
+finetuning. FollowingstandardControlNettrainingmethod,weemploythediffusionlossinEq.(1)
+to finetune the RGBD feedback ControlNet. To accelerate convergence, we feed rendered RGBD
+viewsofalessnoisytimestepx˜ totheControlNetduringtraining.
+0.1t
+Inference: guided 3D feedback augmentation. One potential issue is that the ControlNet en-
+coder may overfit the finetuning dataset, resulting in an undesirable bias that persists even if the
+renderedRGBDx˜ isreplacedwithazerotensor. Tomitigatethisissue,inspiredbyclassifier-free
+t
+guidance(CFG)(Ho&Salimans,2021),wereplacexˆ withtheguideddenoisedviewsxˆG during
+t t
+inferencetocancelouttheControlNetbias:
+xˆG =λ (D (x ,c,t,x˜ )−D (x ,c,t,0))+λ D(x ,c,t)+(1−λ )D(x ,0,t), (4)
+t aug aug t t aug t c t c t
+where λ is the regular condition CFG scale, and λ is our feedback augmentation guidance
+c aug
+scale. During training, we feed zero tensors to the ControlNet with a 20% probability, so that
+D (x ,c,t,0)learnsameaningfuldatasetbias.
+aug t
+Trainingdetails. Weadoptvarioustrainingtechniquestoreducethememoryfootprint,including
+mixedprecisiontraining,8-bitAdamW(Dettmersetal.,2022;Loshchilov&Hutter,2019),gradient
+checkpointing,anddeferredback-propagation(Xuetal.,2024a;Zhangetal.,2022). Theadapteris
+trainedwithatotalbatchsizeof16objectson4A6000GPUs. Inphase1,GRMisfinetunedwith
+asmalllearningrateof5×10−6 for2kiterations(forInstant3D)or4kiterations(forZero123++).
+In phase 2, ControlNet is finetuned with a learning rate of 1 × 10−5 for 5k iterations. 47k (for
+Instant3D) or 80k (for Zero123++) objects from a high-quality subset of Objaverse (Deitke et al.,
+2023)arerenderedasthetrainingdata.
+5Preprint
+4.2 3D-ADAPTERUSING3DOPTIMIZATION/TEXTUREBACKPROJECTION
+Feed-forward 3D reconstruction methods, like GRM, are typically constrained by specific camera
+layouts. In contrast, more flexible reconstruction approaches, such as optimizing an Instant-NGP
+NeRF (Mu¨ller et al., 2022; Mildenhall et al., 2020) and DMTet mesh (Shen et al., 2021), can ac-
+commodatediversecameraconfigurationsandachievehigher-qualityresults,althoughtheyrequire
+longeroptimizationtimes.
+Inthissubsection,wedesignanoptimization-based3Dadapter,usingStableDiffusionv1.5(Rom-
+bachetal.,2022)asthebasemodel, whereeachviewisdenoisedindependently, withtheadapter
+beingtheonlycomponentthatsharesinformationacrossviews.
+Duringthesamplingprocess, theadapterperformsNeRFoptimizationforthefirst60%ofthede-
+noising steps. It then converts the color and density fields into a texture field and DMTet mesh,
+respectively, to complete the remaining 40% denoising steps. All optimizations are incremental,
+meaningthe3Dstatefromthepreviousdenoisingstepisretainedtoinitializethenext. Asaresult,
+only96optimizationstepsareneededperdenoisingstep. Alternatively,fortexturegenerationonly,
+multi-view aggregation can be achieved by backprojecting the views into UV space and blending
+the results according to visibility. For feedback augmentation, the off-the-shelf “tile” ControlNet,
+originallytrainedforsuperresolution,performseffectivelyforRGBfeedbackduetoitsrobustness
+toblurryinputs,whiletheoff-the-shelfdepthControlNetcannaturallyhandledepthfeedback.
+It should be noted that, when using single-image diffusion as the base model, 3D-Adapter alone
+cannot provide the necessary global semantic consistency for 3D generation. Therefore, it should
+be complemented with other sources of consistency, such initialization with partial noise like
+SDEdit(Mengetal.,2022)orextraconditioningfromControlNets. Fortext-to-avatargeneration,
+we use rendered views of a human template for SDEdit initialization with the initial timestep t
+init
+setto0.88T,andemployanextraposeControlNetforconditioning. Fortext-to-texturegeneration,
+globalconsistencyisusuallygoodduetogroundtruthdepthconditioning.
+Optimization loss functions. For NeRF/mesh optimization, we employ L1 and LPIPS losses
+on RGB and alpha maps, and total variation (TV) loss on normal maps. Additionally, we en-
+force stronger geometry regularization using ray entropy loss for NeRF, and Laplacian smoothing
+loss (Sorkine et al., 2004) plus normal consistency loss for mesh, making the optimization more
+robusttoimperfectintermediateviewsxˆ′. MoredetailscanbefoundinAppendixC.
+t
+4.3 TEXTUREPOST-PROCESSING
+To further enhance the visual quality of objects generated from text, we implement an optional
+texturerefinementpipelineasapost-processingstep.First,whenusingtheGRM-based3D-Adapter,
+weconvertthegenerated3DGSintoatexturedmeshviaTSDFintegration. Withtheinitialmesh,
+werendersixsurroundingviewsandapplyper-viewSDEditrefinement(t = 0.5T)usingStable
+init
+Diffusionv1.5with“tile”ControlNet. Finally,therefinedviewsareaggregatedintotheUVspace
+using texture backprojection. For fair comparisons in the experiments, this refinement step is not
+usedbydefaultunlessspecifiedotherwise.
+5 EXPERIMENTS
+5.1 EVALUATIONMETRICS
+Toevaluatetheresultsgeneratedby3D-Adapterandcomparethemtovariousbaselinesandcom-
+petitors,wecomputethefollowingmetricsbasedontherenderedimagesofthegenerated3Drep-
+resentations:
+• CLIPscore(Radfordetal.,2021;Jainetal.,2022): Evaluatesimage–textalignmentintext-to-
+3D,text-to-texture,andtext-to-avatartasks.WeuseCLIP-ViT-L-14forallCLIP-relatedmetrics.
+• Aestheticscore(Schuhmannetal.,2022): Assessestexturedetails. TheuserstudyinWuetal.
+(2024)revealedthatthismetrichighlycorrelateswithhumanpreferenceintexturedetails.
+• FID(Heuseletal.,2017): Measuresthevisualqualitywhenreferencetestsetimagesareavail-
+able,applicabletotext-to-3Dmodelstrainedoncommondatasetandallimage-to-3Dmodels.
+6Preprint
+Table 1: Text-to-3D: comparison with baselines, pa-
+Table 2: Text-to-3D: comparison with
+rametersweep,andablationstudies.
+previousSOTAs.
+ID Method CLIP↑ Aesthetic↑ FID↓ /M 1D 0−D 7↓ Method CLIP↑ Aesthetic↑
+A0 Two-stage(GRM) 27.02 4.48 34.19 232.4 Shap-E 19.4 4.07
+A1 A0+I/Osync 24.62 4.35 63.22 1239.7 LGM 22.5 4.31
+A2 A1w/finetunedGRM 22.57 4.16 70.35 1.7 Instant3D 25.5 4.24
+B0 3D-Adapterλ =1 27.31 4.54 32.81 4.7 MVDream-SDS 26.9 4.49
+aug
+B1 3D-Adapterλ =2 27.22 4.52 33.46 3.9 GRM 26.6 4.54
+aug
+B2 3D-Adapterλ =4 26.99 4.45 34.34 3.2
+aug 3D-Adapter(ours) 27.7 4.61
+B3 3D-Adapterλ =8 25.47 4.28 39.36 25.3
+aug
+3D-Adapter
+C0 B0w/ofeedback 27.18 4.55 33.13 7.6 +texrefine(ours) 28.0 4.71
+C1 B0w/obiascanceling 25.49 4.36 42.20 3.6
+A turtle standing
+on its hind legs,
+wearing a top hat
+and holding a
+cane
+A robot and
+dinosaur playing
+chess, high
+resolution
+A tiger wearing a
+tuxedo
+Prompt 3D-Adapter 3D-Adapter GRM Two-stage GRM I/O Sync MVDream-SDS
++ tex refine (mesh) (3DGS) (3DGS) (3DGS) (NeRF)
+Figure3: Comparisonontext-to-3Dgeneration
+• CLIPsimilarity(Radfordetal.,2021),LPIPS(Zhangetal.,2018),SSIM(Wangetal.,2004),
+PSNR:Evaluatesnovelviewfidelityinimage-to-3D.
+• Mean depth distortion (MDD) (Yu et al., 2024; Huang et al., 2024): Assesses the geometric
+quality of generated 3DGS. Lower depth distortion indicates less floaters or fuzzy surfaces,
+reflectingbettergeometryconsistency. MoredetailscanbefoundinAppendixD.
+• CLIPt-lessscore: AssessesthegeometricqualityofgeneratedmeshesbycomputingtheCLIP
+scorebetweenshadedtexturelessrenderingsandtextsappendedwith“textureless3Dmodel”.
+5.2 TEXT-TO-3DGENERATION
+Fortext-to-3Dgeneration,weadopttheGRM-based3D-AdapterwithInstant3DU-Netasthebase
+model. All results are generated using EDM Euler ancestral solver (Karras et al., 2022) with 30
+denoising steps and mean latent initialization (Appendix B.2). The inference time is around 0.7
+secperstep,anddetailedinferencetimeanalysisispresentedinAppendixB.3. Forevaluation,we
+firstcompare3D-Adapterwiththebaselinesandconductablationstudiesonavalidationsetof379
+BLIP-captioned objects sampled from a high-quality subset of Objaverse (Li et al., 2022; Deitke
+et al., 2023). The results are shown in Table 1, with the rendered images from the dataset used
+asrealsampleswhencomputingtheFIDmetric. Subsequently,webenchmark3D-Adapteronthe
+sametestsetasGRM(Xuetal.,2024a),consistingof200prompts,tomakefaircomparisonstothe
+previousSOTAsinTable2. QualitativeresultsareshowninFig.3.
+Baselines. Thetwo-stageGRM(A0)exhibitsgoodvisualquality,buttheMDDmetricismagni-
+tudes higher than that of our 3D-Adapter (B0–B3) due to the highly ambiguous geometry caused
+7Preprint
+Table 3: Image-to-3D: comparison with previous SO-
+TAs.
+Table 4: Text-to-avatar: comparison
+Method Type PSNR↑ SSIM↑ LPIPS↓ CLIP↑ FID↓
+sim withbaselines.
+One-2-3-45 Mesh 17.84 0.800 0.199 0.832 89.4
+CLIP
+TriplaneGaussian GS 16.81 0.797 0.257 0.840 52.6 Methods CLIP↑ Aesthetic↑ ↑
+t-less
+Shap-E Mesh 15.45 0.772 0.297 0.854 56.5
+LGM GS 16.90 0.819 0.235 0.855 42.1 Two-stagebaseline 23.90 4.79 24.60
+DreamGaussian Mesh 19.19 0.811 0.171 0.862 57.6 I/Osyncbaseline 22.01 4.53 25.98
+Wonder3D Mesh 17.29 0.815 0.240 0.871 55.7
+3D-Adapter 23.67 4.97 26.07
+One-2-3-45++ Mesh 17.79 0.819 0.219 0.886 42.1
+3D-Adapter
+GRM GS 20.10 0.826 0.136 0.932 27.4 24.07 5.11 26.07
++texrefine
+3D-Adapter(ours) GS 20.38 0.840 0.135 0.936 20.2
+3D-Adapter
+Mesh 20.34 0.840 0.135 0.933 21.7
++TSDF(ours)
+Input 3D-Adapter (ours) One2345++ Wonder3D
+Figure4: Comparisonofmesh-basedimage-to-3DmethodsontheGSOtestset.
+bylocalmisalignment. NaivelyrewiringitintoanI/Osyncmodel(A1)worsenstheresults,asthe
+original GRM is trained only on rendered ground truths x and cannot handle the imperfections of
+the denoised views xˆ. However, when using the GRM model fine-tuned according to our method
+(Eq.3),themodel(A2)achievesthelowestpossibleMDDwithnearlyperfectgeometryconsistency,
+butitsufferssignificantlyfrommodecollapseandstrugglestogeneratemeaningfulcontent.
+Parametersweeponλ andablationstudies. The3D-Adapterwithafeedbackaugmentation
+aug
+guidance scale λ = 1 (B0) achieves the best visual quality among all variants and significantly
+aug
+better geometry quality than A0. As λ increases, the MDD metric continues to improve, but at
+aug
+theexpenseofvisualquality. Averylargeλ (B3)unsurprisinglyworsenstheresults,similartoa
+aug
+largeCFGscale. Disablingfeedbackaugmentation(C0,equivalenttoλ =0)notablyimpactsthe
+aug
+geometricquality,asevidencedbytheworseMDDmetric,althoughitstilloutperformsthebaseline
+(A0)thankstoourrobustGRMfine-tuning. Withoutbiascanceling(C1),allvisualmetricsdegrade
+significantly,whichsubstantiatestheeffectivenessof3Dfeedbackguidance(Eq.(4)).
+Comparison with other competitors. Built on top of GRM, our 3D-Adapter (λ =1) further
+aug
+advancesthebenchmark,outperformingpreviousSOTAsintext-to-3D(Jun&Nichol,2023;Tang
+etal.,2024a;Lietal.,2024;Shietal.,2024;Xuetal.,2024a)asshowninTable2andFig.3.
+5.3 IMAGE-TO-3DGENERATION
+Forimage-to-3Dgeneration,weadoptthesameapproachusedfortext-to-3Dgeneration,exceptfor
+employingZero123++U-Netasthebasemodel. WefollowthesameevaluationprotocolasinXu
+et al. (2024a), using 248 GSO objects (Downs et al., 2022) as the test set. As shown in Table 3,
+3D-Adapter(λ =1)outperformsthetwo-stageGRMandothercompetitors(Liuetal.,2023a;Zou
+aug
+et al., 2024; Jun & Nichol, 2023; Tang et al., 2024a;b; Long et al., 2024; Liu et al., 2024a; Xu
+8Preprint
+Table 6: Text-to-texture: comparison with pre-
+Table 5: Text-to-texture: comparison with
+viousSOTAs.
+baselines.
+Methods CLIP↑ Aesthetic↑
+Methods CLIP↑ Aesthetic↑
+TEXTure 25.39 4.66
+Two-stagebaseline 25.82 4.85 Text2Tex 24.44 4.72
+I/Osyncbaseline 26.05 4.68 SyncMVD 25.65 4.76
+3D-Adapter 26.40 4.85
+3D-Adapter(ours) 26.40 4.85
+There is a picture
+of a pair of shoes
+with a shoelace
+Batman in a
+Batman costume
+standing up with his
+hands in his pockets
+There is a toy car
+with a steering and
+a steering wheel
+A close up of a toy
+figure of a captain
+in a red, white and
+blue outfit
+A close up of a toy
+figure of a man with
+a hat and a sword
+Prompt
+(BLIP-generated) 3D-Adapter I/O sync Two-stage SyncMVD Text2Tex TEXTure
+Figure5: Comparisonontext-to-texturegeneration.
+etal.,2024a)onallmetrics. Moreover,thequalitylossinconvertingthegenerated3DGStomesh
+via TSDF is almost negligible. We present qualitative comparisons of the meshes generated by
+3D-AdapterandothermethodsinFig.4.
+5.4 TEXT-TO-TEXTUREGENERATION
+For text-to-texture evaluation, 3D-Adapter employs fast texture backprojection to blend multiple
+viewsforintermediatetimesteps,andswitchestohigh-qualitytexturefieldoptimization(similarto
+NeRF)forthefinaltimestep.AcommunityStableDiffusionv1.5variant,DreamShaper8,isadopted
+as the base model. During the sampling process, 32 surrounding views are used initially, and this
+numberisgraduallyreducedto7viewsduringthedenoisingprocesstoreducecomputationinlater
+stages. WeadopttheEDMEulerancestralsolverwith24denoisingsteps. Thetotalinferencetime
+isaround1.5minutesperobjectonasingleRTXA6000GPU(includingUVunwrapping),which
+is faster than the competitors (SyncMVD (Liu et al., 2023c): ∼1.9 min, TEXTure (Richardson
+etal.,2023): ∼2.0min,Text2Tex(Chenetal.,2023a): ∼11.2min). 92BLIP-captionedobjectsare
+sampledfromahigh-qualitysubsetofObjaverseasourtestset.
+Comparisonwithbaselines. AsshowninTable5andFig.5,thetwo-stagebaselinehasgoodtex-
+turedetailsbutnotablyworseCLIPscoreduetopoorconsistency. TheI/Osyncbaselinehasmuch
+better consistency, but it sacrifices details, resulting in the worst aesthetic score. In comparison,
+3D-Adapterexcelsinbothmetrics,producingdetailedandconsistenttextures.
+Comparisonwithothercompetitors. Quantitatively,Table6demonstratesthat3D-Adaptersig-
+nificantlyoutperformspreviousSOTAsonbothmetrics. Interestingly,evenourtwo-stagebaseline
+inTable5surpassesthecompetitors,whichcanbeattributedtoouruseoftexturefieldoptimization
+9Preprint
+Lionel Messi
+Argentina
+A humanoid
+robot
+Wonder Woman
+3D-Adapter
+Prompt 3D-Adapter I/O sync Two-stage
++tex refine
+Figure6: Comparisonontext-to-avatargenerationusingthesameposetemplate.
+andcommunity-customizedbasemodel. QualitativeresultsinFig.5revealthatpreviousmethods
+aregenerallylessrobustcomparedto3D-Adapterandmayproduceartifactsinsomecases.
+5.5 TEXT-TO-AVATARGENERATION
+For text-to-avatar generation, the optimization-based 3D-Adapter is adopted with a custom pose
+ControlNetforStableDiffusionv1.5, whichprovidesextraconditioninggivenahumanposetem-
+plate. 32 full-body views and 32 upper-body views are selected for denoising, capturing both the
+overall figure and face details. These are later reduced to 12 views during the denoising process.
+WeusetheEDMEulerancestralsolverwith32denoisingsteps,withaninferencetimeofapprox-
+imately 7 minutes per object on a single RTX A6000 GPU (including 0.5 minutes on CPU-based
+UVunwrapping). Textureediting(usingtext-to-texturepipelineandSDEditwitht = 0.3T)and
+init
+refinementcanbeoptionallyappliedtofurtherimprovetexturedetails,whichcosts1.4minutes. For
+evaluation, we compare 3D-Adapter with baselines using 21 character prompts on the same pose
+template. As shown in Table 4, 3D-Adapter achieves the highest scores across all three metrics,
+indicatingsuperiorappearanceandgeometry. Fig.6revealsthatI/Osyncproducesoverlysmoothed
+textureandgeometryduetomodecollapse,whilethetwo-stagebaselineresultsinnoisy,lesscoher-
+enttextureandgeometry. TheseobservationsalsoalignwiththequantitativeresultsinTable4.
+6 CONCLUSION
+Inthiswork,wehaveintroduced3D-Adapter,aplug-inmodulethateffectivelyenhancesthe3Dge-
+ometryconsistencyofexistingmulti-viewdiffusionmodels,bridgingthegapbetweenhigh-quality
+2Dand3Dcontentcreation.Wehavedemonstratedtwovariantsof3D-Adapter:thefast3D-Adapter
+usingfeed-forwardGaussianreconstruction,andtheflexibletraining-free3D-Adapterusing3Dop-
+timization and pretrained ControlNets. Experiments on text-to-3D, image-to-3D, text-to-texture,
+andtext-to-avatartaskshavesubstantiateditsall-roundcompetence,suggestinggreatgeneralityand
+potentialinfutureextension.
+Limitations. 3D-Adapterintroducessubstantialcomputationoverhead,primarilyduetotheVAE
+decodingprocessbefore3Dreconstruction. Inaddition, weobservethatourfinetunedControlNet
+for3Dfeedbackaugmentationstronglyoverfitsthefinetuningdata,whichmaylimititsgeneraliza-
+tion despite the proposed guidance method. Future work may focus on developing more efficient,
+easy-to-finetunenetworksfor3D-Adapter.
+10Preprint
+Acknowledgements WethankYinghaoXuandZifanShiforsharingthedata,code,andresultsfor
+text-to-3Dandimage-to-3Devaluation,andothermembersofGeometricComputationGroup,Stan-
+fordComputationalImagingLab,andSULabforusefulfeedbackanddiscussions.Thisprojectwas
+inpartsupportedbyVannevarBushFacultyFellowship, ARLgrantW911NF-21-2-0104, Google,
+Samsung,andQualcommInnovationFellowship.
+REFERENCES
+Titas Anciukevicius, Zexiang Xu, Matthew Fisher, Paul Henderson, Hakan Bilen, Niloy J. Mitra,
+andPaulGuerrero. RenderDiffusion: Imagediffusionfor3Dreconstruction,inpaintingandgen-
+eration. InCVPR,2023.
+Miguel Angel Bautista, Pengsheng Guo, Samira Abnar, Walter Talbott, Alexander Toshev,
+ZhuoyuanChen, LaurentDinh, ShuangfeiZhai, HanlinGoh, DanielUlbricht, AfshinDehghan,
+and Josh Susskind. Gaudi: A neural architect for immersive 3d scene generation. In NeurIPS,
+2022.
+Eric R. Chan, Connor Z. Lin, Matthew A. Chan, Koki Nagano, Boxiao Pan, Shalini De Mello,
+Orazio Gallo, Leonidas Guibas, Jonathan Tremblay, Sameh Khamis, Tero Karras, and Gordon
+Wetzstein. Efficientgeometry-aware3Dgenerativeadversarialnetworks. InCVPR,2022.
+Dave Zhenyu Chen, Yawar Siddiqui, Hsin-Ying Lee, Sergey Tulyakov, and Matthias Nießner.
+Text2tex: Text-driventexturesynthesisviadiffusionmodels. InICCV,2023a.
+HanshengChen,JiataoGu,AnpeiChen,WeiTian,ZhuowenTu,LingjieLiu,andHaoSu. Single-
+stagediffusionnerf: Aunifiedapproachto3dgenerationandreconstruction. InICCV,2023b.
+Zilong Chen, Yikai Wang, Feng Wang, Zhengyi Wang, and Huaping Liu. V3d: Video diffusion
+modelsareeffective3dgenerators,2024.
+MattDeitke, DustinSchwenk, JordiSalvador, LucaWeihs, OscarMichel, EliVanderBilt, Ludwig
+Schmidt,KianaEhsani,AniruddhaKembhavi,andAliFarhadi. Objaverse: Auniverseofanno-
+tated3dobjects. InCVPR,2023.
+Tim Dettmers, Mike Lewis, Sam Shleifer, and Luke Zettlemoyer. 8-bit optimizers via block-wise
+quantization. InICLR,2022.
+LauraDowns,AnthonyFrancis,NateKoenig,BrandonKinman,RyanHickman,KristaReymann,
+ThomasBMcHugh,andVincentVanhoucke. Googlescannedobjects: Ahigh-qualitydatasetof
+3dscannedhouseholditems. InICRA,pp.2553–2560,2022.
+Emilien Dupont, Hyunjik Kim, S. M. Ali Eslami, Danilo Jimenez Rezende, and Dan Rosenbaum.
+Fromdatatofuncta: Yourdatapointisafunctionandyoucantreatitlikeone. InICML,2022.
+Chenjian Gao, Boyan Jiang, Xinghui Li, Yingpeng Zhang, and Qian Yu. Genesistex: Adapting
+imagedenoisingdiffusiontotexturespace. InCVPR,2024.
+Jiatao Gu, Alex Trevithick, Kai-En Lin, Josh Susskind, Christian Theobalt, Lingjie Liu, and Ravi
+Ramamoorthi. Nerfdiff:Single-imageviewsynthesiswithnerf-guideddistillationfrom3d-aware
+diffusion. InICML,2023.
+Anchit Gupta, Wenhan Xiong, Yixin Nie, Ian Jones, and Barlas Og˘uz. 3dgen: Triplane latent
+diffusionfortexturedmeshgeneration,2023.
+Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp Hochreiter.
+Ganstrainedbyatwotime-scaleupdateruleconvergetoalocalnashequilibrium. InNeurIPS,
+2017.
+JonathanHoandTimSalimans. Classifier-freediffusionguidance. InNeurIPSWorkshop,2021.
+JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. InNeurIPS,
+2020.
+11Preprint
+BinbinHuang,ZehaoYu,AnpeiChen,AndreasGeiger,andShenghuaGao. 2dgaussiansplatting
+forgeometricallyaccurateradiancefields,2024.
+AjayJain,BenMildenhall,JonathanT.Barron,PieterAbbeel,andBenPoole.Zero-shottext-guided
+objectgenerationwithdreamfields. InCVPR,2022.
+HeewooJunandAlexNichol. Shap-e: Generatingconditional3dimplicitfunctions,2023.
+TeroKarras,MiikaAittala,TimoAila,andSamuliLaine. Elucidatingthedesignspaceofdiffusion-
+basedgenerativemodels. InNeurIPS,2022.
+BernhardKerbl,GeorgiosKopanas,ThomasLeimku¨hler,andGeorgeDrettakis. 3dgaussiansplat-
+ting for real-time radiance field rendering. ACM Transactions on Graphics, 42(4), July 2023.
+URLhttps://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/.
+MijeongKim, SeongukSeo, andBohyungHan. Infonerf: Rayentropyminimizationforfew-shot
+neuralvolumerendering. InCVPR,2022.
+DiederikP.KingmaandJimmyBa. Adam: Amethodforstochasticoptimization. InICLR,2015.
+MinSeokLee,WooseokShin,andSungWonHan. Tracer: Extremeattentionguidedsalientobject
+tracingnetwork. InAAAI,2022.
+Jiahao Li, Hao Tan, Kai Zhang, Zexiang Xu, Fujun Luan, Yinghao Xu, Yicong Hong, Kalyan
+Sunkavalli, Greg Shakhnarovich, and Sai Bi. Instant3d: Fast text-to-3d with sparse-view gen-
+erationandlargereconstructionmodel. InICLR,2024. URLhttps://openreview.net/
+forum?id=2lDQLiH1W4.
+JunnanLi,DongxuLi,CaimingXiong,andStevenHoi. Blip: Bootstrappinglanguage-imagepre-
+trainingforunifiedvision-languageunderstandingandgeneration. InICML,2022.
+Minghua Liu, Chao Xu, Haian Jin, Linghao Chen, Zexiang Xu, Hao Su, et al. One-2-3-45: Any
+singleimageto3dmeshin45secondswithoutper-shapeoptimization. InNeurIPS,2023a.
+MinghuaLiu,RuoxiShi,LinghaoChen,ZhuoyangZhang,ChaoXu,XinyueWei,HanshengChen,
+Chong Zeng, Jiayuan Gu, and Hao Su. One-2-3-45++: Fast single image to 3d objects with
+consistentmulti-viewgenerationand3ddiffusion. InCVPR,2024a.
+RuoshiLiu,RundiWu,BasileVanHoorick,PavelTokmakov,SergeyZakharov,andCarlVondrick.
+Zero-1-to-3: Zero-shotoneimageto3dobject. InICCV,2023b.
+YuanLiu,ChengLin,ZijiaoZeng,XiaoxiaoLong,LingjieLiu,TakuKomura,andWenpingWang.
+Syncdreamer: Generating multiview-consistent images from a single-view image. In ICLR,
+2024b.
+YuxinLiu,MinshanXie,HanyuanLiu,andTien-TsinWong.Text-guidedtexturingbysynchronized
+multi-viewdiffusion,2023c.
+Xiaoxiao Long, Cheng Lin, Peng Wang, Taku Komura, and Wenping Wang. Sparseneus: Fast
+generalizableneuralsurfacereconstructionfromsparseviews. InECCV,2022.
+Xiaoxiao Long, Yuan-Chen Guo, Cheng Lin, Yuan Liu, Zhiyang Dou, Lingjie Liu, Yuexin Ma,
+Song-HaiZhang,MarcHabermann,ChristianTheobalt,andWenpingWang. Wonder3d: Single
+imageto3dusingcross-domaindiffusion. InCVPR,2024.
+IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InICLR,2019.
+ChengLu, YuhaoZhou, FanBao, JianfeiChen, ChongxuanLi, andJunZhu. Dpm-solver: Afast
+odesolverfordiffusionprobabilisticmodelsamplinginaround10steps. InNeurIPS,2022.
+ChenlinMeng,YutongHe,YangSong,JiamingSong,JiajunWu,Jun-YanZhu,andStefanoErmon.
+SDEdit:Guidedimagesynthesisandeditingwithstochasticdifferentialequations.InICLR,2022.
+Gal Metzer, Elad Richardson, Or Patashnik, Raja Giryes, and Daniel Cohen-Or. Latent-nerf for
+shape-guidedgenerationof3dshapesandtextures. InCVPR,2023.
+12Preprint
+BenMildenhall,PratulP.Srinivasan,MatthewTancik,JonathanT.Barron,RaviRamamoorthi,and
+RenNg. Nerf: Representingscenesasneuralradiancefieldsforviewsynthesis. InECCV,2020.
+Norman Mu¨ller, Yawar Siddiqui, Lorenzo Porzi, Samuel Rota Bulo`, Peter Kontschieder, and
+MatthiasNießner. Diffrf: Rendering-guided3dradiancefielddiffusion. InCVPR,2023.
+Thomas Mu¨ller, Alex Evans, Christoph Schied, and Alexander Keller. Instant neural graphics
+primitiveswithamultiresolutionhashencoding. ACMTransactionsonGraphics, 41(4):102:1–
+102:15, July 2022. doi: 10.1145/3528223.3530127. URL https://doi.org/10.1145/
+3528223.3530127.
+WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InICCV,2023.
+RyanPo, WangYifan, VladislavGolyanik, KfirAberman, JonathanT.Barron, AmitH.Bermano,
+EricRyanChan,TaliDekel,AleksanderHolynski,AngjooKanazawa,C.KarenLiu,LingjieLiu,
+BenMildenhall,MatthiasNießner,Bjo¨rnOmmer,ChristianTheobalt,PeterWonka,andGordon
+Wetzstein. State of the art on diffusion models for visual computing. In Eurographics STAR,
+2024.
+BenPoole,AjayJain,JonathanT.Barron,andBenMildenhall. Dreamfusion: Text-to-3dusing2d
+diffusion. InICLR,2023.
+Guocheng Qian, Jinjie Mai, Abdullah Hamdi, Jian Ren, Aliaksandr Siarohin, Bing Li, Hsin-Ying
+Lee, IvanSkorokhodov, PeterWonka, SergeyTulyakov, andBernardGhanem. Magic123: One
+imagetohigh-quality3dobjectgenerationusingboth2dand3ddiffusionpriors. InICLR,2024.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual
+modelsfromnaturallanguagesupervision. InICML,pp.8748–8763,2021.
+Elad Richardson, Gal Metzer, Yuval Alaluf, Raja Giryes, and Daniel Cohen-Or. Texture: Text-
+guidedtexturingof3dshapes. InSIGGRAPH,2023.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bjo¨rn Ommer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels. InCVPR,2022.
+ChristophSchuhmann, RomainBeaumont, RichardVencu, CadeGordon, RossWightman, Mehdi
+Cherti,TheoCoombes,AarushKatta,ClaytonMullis,MitchellWortsman,PatrickSchramowski,
+SrivatsaKundurthy,KatherineCrowson,LudwigSchmidt,RobertKaczmarczyk,andJeniaJitsev.
+Laion-5b:Anopenlarge-scaledatasetfortrainingnextgenerationimage-textmodels.InNeurIPS
+Workshop,2022.
+TianchangShen,JunGao,KangxueYin,Ming-YuLiu,andSanjaFidler. Deepmarchingtetrahedra:
+ahybridrepresentationforhigh-resolution3dshapesynthesis. InNeurIPS,2021.
+RuoxiShi,HanshengChen,ZhuoyangZhang,MinghuaLiu,ChaoXu,XinyueWei,LinghaoChen,
+Chong Zeng, and Hao Su. Zero123++: a single image to consistent multi-view diffusion base
+model,2023.
+YichunShi,PengWang,JianglongYe,MaiLong,KejieLi,andXiaoYang. Mvdream: Multi-view
+diffusionfor3dgeneration. InICLR,2024.
+J Ryan Shue, Eric Ryan Chan, Ryan Po, Zachary Ankner, Jiajun Wu, and Gordon Wetzstein. 3d
+neuralfieldgenerationusingtriplanediffusion. InCVPR,2023.
+YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,andBen
+Poole.Score-basedgenerativemodelingthroughstochasticdifferentialequations.InICLR,2021.
+O. Sorkine, D. Cohen-Or, Y. Lipman, M. Alexa, C. Ro¨ssl, and H.-P. Seidel. Laplacian surface
+editing. In Proceedings of the 2004 Eurographics/ACM SIGGRAPH Symposium on Geometry
+Processing,SGP’04,pp.175–184,NewYork,NY,USA,2004.AssociationforComputingMa-
+chinery. ISBN3905673134. doi: 10.1145/1057432.1057456. URLhttps://doi.org/10.
+1145/1057432.1057456.
+13Preprint
+Jiaxiang Tang, Zhaoxi Chen, Xiaokang Chen, Tengfei Wang, Gang Zeng, and Ziwei Liu. Lgm:
+Largemulti-viewgaussianmodelforhigh-resolution3dcontentcreation,2024a.
+Jiaxiang Tang, Jiawei Ren, Hang Zhou, Ziwei Liu, and Gang Zeng. Dreamgaussian: Generative
+gaussiansplattingforefficient3dcontentcreation. InICLR,2024b.
+AyushTewari,TianweiYin,GeorgeCazenavette,SemonRezchikov,JoshuaB.Tenenbaum,Fre´do
+Durand, William T. Freeman, and Vincent Sitzmann. Diffusion with forward models: Solving
+stochasticinverseproblemswithoutdirectsupervision. InNeurIPS,2023.
+VikramVoleti,Chun-HanYao,MarkBoss,AdamLetts,DavidPankratz,DmitriiTochilkin,Chris-
+tian Laforte, Robin Rombach, and Varun Jampani. SV3D: Novel multi-view synthesis and 3D
+generationfromasingleimageusinglatentvideodiffusion. arXiv,2024.
+PengWang, LingjieLiu, YuanLiu, ChristianTheobalt, TakuKomura, andWenpingWang. Neus:
+Learningneuralimplicitsurfacesbyvolumerenderingformulti-viewreconstruction.InNeurIPS,
+pp.27171–27183,2021a.
+PengWang,HaoTan,SaiBi,YinghaoXu,FujunLuan,KalyanSunkavalli,WenpingWang,Zexiang
+Xu, and Kai Zhang. PF-LRM: Pose-free large reconstruction model for joint pose and shape
+prediction. InICLR,2024. URLhttps://openreview.net/forum?id=noe76eRcPC.
+TengfeiWang,BoZhang,TingZhang,ShuyangGu,JianminBao,TadasBaltrusaitis,JingjingShen,
+DongChen,FangWen,QifengChen,andBainingGuo. Rodin: Agenerativemodelforsculpting
+3ddigitalavatarsusingdiffusion. InCVPR,2023.
+Xintao Wang, Liangbin Xie, Chao Dong, and Ying Shan. Real-esrgan: Training real-world blind
+super-resolutionwithpuresyntheticdata. InICCVWorkshop,2021b.
+ZhouWang,A.C.Bovik, H.R.Sheikh, andE.P.Simoncelli. Imagequalityassessment: fromerror
+visibilitytostructuralsimilarity.IEEETIP,13(4):600–612,2004.doi:10.1109/TIP.2003.819861.
+DanielWatson,WilliamChan,RicardoMartin-Brualla,JonathanHo,AndreaTagliasacchi,andMo-
+hammadNorouzi. Novelviewsynthesiswithdiffusionmodels. InICLR,2023.
+TongWu,GuandaoYang,ZhibingLi,KaiZhang,ZiweiLiu,LeonidasGuibas,DahuaLin,andGor-
+donWetzstein. Gpt-4v(ision)isahuman-alignedevaluatorfortext-to-3dgeneration. InCVPR,
+2024.
+Yinghao Xu, Zifan Shi, Wang Yifan, Hansheng Chen, Ceyuan Yang, Sida Peng, Yujun Shen, and
+GordonWetzstein. Grm: Largegaussianreconstructionmodelforefficient3dreconstructionand
+generation,2024a.
+Yinghao Xu, Hao Tan, Fujun Luan, Sai Bi, Peng Wang, Jiahao Li, Zifan Shi, Kalyan Sunkavalli,
+GordonWetzstein, ZexiangXu, andKaiZhang. Dmv3d: Denoisingmulti-viewdiffusionusing
+3dlargereconstructionmodel. InICLR,2024b.
+Zehao Yu, Torsten Sattler, and Andreas Geiger. Gaussian opacity fields: Efficient and compact
+surfacereconstructioninunboundedscenes,2024.
+KaiZhang,NickKolkin,SaiBi,FujunLuan,ZexiangXu,EliShechtman,andNoahSnavely. Arf:
+Artisticradiancefields. InECCV,2022.
+Lvmin Zhang, Anyi Rao, and Maneesh Agrawala. Adding conditional control to text-to-image
+diffusionmodels. InICCV,2023.
+Richard Zhang, Phillip Isola, Alexei Efros, Eli Shechtman, and Oliver Wang. The unreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InCVPR,2018.
+Xin-YangZheng,HaoPan,Peng-ShuaiWang,XinTong,YangLiu,andHeung-YeungShum. Lo-
+callyattentionalsdfdiffusionforcontrollable3dshapegeneration. ACMTransactionsonGraph-
+ics,42(4),2023.
+14Preprint
+Zi-XinZou,ZhipengYu,Yuan-ChenGuo,YangguangLi,DingLiang,Yan-PeiCao,andSong-Hai
+Zhang. Triplanemeetsgaussiansplatting: Fastandgeneralizablesingle-view3dreconstruction
+withtransformers. InCVPR,2024.
+QiZuo,XiaodongGu,LingtengQiu,YuanDong,ZhengyiZhao,WeihaoYuan,RuiPeng,SiyuZhu,
+ZilongDong,LiefengBo,andQixingHuang. Videomv: Consistentmulti-viewgenerationbased
+onlargevideogenerativemodel,2024.
+A THEORETICAL ANALYSIS OF THE I/O SYNC TECHNIQUE
+WhenperformingdiffusionODEsamplingusingthecommonEulersolver,alinearinputsyncop-
+erationisequivalenttosyncingtheoutputxˆ aswellastheinitializationx . Thisisbecausethe
+t tinit
+inputx canbeexpressedasalinearcombinationofallpreviousoutputs{x ,x ,...}and
+t t−∆t t−2∆t
+theinitializationx byexpandingtherecursiveEulersteps.
+tinit
+Furthermore,linearI/Osyncisalsoequivalenttolinearscoresync,sincethelearnedscorefunction
+s (x )canalsobeexpressedasalinearcombinationoftheinputx andoutputxˆ :
+t t t t
+ϵˆ α xˆ −x
+s (x )=− t = t t t (5)
+t t σ σ 2
+t t
+However, synchronizing the score function, a.k.a. score averaging, is theoretically problematic.
+Let p(x|c ),p(x|c ) be two independent probability density functions of a corresponding pixel x
+1 2
+viewed from cameras c and c , respectively. A diffusion model is trained to predict the score
+1 2
+functions (x |c )ofthenoisydistributionattimestept,definedas:
+t t v
+(cid:90)
+s (x |c )=∇ log p(x |x)p(x|c )dx, (6)
+t t v xt t v
+where p(x |x) = N(x ;α x,σ2I) is a Gaussian perturbation kernel. Ideally, assuming c and
+t t t t 1
+c are independent, combining the two conditional PDFs p(x|c ) and p(x|c ) yields the product
+2 1 2
+p(x|c ,c )= 1p(x|c )p(x|c ),whereZ isanormalizationfactor. Thecorrespondingscorefunc-
+1 2 Z 1 2 (cid:82)
+tion should then become s (x |c ,c ) = ∇ log p(x |x)p(x|c ,c )dx. However, the average
+t t 1 2 xt t 1 2
+ofs (x |c )ands (x |c )isgenerallynotproportionaltos (x |c ,c ),i.e.:
+t t 1 t t 2 t t 1 2
+1 1 1
+(cid:18)(cid:90) (cid:19)(cid:18)(cid:90) (cid:19)
+s (x |c )+ s (x |c )= ∇ log p(x |x)p(x|c )dx p(x |x)p(x|c )dx
+2 t t 1 2 t t 2 2 xt t 1 t 2
+(cid:90) (cid:18) 1 (cid:19)
+(cid:26)∝∇ log p(x |x) p(x|c )p(x|c ) dx=s (x |c ,c ). (7)
+xt t Z 1 2 t t 1 2
+In Fig. 7, we illustrate a simple 1D simulation, showing that score averaging leads to mode col-
+lapse,whencomparedtotherealproductdistribution. Thisexplainstheblurry,mean-shapedresults
+producedbytheI/Osyncbaselines.
+B DETAILS ON GRM-BASED 3D-ADAPTER
+B.1 CONTROLNET
+The GRM-based 3D-Adapter trains a ControlNet (Zhang et al., 2023) for feedback augmentation,
+which has very large model capacity and can easily overfit our relatively small finetuning dataset
+(e.g.,47kobjectsforInstant3D).Therefore,usingtheCFG-likebiassubtractiontechnique(Eq.(4))
+isextremelyimportanttothegeneralizationperformance,whichisalreadyvalidatedinourablation
+studies. Additionally,wedisconnectthetextpromptinputfromtheControlNettofurtheralleviate
+overfitting.
+B.2 MEANLATENTINITIALIZATION
+Instant3D’s4-viewUNetissensitivetotheinitializationmethod,asnotedintheoriginalpaper(Li
+etal.,2024),whichdevelopsanempiricalGaussianblobinitializationmethodtostabilizetheback-
+groundcolor. Incontrast,thispaperadoptsamoreprincipledmeanlatentinitializationmethodby
+15Preprint
+p(x|c 1)
+p(x|c 2)
+p(x|c 1)p(x|c 2)* (x)
+(p(x|c 1)* (x))(p(x|c 2)* (x))
+x
+Figure7: Asimple1Dsimulationillustratingthedifferencebetweenthescoreaverageddistribu-
+tionandtheactualperturbedproductdistribution. ∗denotesconvolution,andN(x)denotesthe
+Gaussianperturbationkernel.
+Table7: GRM-based3D-Adapter: Inferencetimes(sec)withguidanceonasingleRTXA6000.
+Adapter VAE Adapter Adapter Overall
+Encode GRM Render Decode
+Decode Decode Encode total total
+0.055 0.120 0.215 0.091 0.023 0.082 0.121 0.531 0.707
+computing the mean value x¯ of the VAE-encoded latents of 10K objects in the training set. The
+initialstateisthensampledbyperturbingthemeanlatentwithGaussiannoiseϵ:
+x =α x¯+σ ϵ. (8)
+tinit tinit tinit
+B.3 INFERENCETIME
+Detailed module-level inference times per denoising step is shown in Table 7 (with classifier-free
+guidanceandguided3Dfeedbackaugmentationenabled). Apparently, theSDXLVAEdecoderis
+themostexpensivemodulewithin3D-Adapter,whichmaybereplacedbyamoreefficientdecoder
+infuturework.
+C DETAILS ON OPTIMIZATION-BASED 3D-ADAPTER
+The optimization-based 3D-Adapter faces the challenge of potentially inconsistent multi-view in-
+puts, especially at the early denoising stage. Existing surface optimization approaches, such as
+NeuS(Wangetal.,2021a),arenotdesignedtoaddresstheinconsistency. Therefore,wehavedevel-
+opedvarioustechniquesfortherobustoptimizationofInstantNGPNeRF(Mu¨lleretal.,2022)and
+DMTetmesh(Shenetal.,2021),usingenhancedregularizationandprogressiveresolution.
+Rendering. ForeachNeRFoptimizationiteration,werandomlysamplea128×128imagepatch
+from all camera views. Unlike Poole et al. (2023) that computes the normal from NeRF density
+gradients, we compute patch-wise normal maps from the rendered depth maps, which we find to
+be faster and more robust. For mesh rendering, we obtain the surface color by querying the same
+InstantNGPneuralfieldusedinNeRF.ForbothNeRFandmesh,Lambertianshadingisappliedin
+the linear color space prior to tonemapping, with random point lights assigned to their respective
+views.
+RGBAlosses. ForbothNeRFandmesh,weemployRGBandalpharenderinglossestooptimize
+the 3D parameters so that the rendered views x˜ match the intermediate denoised views xˆ′. For
+t t
+RGB, we employ a combination of pixel-wise L1 loss and patch-wise LPIPS loss (Zhang et al.,
+2018). For alpha, we predict the target alpha channel from xˆ′ using an off-the-shelf background
+t
+removalnetwork(Leeetal.,2022)asinMagic123(Qianetal.,2024). Additionally,wesoftenthe
+predictedalphamapusingGaussianblurtopreventNeRFfromoverfittingtheinitialization.
+16Preprint
+Normallosses. Toavoidbumpysurfaces,weapplyanL1.5totalvariation(TV)regularizationloss
+ontherenderednormalmaps:
+L
+N
+=(cid:88)(cid:13) (cid:13)w hw·∇ hwnr ce hn wd(cid:13) (cid:13)1.5 , (9)
+chw
+wherenrend ∈RdenotesthevalueoftheC×H×W normalmapatindex(c,h,w),∇ nrend ∈R2
+chw hw chw
+isthegradientofthenormalmapw.r.t. (h,w),andw ∈ [0,1]isthevalueofaforegroundmask
+hw
+withedgeerosion.
+RayentropylossforNeRF. TomitigatefuzzyNeRFgeometry, weproposeanovelrayentropy
+loss based on the probability of sample contribution. Unlike previous works (Kim et al., 2022;
+Metzeretal.,2023)thatcomputetheentropyofopacitydistributionoralphamap,weconsiderthe
+raydensityfunction:
+p(τ)=T(τ)σ(τ), (10)
+(cid:82)s
+where τ denotes the distance, σ(τ) is the volumetric density and T(τ) = exp− σ(τ)dτ is the
+0
+(cid:82)+inf
+raytransmittance. Theintegralofp(τ)equalsthealphavalueofthepixel,i.e.,a = p(τ)dτ,
+0
+whichislessthan1. Therefore,thebackgroundprobabilityis1−aandacorrespondingcorrection
+termneedstobeaddedwhencomputingthecontinuousentropyoftherayasthelossfunction:
+L
+=(cid:88)(cid:90) +inf
+−p (τ)logp (τ)dτ −(1−a
+)log1−a
+r, (11)
+ray r r r d
+r 0 (cid:124) (cid:123)(cid:122) (cid:125)
+backgroundcorrection
+where r is the ray index, and d is a user-defined “thickness” of an imaginative background shell,
+whichcanbeadjustedtobalanceforeground-to-backgroundratio.
+Mesh smoothing losses As per common practice, we employ the Laplacian smoothing
+loss (Sorkine et al., 2004) and normal consistency loss to further regularize the mesh extracted
+fromDMTet.
+Implementation details The weighted sum of the aforementioned loss functions is utilized to
+optimizethe3Drepresentation.Ateachdenoisingstep,wecarryforwardthe3Drepresentationfrom
+the previous step and perform additional iterations of Adam (Kingma & Ba, 2015) optimization.
+During the denoising sampling process, the rendering resolution progressively increases from 128
+to256,andfinallyto512whenNeRFisconvertedintoamesh(fortexturegenerationtheresolution
+is consistently 512). When the rendering resolution is lower than the diffusion resolution 512, we
+employRealESRGAN-small(Wangetal.,2021b)forefficientsuper-resolution.
+D DETAILS ON THE MEAN DEPTH DISTORTION (MDD) METRIC
+TheMDDmetricisinspiredbythedepthdistortionlossinYuetal.(2024),whichproveseffective
+in removing floaters and improving the geometry quality. The depth distortion loss of a pixel is
+definedas:
+(cid:88)
+L = ω ω |τ −τ |, (12)
+D m n m n
+m,n
+where m,n index over Gaussians contributing to the ray, ω is the blending weight of the m-th
+m
+Gaussianandτ isthedistanceoftheintersectionpoint.
+m
+Tocomputethemeandepthdistortionofaview,wetakethesumofdepthdistortionlossesacross
+allpixelsanddivideitbythesumofalphavaluesacrossallpixels:
+(cid:80)
+L
+MDD = r Dr, (13)
+(cid:80)
+a
+r r
+whereristhepixelindex.
+E MORE RESULTS
+WepresentmorequalitativecomparisonsinFig.8,9,10,11,12.
+17Preprint
+A bald eagle carved
+out of wood
+A praying mantis
+wearing roller skates
+A knight
+holding a lance
+and sitting on
+an armored
+horse
+A goat drinking
+beer
+A greyhound
+dog racing down
+the track
+A shiny silver
+robot cat
+A drum set
+made of cheese
+A cute
+steampunk
+elephant
+Prompt 3D-Adapter 3D-Adapter GRM Two-stage GRM I/O Sync MVDream-SDS
++ tex refine (mesh) (3DGS) (3DGS) (3DGS) (NeRF)
+Figure8: Morecomparisonsontext-to-3Dgeneration(part1).
+18Preprint
+A bear playing
+electric bass
+A mountain
+goat standing
+on a boulder
+A car made out of
+cheese
+A lion reading the
+newspaper
+A blue jay
+standing on a
+large basket of
+rainbow
+macarons
+A chimpanzee
+dressed as a football
+player
+A squirrel dressed
+like Henry VIII king
+of England
+A Bichon Frise
+wearing
+academic regalia
+Prompt 3D-Adapter 3D-Adapter GRM Two-stage GRM I/O Sync MVDream-SDS
++ tex refine (mesh) (3DGS) (3DGS) (3DGS) (NeRF)
+Figure9: Morecomparisonsontext-to-3Dgeneration(part2).
+19Preprint
+Input 3D-Adapter (ours) One2345++ Wonder3D
+Figure10: Morecomparisonsonimage-to-3Dgeneration.
+20Preprint
+A close up of a yellow
+scooter on a white
+background
+There is a toy
+airplane that is
+flying in the sky
+There is a black
+backpack with a red
+line on it
+A close up of a pair of
+headphones with a
+green cover
+There is a large army
+tank that is on a
+concrete surface
+A close up of a robot
+with a skateboard on
+a white background
+A close up of a toy
+figure of a man
+holding a sword
+There is a small
+figurine of a girl
+dressed in a flowery
+dress
+A close up of a statue
+of a man with a cross
+There is a snail with
+flowers on its back
+and a white
+background
+Prompt
+3D-Adapter I/O sync Two-stage SyncMVD Text2Tex TEXTure
+(BLIP-generated)
+Figure11: Morecomparisonsontext-to-texturegeneration.
+21Preprint
+Samurai warrior
+Ancient Egyptian
+Pharaoh
+Naruto
+Iron Man
+Captain America
+Photo of Bruce
+Lee
+3D-Adapter
+Prompt 3D-Adapter I/O sync Two-stage
++tex refine
+Figure12: Morecomparisonsontext-to-avatargeneration.
+22
