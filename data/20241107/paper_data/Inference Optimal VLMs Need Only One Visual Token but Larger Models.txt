@@ -1,0 +1,883 @@
+Preprint. UnderReview.
+INFERENCE OPTIMAL VLMS NEED ONLY ONE
+VISUAL TOKEN BUT LARGER MODELS
+KevinY.Li∗1 SachinGoyal∗1 Joa˜oD.Semedo2 J.ZicoKolter1
+1CarnegieMellonUniversity,2BoschCenterforArtificialIntelligence
+{kyl2, sachingo, zkolter}@cs.cmu.edu joao.semedo@us.bosch.com
+ABSTRACT
+Vision Language Models (VLMs) have demonstrated strong capabilities across
+various visual understanding and reasoning tasks. However, their real-world de-
+ployment is often constrained by high latency during inference due to substan-
+tialcomputerequiredtoprocessthelargenumberofinputtokens(predominantly
+from the image) by the LLM. To reduce inference costs, one can either down-
+size the LLM or reduce the number of input image-tokens, the latter of which
+has been the focus of many recent works around token compression. However,
+it is unclear what the optimal trade-off is, as both the factors directly affect the
+VLMperformance. Wefirstcharacterizethisoptimaltrade-offbetweenthenum-
+berofvisualtokensandLLMparametersbyestablishingscalinglawsthatcapture
+variations in performance with these two factors. Our results reveal a surprising
+trend: for visual reasoning tasks, the inference-optimal behavior in VLMs, i.e.,
+minimum downstream error at any given fixed inference compute, is achieved
+whenusingthelargestLLMthatfitswithintheinferencebudgetwhileminimizing
+visual token count — often to a single token. While the token reduction liter-
+ature has mainly focused on maintaining base model performance by modestly
+reducing the token count (e.g., 5–10×), our results indicate that the compute-
+optimal inference regime requires operating under even higher token compres-
+sion ratios. Based on these insights, we take some initial steps towards build-
+ingapproachestailoredforhightokencompressionsettings. Codeisavailableat
+https://github.com/locuslab/llava-token-compression.
+1 INTRODUCTION
+Recent advancements in Large Language Models (LLMs) have enabled Vision Language Models
+(VLMs) to perceive, reason, and respond through both text and image inputs (Liu et al., 2023;
+Alayracetal.,2022;Daietal.,2023). ManyVLMsarebuiltontopofpretrainedvisionencoders,
+likeCLIP,andpassthepatch-basedtokensfromthevisualencoderintothepretrainedLLMback-
+boneataone-to-oneratioforvisualcontext. ThisresultsintheLLMprocessinghundredsoftokens
+per image, overshadowing those from the user prompt and accounting for most of inference time
+compute. Consequently,deployingVLMsinreal-worldapplications,particularlyonconsumer-side
+edgedevicessuchasmonitoringsystems,drivingassistants,etc.,isoftenlimitedbythesignificant
+inferencecostandresultinglatency.
+ToreducetheinferencecostofVLMs,manyrecentworkshavefocusedondecreasingthenumber
+of visual tokens, via a small learnable module, prior to passing image tokens into the LLM while
+minimizingperformancedegradation(Lietal.,2024c;Shangetal.,2024). Forexample, (Lietal.,
+2024c)learnacrossattentionmoduleovertheCLIPoutputtokenstocompressthenumberoftokens.
+Alternatively, inference FLOPs, proportional to the number of parameters and number of tokens
+processed,canbereducedbyusingasmallerLLM.SinceboththeLLMsizeandnumberofvisual
+inputtokensdirectlyaffecttheVLM’sperformance,itbecomesunclearwhattheoptimaltrade-off
+betweenthetwois. Forexample,onecouldprocessallvisualinputtokensusinga4BLLMoruse
+an 8B LLM on a reduced set of half the original visual tokens, as both result in similar inference
+costs—currently,theidealchoiceisunknown.
+*Equalcontribution,workpartiallydoneatBoschResearch.
+1
+4202
+voN
+5
+]VC.sc[
+1v21330.1142:viXraPreprint. UnderReview.
+Scaling #Params vs #Visual Tokens Scaling #Params vs #Visual Tokens
+0.650 7B 0.625 7B Scaling Params Scaling Params
+=0.077 =0.077
+0.625 =0.015 0.600 =0.015
+Pareto Pareto 0.600 Optimal 0.575 Optimal
+0.575
+4B 0.550 4B
+0.550 #Tokens(V) #Tokens(V)
+1 0.525 1
+0.525 4 4
+16 0.500 16
+0.500 3 66 4 1.8B 3 66 4 1.8B
+0.475 144 0.475 144
+576 576
+0.5B 0.450 0.5B
+100 101 102 103 104 102 103 104
+Inference FLOP ( (NV))) Inference FLOP ( (N(50+V))))
+(a)ScalinglawsforVLMsatQ=0(cachedtext). (b)ScalinglawsforVLMsatQ=50(variabletext).
+Figure 1: Inference optimal scaling laws for VLMs: The number of visual tokens (V) passed
+to the LLM (after token compression, § 2.2), along with the LLM parameter count (N), directly
+determine the inference cost of VLMs (O(N(Q+V))), where Q is the text input tokens. Since
+aVLM’sdownstreamperformanceisdirectlyaffectedbyboththesefactors, itisunclearwhatthe
+optimaltrade-offisforafixedinferencecompute. Inthiswork,wetrytoanswerthisquestionwith
+our scaling laws. Left (a): We plot the fitted scaling curves, assuming cached text input tokens
+(Q = 0). Weobserveasurprisingtrend: forvisualreasoningtasks,thecomputeoptimalbehavior
+(dotted black curve) requires using a single visual token with the largest possible language model
+thatcanfitundertheinferencebudget.Right(b):InferenceoptimalbehaviorunderQ=50requires
+slightlyhighernumberofvisualtokensastheLLMalreadyincursafixedcostduetothetexttokens.
+This raises an important question: given a fixed inference budget, what is the optimal trade-off
+betweenLLMsizeandthenumberofvisualtokensprocessedfordownstreamperformance? Inthis
+work, we try to answer this question by building the first inference-time compute-optimal scaling
+laws for VLMs, modeling performance as a function of both key factors affecting inference cost:
+LLMsizeandthenumberofvisualtokensprocessed. Weobservethatthedownstreamerrorvaries
+5xfasterwithLLMparametersthanwiththenumberofinputvisualtokens.
+In fact, our scaling laws reveal a striking observation: for visual reasoning tasks, the compute-
+optimalinferenceregimeentailsusingthelargestfeasibleLLMwithaverysmallnumberofvisual
+inputtokens—oftenjustone—whentheinputquerycanbecached. Weshowthatforanygiven
+fixed inference cost, trading off the visual tokens for a larger LLM size leads to a reduction in
+downstreamerrorforvisualreasoningtasks. However,forcertainusecaseslikeOpticalCharacter
+Recognition (OCR) or document understanding tasks, the optimal approach is quite the opposite,
+requiringasmanyvisualtokensaspossible, astokencompressionprovesineffectiveforcapturing
+thedenseanddiverseinformationpresentinsuchtasks.
+Mostexistingworkontokencompressionhasfocusedonreducingvisualtokensbyamodestfactor
+(e.g., from 576 to 144 tokens or 64 tokens). In contrast, our results underscore the critical impor-
+tanceofpursuingmuchhighercompressionrates(e.g.,reducingtokensto1or4)forvisualreasoning
+taskswheresuchcompressionis notonlyfeasiblebutalsocompute-optimal. Building uponthese
+insights,wetakeinitialstepstowarddevelopingtokencompressionalgorithmsspecificallytailored
+forhighcompressionregimes. Weproposeaquery-basedtokencompressionapproach,recognizing
+thatinextremecompressionscenarios,itisessentialtoselectivelycuratetokensbasedontheuser’s
+query to preserve the most relevant tokens. In summary, our work identifies the compute-optimal
+inferenceregimeforVLMs,emphasizingtheimportanceofhightokencompressionforvisualrea-
+soning tasks. We hope these findings will serve as a motivation and foundation for shifting token
+reductiontechniquestowardsmoreeffectiveandhighercompressionratios.
+Our work is organized as follows. We first introduce some preliminaries around inference costs
+and visual token compression for VLMs in Section 2. Then we talk about our compute optimal
+scaling laws in Section 3, the results of which motivate our compression algorithm designed for
+hightoken-reductionregimesarecoveredinSection4.
+2
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#Preprint. UnderReview.
+2 PRELIMINARIES
+2.1 ESTIMATINGINFERENCECOSTFORVLMS
+ThelanguagemodelinVLMsprocessesthevisualinputtokensalongwiththeusertextquerytokens.
+Aslanguagemodelsbecomelarger,theFLOPs(FloatingPointOperations)requiredtoprocesseach
+input token scales accordingly. We follow the standard practice for estimating the inference time
+FLOPsas (Kaplanetal.,2020;Sardanaetal.,2024;Snelletal.,2024):
+FLOPs =O(N ×T), (1)
+inf
+where N denotes the parameter count of LLM and T denotes the total inference time tokens. We
+ignore the inference cost stemming from the visual encoder, as we use the CLIP-L vision en-
+coder(Radfordetal.,2021)withthesameinputimageresolutionacrossallexperiments.Inaddition,
+manycurrentopen-sourceVLMsutilizethesameencoder,incurringafixedcostacrossmodels.
+WehighlightthattheinferencecostofVLMsscalesproportionallywithboththeparametersandthe
+numberofinputtokensprocessedbytheLLM.
+InthecontextofVLMs,thetotalinferencetokens,T,canbefurtherdecomposedasT =Q+V+G,
+where Q represents the text input tokens, i.e., the question/prompt, V represents the number of
+visualtokensfromthevisionencoder(aftertokencompression),andGaccountsforthegenerated
+tokens. Inmanyrealworldapplications,suchasdrivingassistancesystems,thetextinputremains
+constant(e.g.,“Alertthedriverifthesceneaheadhasahazard”). Inthesescenarios,thetextinput
+canbecached,effectivelymakingQ = 0bybypassingself-attentionprojectionsandfeed-forward
+calculations. However, inotherinteractiveapplications, Qmayvarybasedondynamicinput. We
+willstudythebehaviorofthedownstreamerrorwithFLOPs underbothQ = 0andvaryingQ
+inf
+regimes. Finally,thegenerationtokensagainarequitesmallformostinferencetasks(singleword
+answers). However,theanalysiswithincreasingQtransferstoincreasingQ+Gaswell.
+2.2 TOKENCOMPRESSIONINVLMS
+As discussed in the previous section, inference FLOPs for VLMs increase proportionally with the
+numberofvisualinputtokens(e.g.,576perimagewithCLIP-ViT-Lvisualencoder). Thenumber
+ofvisualtokensoftendominatesthetotalnumberoftokensprocessedbythelanguagemodel,espe-
+ciallyinapplicationswherethetextinputcanbecachedoriscomparativelyshorter. Thus,therehas
+been a growing interest in developing approaches to compress the visual information into a fewer
+numberoftokensviaasmalllearnablemodule. Forexample,TokenPacker(Lietal.,2024c)learns
+asmallcross-attentionmoduleovertheimagetokenstocompressthembeforepassingtotheLLM.
+More formally, let the visual encoder be defined as a function f(I) = X, where X ∈ Rn×d rep-
+resents a sequence of n vision embedding tokens produced by the encoder from the input image
+I. Token compression then learns a vision projector g (X) = Y that maps these embeddings X
+θ
+to Y ∈ Rm×d, a compressed sequence of m < n tokens to be processed by the language model
+(n=mforstandardVLMswithoutanytokencompression). WereferthereadertoSection5.1for
+adetaileddiscussiononsomeoftherecenttokencompressionalgorithms.
+Notethattokencompressiondoesn’trefertousingasmallervisualencoderorusingsmallerimage
+resolutions as inputs to the encoder. These approaches usually either do not decrease the visual
+tokencountmuch(beyondaround224)orleadtoalargedropsinperformance(Lietal.,2024a).
+3 TOKENS VS PARAMETERS: INFERENCE TIME SCALING LAWS FOR VLMS
+Thedeploymentofvisionlanguagemodelsinreal-worldapplicationscomeswithsignificantchal-
+lenges,particularlysurroundinginferencelatencyandframespersecond(FPS).Forinstance,inreal-
+timesystems,suchasautomotivedriverassistanceorhazardmonitoring,maintaininghighFPSand
+quickresponsetimesiscrucialforsafeandeffectivedeployment. Consequently,reducinginference
+FLOPswhileminimizingdownstreamperformancedegradationisofcritical,practicalimportance,
+especiallyonconsumer-gradeedgedevices,whichareoftenseverelycomputeconstrained.
+ThishasledtoagrowinginterestinvisualtokencompressionforVLMs(§2.2). Alternatively,one
+couldalsouseasmallerLLMtoreduceinferencecost. However,bothoftheabovefactorsdirectly
+3Preprint. UnderReview.
+influencethedownstreamperformance(§2.1). Thisraisesakeyquestion: Givenafixedinference
+compute budget for VLMs, what is the optimal trade-off between the language model size and the
+number of visual tokens processed? In our work, we answer this question by developing scaling
+lawsforVLMsthataccountforthevaryingparametercountofthelanguagemodelcomponentand
+thenumberofvisualinputtokensprocessedbythelanguagemodel. AsmentionedinSection2.1,
+weassumetheinferencecostfromthevisualencodertobefixedandignoreitfromhereonout.
+3.1 SCALINGLAWFORMULATION
+RecallthattheperformanceofaVLMisprimarilygovernedbytheparametercountofthelanguage
+model and the number of visual tokens processed by the LLM, assuming a fixed visual encoder.
+Accordingly,wemodelthescalingbehaviorofVLMperformanceas:
+A B
+Y(N,T)= ∗ +D, (2)
+Nα Tβ
+whereN denotestheLLMparameters,T denotestheinputvisualtokens,{A,B,D,α,β}arelearn-
+ableparameters,andY(N,T)isameasureofmodelquality. Althoughtraditionalscalinglawshave
+beenstudiedinthecontextofpretraininglossKaplanetal.(2020),practitionersoftenusethedirect
+downstreamperformancetoassessmodelquality(Gadreetal.,2024;Goyaletal.,2024b;Liuetal.,
+2022). Thus,weuseaveragedownstreamerroronasuiteofninecommonlyusedvisualreasoning
+benchmarks(§3.2)asameasureofmodelqualityY(N,T).
+Below,wesummarizetheroleofeachoftheselearnableparameterinthescalinglaw(Eq.2).
+LLMQualityParameter(α): Thisparameterdictateshowthedownstreamerrorchangeswiththe
+complexityoftheLLM,i.e.,itsparametercount. Alargerαindicatesabetterlanguagemodel,such
+asLlama3-7BoutperformingLlama2-7B,whichoftenstemsfrombetterpretraining.
+Visual Token Quality Parameter (β): β captures the quality of the visual input tokens fed into
+theLLM,reflectingthequalityofthecompressiontechnique. Amoreeffectivetokencompression
+algorithmwouldyieldalargerβ, allowingformorereductionsinnumberofT visualtokensthan
+lesseffectivemethodswhilemaintainingthesamedownstreamperformance.
+Constants (A,B,D): AandB are normalizing constants and D refers to irreducible loss, which
+cannotbereducedevenwiththelargestN-sizedlanguagemodelorallT visualtokens(cappedat
+576forourchoiceofvisionencoder).
+3.2 EXPERIMENTALSETUP
+VLM Training and Evaluation: We use the LLaVA-Next framework (Liu et al., 2024b) to train
+VLMswiththeQwen-1.5familyoflanguagemodelsasthebackbone. Specifically, weutilizethe
+Qwen-{0.5,1.8,4,7,14}B-chatmodels(Baietal.,2023).Thepretrainingandfinetuningdatasetand
+hyperparametersfollowLiuetal.(2024a),exceptwedoubletheeffectivebatchsizeforfinetuning.
+WeuseCLIPViT-L/14(Radfordetal.,2021)asthevisionencoderforallexperiments,andcompress
+theoriginal576tokensto{144,64,36,16,4,1}tokensusingTokenPacker(Lietal.,2024c).
+To estimate the downstream error Y(N,T), we evaluate on 9 commonly used benchmarks for
+visual reasoning and understanding: MME (Fu et al., 2024), GQA (Hudson & Manning, 2019),
+AI2D (Kembhavi et al., 2016), MMBench (Liu et al., 2024c), MMMU (Yue et al., 2023), Sci-
+enceQA(Luetal.,2022),MathVista(Luetal.,2024),POPE(Lietal.,2023c),andChartQA(Masry
+etal.,2022). WecomputeY(N,T)byaveragingtheerrorsofthenormalizedevaluationmetric. For
+MME,theCognitionandPerceptionscoreswerecombinedandtheF1scoreswereusedforPOPE.
+Fitting Scaling Laws: We fit the proposed scaling law (Eq. 2) on {Y(N,T),N,T} pairs, with
+N ∈{0.5B,1.8B,4B,7B}andT ∈{1,4,16,36,64,144,576}(describedintheexperimentsetup
+above). Weusegrid-search,foritsstability(Goyaletal.,2024b),toestimatethescalingparameters
+α,β,A,B, andD.ThefinalscalinglawisevaluatedonaN =14BVLMmodelatvariousnumber
+ofvisualtokensinT. Furtherdetailsaboutthegrid-searchfitcanbefoundinAppendixA.2.
+4Preprint. UnderReview.
+3.3 RESULTS: ESTIMATEDSCALINGCURVES
+RecallfromSection2.1thatFLOPs =O(N(Q+V)),whereQrepresentstheinputtexttokens,
+inf
+andV isthevisualinputtokens. Wefirstvisualizeourscalinglawsunder2settings—(a)cached
+textinput(Fig.1a): Theinputtexttokens(Q)arefixedandcanbecached,leadingtoFLOPs ∼
+inf
+O(NV), and (b) non-cached text input (Fig.1b): The input text tokens are approximated as 50,
+i.e.,FLOPs =O(N(50+V))(weconsidermoregranularvariationofQin§3.3.2).
+inf
+Figure1visualizesthefittedscalingcurve,illustratingthevariationintheaveragedownstreamerror
+asinferenceFLOPsarevaried(underboththecachedandnon-cachedtextinputsetting). Wevary
+the inference FLOPs on the x-axis by increasing the number of visual input tokens processed by
+the LLM (the scatter size), while the color scale indicates the varying number of language model
+parameters. Wemakesomekeyobservationsbelow.
+Log-Linear Relation between Error and Number of Visual Input Tokens: Consider the
+changeinperformanceforthe7Bmodelasthenumberofvisualinputtokensvaries(marooncurves
+in Fig. 1.) Recent works on visual token compression (Li et al., 2024c; Shang et al., 2024) claim
+littletonoperformancedegradationwithtokencompression. Forexample,theyreportsimilarper-
+formancetothebasemodel’s576tokensevenwhenvisualtokencountisreducedto36or144on
+certaintasks. However,ourscalingcurvesinFigure1arevealadifferenttrend,showingalog-linear
+decreaseinvisualreasoningperformanceasthenumberofvisualinputtokensisreduced. Webe-
+lievethisdiscrepancyarisesbecauseofthelimiteddownstreamevaluationbenchmarksconsidered
+inthepreviousworkswhichmaynotfullycapturetheVLM’soverallcapabilities.
+Error Varies 5× Faster with LLM Parameters than with Tokens: Recall from the scaling
+law(Eq.2)thatα representstheLLMqualityparameterandβ representsthevisualtokenquality
+parameter,bothdenotingtherateatwhichtheyinfluencethedownstreamerrorrespectively. From
+Figure1a,weobservethatα=0.077ismorethanfivetimeslargerthanβ =0.015,signifyingthat
+VLMerrorincreasessignificantlyfasterwhenreducingtheLLMparameterscomparedtoreducing
+thenumberofvisualtokens. Therefore,whenminimizinginferenceFLOPs,itismoreeffectiveto
+prioritize reducing visual tokens (V) first, as the impact on performance is less pronounced than
+reducing the LLM parameters (N). This finding is reflected in Figure 4 where we observe that,
+underfixedinferencecompute,usingalargerLLMwithfewervisualtokens(7BLMw/36tokens)
+providesbetterperformancethanusingasmallerLLMwithmorevisualinputtokens(1.8BLMw/
+144tokens)forvisualreasoningtasks.
+Scaling Laws Hold for Increases in LLM Accuracy of the estimated Scaling Laws
+Scale: We evaluate the accuracy of our scal- 0.625 Scaling Params 14B
+ing laws (fitted on VLMs of 0.5B-7B range) 0.600 == 00 .. 00 17 57
+forpredictingtheperformanceforlargermod- Fitted Curves 0.575 Test Points
+els. WeestimatetheperformanceofQwen-1.5 Estimated Curve
+0.550
+14B using our fitted scaling laws. Our scal-
+ing laws estimate the performance with an er- 0.525 #Tokens(V) 7B
+1
+ror margin of less than 2%, as visualized in 0.500 4
+16
+Figure 2, 6b. The log-linear relationship be- 0.475 36 4B 64
+tween the error and number of visual tokens 0.450 144 1.8B
+persists,andthegreaterinfluenceoftheLLM’s 576
+0.5B
+sizecomparedtovisualtokensonperformance
+100 101 102 103 104
+Inference FLOP ( (NV)))
+continues to hold. Thus, for VLMs using 7B
+languagemodelbackbones,itisstilloptimalto Figure2: Ourscalinglaws(fittedonVLMswith
+increaseLLMsizeto14Bwhilereducingvisual 0.5-7BLLMs)estimatetheperformanceofa14B
+tokencountforfixedinferencecosts. LLMVLMwithanerrormarginoflessthan2%.
+3.3.1 COMPUTE-OPTIMALINFERENCEREQUIRESASINGLEVISUALTOKEN
+Observe the pareto optimal curve (black dotted curve) in Figure 1a. For cached query, at any
+given inference compute, the optimal behavior, i.e., lowest downstream error, occurs when using
+the largest possible LLM while reducing the number of visual input tokens to one. Thus, for sce-
+narios where the text input can be cached (Q = 0), such as monitoring systems with static text
+5
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#Preprint. UnderReview.
+Text Tokens (Q) vs Compute Optimal Tokens Scaling trends for OCR Tasks
+100 7B
+0.90 Scaling Params
+0.56 =0.029
+80 =0.048
+0.85 Pareto 0.54 Optimal
+60 0.80
+0.52 4B
+40 0.75 #Tokens(V) 0.50 4
+16
+0.48 #LM Pa 1 4r . B8a Bms 20 0.70 3 6 16 4
+44
+1.8B
+7B 0.65 576
+101 102 103 104 0 101 102 103 104 0.5B
+FLOPs (N(Q+V))), Increasing V Inference FLOP ( (NV)))
+(a)Performancetrendsandtrade-offsofVLMschange (b)ScalinglawsonOCR-liketasksfavorvisualtoken
+whenvaryingthenumberofinputtexttokenQ. countoverLLMsize;theoppositeofvisualreasoning.
+Figure3: Adjustinginputtexttokencountandbenchmarkfamilyshiftsperformancetrends.
+Left (a): For visual reasoning tasks, as the number of text tokens Q increases, the impact of in-
+creasing the number of visual tokens V, i.e., reducing compression, becomes more apparent. In-
+tuitively, at enough text tokens, initial increases in visual tokens are only a minor fraction of the
+overallcompute(§3.3.2). Right(b): WhentasksarechangedfromvisualreasoningtoOCR/text-
+understanding,trendsreverse:visualtokencountshouldnowbeprioritizedoverLLMsize(§3.3.3).
+input, one should utilize the largest LLM possible by reducing the number of visual tokens to fit
+the inference budget. A similar trend of prioritizing the LLM size holds in the variable text input
+regime. For example, in Figure 1b, where the text input length Q = 50, better performance in a
+fixedcomputebudgetoftenresultsfromthelargermodelwithfewervisualtokenswiththeoptimal
+numberofvisualtokensisnowaround16(intersectionofparetocurvewithscalingplot).
+Thisincreaseinoptimalvisualtokensastexttokensincreaseisintuitive,astheVLMincursafixed
+costforprocessingthetext. Thus,smallincreasesinthenumberofvisualtokensleadtoonlyminor
+increases in the overall inference cost while improving performance. The key observation is that
+compute-optimalbehaviorentailsusingthelargestfeasibleLLMwithveryfewvisualinputtokens.
+This result has important consequences. Existing literature on token reduction (§ 5) has primarily
+focusedonmoderatelyreducingthenumberofvisualinputtokens(e.g.,from576tokensto144or
+64tokens)whiletryingtomatchtheperformanceofthebasemodel. However,ourresultshighlight
+that it is better to operate in a regime with much lower input visual tokens (e.g., 1, 4 or 16), as
+exchanging visual tokens for larger LLM size reduces the downstream error. This highlights the
+need to develop token compression techniques tailored for extreme token compression. We take
+someinitialstepsinthisdirection,buildingonexistingtokencompressionalgorithmsinSection4.
+3.3.2 VARIATIONINOPTIMALTOKENSWITHTEXTQUERYLENGTH
+The shift in performance trends and the ideal visual token count from Q = 0 → 50 raises the
+question; how does the input text length impact the optimal selection of LLM size and number of
+visual tokens? To explore the variations in trends, we consider the effect of text input length on
+the optimal inference behavior in Figure 3a. First, when the text input length, Q, is small (purple
+curves),itisalwaysbettertousethelargermodel(solidcurve)withlessvisualtokenscomparedto
+thesmallermodel(dashedcurve)withmorevisualtokens. However,consideranedgecasewhere
+the text input length is extremely high (e.g., 100 for the green curves). We observe that there is
+a sharp increase in error as inference FLOPs are reduced. This is because visual tokens need to
+be reduced significantly for any effective change in inference FLOPs, as the fixed cost from text
+tokens is quite high. At a certain point (marked by the red dot in Figure 3a), it becomes more
+advantageoustousethe4Bmodelwithahighernumberofvisualtokensratherthanthe7Bmodel
+withfewertokens(contrarytothecaseforlowerQ).Thus,theoptimalnumberofvisualinputtokens
+riseswithanincreaseinQ. Thiscasedemonstratestheneedforcarefulbalancingofvisualtoken
+6
+rorrE
+.gvA
+)Q(
+snekoT
+txeT#
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#Preprint. UnderReview.
+Performance Change Under Similar Inference Compute
+1.8B LM w/ 144 tokens
+30 4B LM w/ 64 tokens
+7B LM w/ 36 tokens
+20
+10
+0
+10
+GQA MMB MME MMMU POPE SQA DocVQA TextVQA
+Visual Reasoning Tasks Text Recognition Tasks
+Figure 4: Performances of various LLM size and visual token count combinations at similar
+inferencecompute. Forvisualreasoningtasks,atagivenfixedinferencecost,increasingtheLLM
+size by decreasing the number of visual tokens improves VLM performance. However, for text
+recognitiontasks,decreasingthenumberofvisualtokensisdetrimentaltoperformance(§3.3.3).
+countandLLMsize,especiallyinscenarioswheretextinputsarelong,toachievecompute-optimal
+performancewithoutsacrificingaccuracy.
+DespitethechangesintheexactoptimalvisualtokencountandLLMparametercountasthelength
+of the user query increases, the general trend for visual reasoning and understanding tasks is that
+increasingthesizeofthelanguagemodelwhilereducingvisualtokenscanleadtosignificantrelative
+gains(asalsoillustratedinFig.4). Thisfindingmaybedue,inpart,tothescalingpropertiesofthe
+LLMs, which allow larger models to extrapolate with less visual information than their smaller
+counterparts (Radford et al., 2021; Wei et al., 2022). However, this trade-off does not extend to
+certaintasks,suchasdocumentcomprehension,textidentification,etc.,whereasingleorhandfulof
+tokensmaynotbeabletoincorporatethehighdensityofinformation,andthetrendstartstoreverse,
+aswediscussindetailin§3.3.3.
+Scaling Inference Compute by Simply Repeating Tokens: Many recent works around scaling
+test-time compute by introducing special tokens (Goyal et al., 2024a) or multiple parallel genera-
+tions(Zelikmanetal.,2024)haveshownpromisinggainsinreasoningtasksforlanguagemodels.
+WetestthisnotionwithVLMsbyrepeatingthevisualinputtokens(compressedto4)multipletimes
+toallowformoreprocessingofkeyvisualaspects. However, wedonotobserveanyperformance
+gains. ThisismostlikelyduetothefactthatthedownstreamtasksforVLMsarenotasreasoning-
+intensive, which demonstrates the importance of developing better token compression algorithms
+andpotentiallyintroducingmorechallengingbenchmarks.
+3.3.3 SCALINGLAWSFOROCRTASKS
+Untilnow,wehavefocusedonscalingbehaviorforvisualreasoningandunderstandingtasks,high-
+lightingthekeyfindingthatusingasinglevisualtokenwiththemaximumpossibleLLMparameters
+istheinference-optimalconfiguration.However,isthesamevalidforalltasks?VLMshaverecently
+beenappliedtodocumentreadingandOCR-styletaskswhereasinglevisualtokenmaybeinsuffi-
+cientduetothehighdensityofinformation. Unlikevisualreasoningtasks, thesetaskslackvisual
+structure in the image and intuitively need more tokens to record the (generally textual) details in
+theimage. Weverifythesamebyfittingourscalinglaws(Eq.2)onDocVQA(Mathewetal.,2021)
+andTextVQA(Singhetal.,2019)benchmarks,wherethetasksrequiremainlyOCRcapabilities.
+Figure 3b presents the fitted scaling law for OCR tasks. Notably, there are no significant gains in
+averagedownstreamperformancefromincreasingLLMparameters; instead, thenumberofvisual
+tokens predominantly dictates the performance. This observation is reflected in the scaling law
+parameters,wheretheLLM-qualityparameterα = 0.029isnearlytwiceassmallerthanthetoken
+qualityparameterβ = 0.048. Thistrendisinstarkcontrasttothescalingparametersobservedfor
+visual reasoning tasks where the LLM-quality parameter (α) was more than five times larger than
+7
+snekot
+675
+/w
+ML
+B5.0
+morf
+egnahC
+%Preprint. UnderReview.
+Overall VLM Architecture Query-Based Compression
+LLM Text-Embedded
+
+Visual Tokens
+Visual Tokens Output
+
+Text Reshape
+Query-Based
+ Query
+Compression
+Vision
+
+Encoder DC oo wn nvo salu mti po ln ina gl
+ Cross-Attention MLP
+Key
+
+Reshape Value
+Text Tokens Compressed
+
+Visual Tokens
+Visual Tokens
+Figure5: Ourquery-basedconvolutionalcross-attention(QueCC,pronounced“quick”)com-
+pressiontechnique. UserinputtexttokensarefirstprocessedthroughtheLLMbackbonetogen-
+erate text embeddings that are then combined with the visual tokens. Within QueCC, the query-
+embedded visual tokens are downsampled via convolution. Next, local cross-attention is applied
+betweenthedownsampledtokensandtheirrespectivevisualtokensregions.Thecompressedtokens
+passthroughanMLPbeforepassingintotheLLM,alongsideinputtexttokens,forgeneration(§4).
+thetokenparameter(Fig.1a). ThisnotionofvisualtokensplayingthesignificantroleinOCRtasks
+isfurtherechoedinFigure4,whichshowstokencompressionweakensVLMperformancedespite
+increasingthesizeandcapabilitiesoftheLLMcomponenttocompensate.
+4 QUERY-BASED TOKEN COMPRESSION
+TheNeedforTokenCompressioninExtremeRegimes: Whilepriorworkhasprimarilyfocused
+onmoderatelycompressingthetokens(e.g.,reducing576tokensto144)whiletryingtomatchthe
+performance of the base model (no token compression), our findings (§ 3.3.1) suggest the need
+foraparadigmshift. Ratherthanaimingformoderatetokencompression, newapproachesshould
+be tailored for extreme token reduction — down to 1, 4, or 16 tokens — with minimal possible
+degradation,asourscalinglawsdemonstratethatcompute-optimalbehavioriswithinthisrange.
+Ourworktakesinitialstepsinthisdirectionbyintroducingaquery-basedtokencompressionstrat-
+egydesignedforsuchhigh-compressionregimes. Incaseswheretokensarereducedtoasfewas1,
+tokencompressionbasedontheuser’sinputquerybecomescriticalforretainingrelevantinforma-
+tion and minimizing performance reductions. In the following section, we build on existing algo-
+rithms(Lietal.,2024c), toincorporatequery-basedtokencompression. Figure5summarizesour
+query-basedconvolutionalcross-attention(QueCC,pronounced“quick”)compressiontechnique.
+User Query Information Injection: To make our projector query-dependent, we add the text
+embedding of the user’s most recent query to the image embeddings from the vision encoder. We
+do this by taking the last hidden states prior to the LM head of the user input from the language
+model as the representation of the user’s overall query. The hidden state is converted into the text
+embedding via a linear projection and added to the image visual token embeddings. These fused
+tokensarelaterusedasthequerycomponentforcross-attention. Thetextembeddingcaneasilybe
+cachedforapplicationswherethequeryisstaticorispartofapredeterminedset. Evenifthequery
+varies,thetext-embeddingcanbeprecalculatedpriortoprocessingtheimageandKVvaluescached
+andreusedwhenprocessingthevisualandtexttokenstogetherduringgeneration.
+Token Downsampling with Cross-Attention and Learnable Convolutions: To compress the
+numberofvisualtokenspassedintotheLLM,weutilizearegion-based,cross-attentionmechanism
+thatdownsamplesthevisionencodertokens, X,intoamoreinformation-denseform. Themecha-
+√ √
+nismhingesonviewingXasa n× ngridduetothepatchificationoftheimagebythevision
+encoder. Li et al. (2024c;d) passes the “2D” version of X through a downsampling function that
+compressestheinputbyas2 factorwhereeachresultingtokencorrespondstoas×sregioninthe
+originalinput.Afterthis,cross-attentionisappliedindependentlybetweeneachdownsampledtoken
+and the corresponding tokens in its s×s region. We improve on the bilinear interpolation-based
+downsamplingtechniques(Lietal.,2024c;Wangetal.,2024b)byusingalearnable,depth-wise2D
+convolutionfilterofkernelsizeandstrides,providingbetterexpressivity.
+8Preprint. UnderReview.
+Method #Token GQA MMB MME POPE SQA TextVQA VizWiz VQAv2
+LLaVA-1.5 576 62.0 64.3 1510.7 85.9 66.8 58.2 50.0 78.5
+PruMerge ∼32 57.2* 60.9 1350.3 76.3 68.5 56.0 45.2* 72.0
+TokenPacker 36 59.6 62.8 1440.9* 83.3* 71.0* 53.2* 50.2 75.0
+MatryoshkaMulti. 36 60.3 64.8 – 85.5 – – 52.8 –
+MatryoshkaQuery 36 58.8 63.4 1416.3 81.9 66.8 – 51.0 73.7
+QueCC(Ours) 36 60.5 62.5 1442.0 84.5 70.6 53.3 50.1 75.8
+TokenPacker 16 58.9* 62.7* 1378.8* 83.7* 68.1* 52.5* 50.5* 74.4*
+MatryoshkaQuery 16 57.6 61.9 1408.5 80.8 67.5 – 49.8 71.1
+QueCC 16 59.0 62.2 1408.0 83.4 70.7 51.3 47.7 74.5
+TokenPacker 4 56.2* 61.5* 1347.6* 81.7* 68.5* 49.2* 45.7* 70.5*
+MatryoshkaQuery 4 53.0 56.5 1176.1 77.6 65.1 – 49.4 64.1
+QueCC 4 56.5 62.1 1390.3 81.8 68.6 48.7 45.0 70.6
+TokenPacker 1 53.4* 58.7* 1262.4* 80.7* 69.4* 46.2* 41.1* 66.9*
+MatryoshkaMulti. 1 52.6 59.5 – 78.4 – – 49.4 –
+MatryoshkaQuery 2 50.8 54.4 1144.0 74.5 65.0 – 48.5 61.0
+QueCC 1 53.5 59.4 1269.1 81.3 69.9 46.8 44.1 67.3
+Table1:ComparisonofvarioustokencompressionmethodsforVLMsatdifferentcompression
+rates. AllmodelsusetheVicuna-1.57Bmodelasthelanguagebackbone. A∗ denotesbenchmark
+resultsforothertechniquesweevaluated,whilebestscoresarebolded,andsecondbestunderlined.
+Ourmethodoutperformsalternativesonalmostallbenchmarksatextremelyhighcompressionre-
+gions(visualtokensreducedto1or4)andhasstrongperformanceatlowercompressionrates.
+4.1 EXPERIMENTALSETUP
+WeuseatrainingsetupsimilartoLLaVa-1.5(Liuetal.,2024a)anduseVicuna-1.57BastheLLM.
+Basedontheoptimalityofhightokencompressionunderscoredbyourscalinglaws(§3.3),wefocus
+onvisualtokenbudgetsof{1,4,16,36,64},correspondingtocompressionratesof88.9%to99.8%.
+Webenchmarkourmethodonadiverse,comprehensivesetofvisualreasoning/understandingand
+OCR/text-understanding tasks: GQA (Hudson & Manning, 2019), MMBench (MMB) (Liu et al.,
+2024c), MME (Fu et al., 2024), POPE (Li et al., 2023c), ScienceQA (SQA) (Lu et al., 2022),
+TextVQA(Singhetal.,2019)VizWiz(Gurarietal.,2018),andVQAv2(Goyaletal.,2017).
+4.2 QUERY-BASEDCONVOLUTIONALCROSS-ATTENTION(QUECC)RESULTS
+Table 1 presents the results of our QueCC algorithm in comparison to previous methods, includ-
+ingTokenPacker(Lietal.,2024c),LLaVa-PruMerge(Shangetal.,2024),MatryoshkaMultimodal
+Models (Cai et al., 2024), and Matryoshka Query Transformer (Hu et al., 2024), in low token
+regimes. Wefindthatourmethodperformsbetterthanalternativesatthehighestcompressionlevels
+inmultipledifferentdatasets,leadingtoa12%and19%improvementinthegapbetweentheorigi-
+nalLLaVA-1.5modelandthenext-bestmethodonMMEandMMBfortheone-visual-tokenlevel.
+Thetrendcontinuesatthefour-tokenlevel,wherethegapbetweenQueCCandthenext-bestalgo-
+rithmwasreducedby26%and21%onMMEandMMB.Ourmodelexhibitsstrongperformance
+on GQA, MME, SQA, and VQAv2 across compression rates, signaling the prospects of using the
+user’squerytoidentifyandcompresskeyvisualtokens.
+5 RELATED WORK
+5.1 TOKENREDUCTIONINVISION-LANGUAGEMODELS(VLMS)
+VLMsarecomposedofthreekeycomponents:(a)avisualencoderthatencodestheinputimages,(b)
+alargelanguagemodel(LLM)thatprocessesthevisualtokensfromtheencoderalongwiththeuser
+textquery,and(c)aprojectorthatmapsthevisualtokenstotheinputembeddingspaceoftheLLM.
+Section A.1 contains additional details exploring various projector designs. Often, the number of
+visualtokens(576tokensperimageforCLIP-ViT-L,forinstance)significantlyexceedsthenumber
+of text tokens, leading to high inference costs. This disproportionate scaling of visual tokens also
+9Preprint. UnderReview.
+hindersmulti-frameintegrationduetothelimitedcontextlengthofthemodel.Inaddition,inference
+costisacriticalfactorinmanyreal-worldapplicationsofcomputervisionsystems. Thus,reducing
+thenumberofvisualtokensprocessedbythelanguagemodelhasbecomeanactiveareaofresearch.
+LLaVA-PruMerge(Shangetal.,2024)andYuetal.(2024)proposetraining-freemethodsthatfilter
+outvisualtokens(fromCLIP)thathavealowsimilaritywiththeCLStoken. TokenPacker(Lietal.,
+2024c), on the other hand, learns a compact token compression module using cross-attention over
+visualtokens, allowingforreducednumberoftokenswhilepreservingsalientinformation. While
+theaboveapproachesfocusontokenreductionwithoutdirectlychangingthevisualencoder(CLIP)
+output,recentworksbasedonMatryoshkaRepresentation(Caietal.,2024;Huetal.,2024)modify
+theCLIPoutputdirectlytogeneratenestedCLIPembeddingsforaflexibletokencount.Zhangetal.
+(2024)investigatemethodsthatemphasizetask-relevantpixelsduringimageprocessing.
+Anotherapproachtoreducinginferencecostisadaptivetokenprocessing,wherethecomputededi-
+catedtocertaintokensatinferenceisvariedJainetal.(2024). Mostofthesemethodsprunevisual
+tokens within the LLM due to their lower attention scores compared to the prompt, system, etc.,
+tokens(Chenetal.,2024;Wanetal.,2024),aheuristiccommonlyfoundinregulartext-onlyLLM
+KVcachereductiontechniques(Zhangetal.,2023;Orenetal.,2024). Finally,whilewefocusour
+paper on image-based VLMs, a host of works (Xu et al., 2024; Shen et al., 2024) discuss token
+compressionforvideoprocessingusingVLMs. WedeferadiscussionofthesetoSectionA.1.
+In contrast to the works discussed above that focus on developing and improving token reduction
+techniques, our work aims to characterize the optimal trade-off between LLM parameters and the
+number of visual tokens to minimize inference costs. This analysis is crucial for guiding deci-
+sionsontheextenttowhichtokensshouldbereducedrelativetoLLMparametersgivenaspecific
+target for inference cost reduction. For our inference optimal scaling laws in this work, we use
+TokenPacker (Li et al., 2024c) for token reduction because of its better downstream performance
+compared to other options (see Table 1). However, our observations from scaling laws naturally
+extendtoanyothercompetitivetokenreductiontechnique.
+5.2 SCALINGLAWSANDSCALINGINFERENCECOMPUTE
+Understandinghowtheperformanceofmoderndeepnetworksimprovesaskeydesignfactors,such
+as the number of parameters or training tokens, are scaled has become a focal point of research,
+particularly as these models continue to grow in size and complexity. Scaling laws offer crucial
+guidanceforoptimizingthearchitectureofsuchmodels. Notably,Kaplanetal.(2020);Hernandez
+et al. (2021); Hoffmann et al. (2022) do a thorough investigation into training compute-optimal
+languagemodels,highlightingtheneedtoscalepretrainingtokensandparametersatthesamerate.
+Chertietal.(2023);Gadreetal.(2023)performasimilarstudyonscalinglawsforCLIP(Radford
+et al., 2021), corroborating that performance improvements arise from increasing both parameter
+countsandpretrainingimage-captionpairs.
+Closest to our work, Li et al. (2024a) investigate what factors improve the performance of
+LLaVA (Liu et al., 2023). They observe performance gains with increasing language model size,
+visual encoder size, and input resolution. They investigate each of these factors when scaled in-
+dependently. In contrast, in this work we focus on understanding the optimal trade-off between
+language model size and the number of visual input tokens, given a fixed inference budget to fit
+in. Note that in our work, visual input token count is varied (decreased) using token compression
+algorithms(§5.1)andnotbyvaryingtheinputimageresolutionorusingadifferentCLIPmodel.
+While scaling the pretraining of LLMs has led to emergent capabilities, there has recently been
+a growing interest in improving their reasoning capabilities by scaling inference time compute.
+Brown et al. (2024) show impressive performance boosts if the language model is allowed mul-
+tiple attempts on a problem. In fact, Snell et al. (2024) show that scaling test time compute by
+parallelmultiplegenerationsatinferencegivesperformancecomparabletoa14×largermodelon
+mathtasks. Goyaletal.(2024a)showperformancegainsbyappendingspecialtokensattheendof
+inputtoscaletesttimecompute. Incontrast,wecharacterizetheoptimaltrade-offbetweentokens
+andparameters,forgettingthebestperformanceatagivenfixedtesttime(inference)compute.
+10Preprint. UnderReview.
+6 DISCUSSION AND CONCLUSION
+Inourwork,wedemonstratethattheoptimaltrade-offforVLMsinferenceistouseveryfewvisual
+input tokens along with the largest possible LLM that fits within the budget. This result has quite
+importantconsequences. Existingworksaimtowardsmoderatereductionintokencount(e.g.,from
+576to144),whiletryingtomatchtheperformanceofthebasemodel(notokenreduction).However,
+ourresultsshowthatthecommunityneedstofocustowardsextremetokenreduction(e.g.,downto
+1, 4 or 16 tokens), as the inference optimal regime requires very few visual input tokens. Note
+that although extreme token reduction can lead to a drop in performance compared to the base
+model,itisstillbetterthanusingmoretokenswithasmallerLLM.Theperformancewithveryfew
+visualtokensispoisedtoonlyimprovefurtheraswedeveloptokenreductionalgorithmstailoredfor
+extremereduction. Ourworktakesaninitialstepinthisdirectionbyproposinginputquery-based
+tokenreduction,asitisbettertoprioritizevisualtokenswithinformationrelevanttothetextinput
+query, under such an extreme token compression. While our findings are focused on visual token
+compression at the projector level prior to passing into the LLM, we leave the compute-optimal
+scalingpropertiesofadaptivetokenprocessingalgorithmsthatoperatewithintheLLMcomponent
+forsubsequentwork. Wehopethatthesecriticalinsightsfromourpaperwillguidefutureresearch
+towardsdevelopingbettertokenreductiontechniquesandthusinferenceoptimalVLMs.
+7 ACKNOWLEDGEMENTS
+WethankLeslieBerberian,DevinWillmott,QiuChen,andVijaySadashivaiahattheBoschCenter
+forAIforusefuldiscussionsandhelpwithrunningsomeoftheexperimentsonBosch’scompute.
+WealsothankAlbertGuforhisfeedbackonthedraft. KLandSGaresupportedbyfundingfrom
+theBoschCenterforArtificialIntelligence.
+REFERENCES
+Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson, Karel
+Lenc,ArthurMensch,KatieMillican,MalcolmReynolds,RomanRing,ElizaRutherford,Serkan
+Cabi,TengdaHan,ZhitaoGong,SinaSamangooei,MarianneMonteiro,JacobMenick,Sebastian
+Borgeaud, AndrewBrock, AidaNematzadeh, SahandSharifzadeh, MikolajBinkowski, Ricardo
+Barreira,OriolVinyals,AndrewZisserman,andKarenSimonyan. Flamingo: avisuallanguage
+modelforfew-shotlearning,2022. URLhttps://arxiv.org/abs/2204.14198.
+Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang, Xiaodong Deng, Yang Fan, Wenbin Ge,
+YuHan,FeiHuang,BinyuanHui,LuoJi,MeiLi,JunyangLin,RunjiLin,DayihengLiu,GaoLiu,
+Chengqiang Lu, Keming Lu, Jianxin Ma, Rui Men, Xingzhang Ren, Xuancheng Ren, Chuanqi
+Tan, Sinan Tan, Jianhong Tu, Peng Wang, Shijie Wang, Wei Wang, Shengguang Wu, Benfeng
+Xu, Jin Xu, An Yang, Hao Yang, Jian Yang, Shusheng Yang, Yang Yao, Bowen Yu, Hongyi
+Yuan, Zheng Yuan, Jianwei Zhang, Xingxuan Zhang, Yichang Zhang, Zhenru Zhang, Chang
+Zhou, Jingren Zhou, Xiaohuan Zhou, and Tianhang Zhu. Qwen technical report, 2023. URL
+https://arxiv.org/abs/2309.16609.
+Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V. Le, Christopher Re´, and
+AzaliaMirhoseini. Largelanguagemonkeys:Scalinginferencecomputewithrepeatedsampling,
+2024. URLhttps://arxiv.org/abs/2407.21787.
+Mu Cai, Jianwei Yang, Jianfeng Gao, and Yong Jae Lee. Matryoshka multimodal models, 2024.
+URLhttps://arxiv.org/abs/2405.17430.
+LiangChen,HaozheZhao,TianyuLiu,ShuaiBai,JunyangLin,ChangZhou,andBaobaoChang.
+Animageisworth1/2tokensafterlayer2: Plug-and-playinferenceaccelerationforlargevision-
+languagemodels,2024. URLhttps://arxiv.org/abs/2403.06764.
+MehdiCherti,RomainBeaumont,RossWightman,MitchellWortsman,GabrielIlharco,CadeGor-
+don, Christoph Schuhmann, Ludwig Schmidt, and Jenia Jitsev. Reproducible scaling laws for
+contrastive language-image learning. In 2023 IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR). IEEE, June 2023. doi: 10.1109/cvpr52729.2023.00276. URL
+http://dx.doi.org/10.1109/CVPR52729.2023.00276.
+11Preprint. UnderReview.
+XiangxiangChu,LimengQiao,XinyangLin,ShuangXu,YangYang,YimingHu,FeiWei,Xinyu
+Zhang, Bo Zhang, Xiaolin Wei, and Chunhua Shen. Mobilevlm : A fast, strong and open vi-
+sionlanguageassistantformobiledevices,2023. URLhttps://arxiv.org/abs/2312.
+16886.
+Wenliang Dai, Junnan Li, Dongxu Li, Anthony Meng Huat Tiong, Junqi Zhao, Weisheng Wang,
+BoyangLi,PascaleFung,andStevenHoi.Instructblip:Towardsgeneral-purposevision-language
+modelswithinstructiontuning,2023. URLhttps://arxiv.org/abs/2305.06500.
+ChaoyouFu,PeixianChen,YunhangShen,YuleiQin,MengdanZhang,XuLin,JinruiYang,Xiawu
+Zheng, Ke Li, Xing Sun, Yunsheng Wu, and Rongrong Ji. Mme: A comprehensive evaluation
+benchmarkformultimodallargelanguagemodels,2024. URLhttps://arxiv.org/abs/
+2306.13394.
+Samir Yitzhak Gadre, Gabriel Ilharco, Alex Fang, Jonathan Hayase, Georgios Smyrnis, Thao
+Nguyen,RyanMarten,MitchellWortsman,DhrubaGhosh,JieyuZhang,EyalOrgad,RahimEn-
+tezari,GiannisDaras,SarahPratt,VivekRamanujan,YonatanBitton,KalyaniMarathe,Stephen
+Mussmann,RichardVencu,MehdiCherti,RanjayKrishna,PangWeiKoh,OlgaSaukh,Alexan-
+der Ratner, Shuran Song, Hannaneh Hajishirzi, Ali Farhadi, Romain Beaumont, Sewoong Oh,
+Alex Dimakis, Jenia Jitsev, Yair Carmon, Vaishaal Shankar, and Ludwig Schmidt. Datacomp:
+Insearchofthenextgenerationofmultimodaldatasets, 2023. URLhttps://arxiv.org/
+abs/2304.14108.
+Samir Yitzhak Gadre, Georgios Smyrnis, Vaishaal Shankar, Suchin Gururangan, Mitchell Worts-
+man,RulinShao,JeanMercat,AlexFang,JeffreyLi,SedrickKeh,RuiXin,MariannaNezhurina,
+Igor Vasiljevic, Jenia Jitsev, Luca Soldaini, Alexandros G. Dimakis, Gabriel Ilharco, Pang Wei
+Koh, Shuran Song, Thomas Kollar, Yair Carmon, Achal Dave, Reinhard Heckel, Niklas Muen-
+nighoff,andLudwigSchmidt. Languagemodelsscalereliablywithover-trainingandondown-
+streamtasks,2024. URLhttps://arxiv.org/abs/2403.08540.
+SachinGoyal,ZiweiJi,AnkitSinghRawat,AdityaKrishnaMenon,SanjivKumar,andVaishnavh
+Nagarajan. Thinkbeforeyouspeak: Traininglanguagemodelswithpausetokens,2024a. URL
+https://arxiv.org/abs/2310.02226.
+SachinGoyal,PratyushMaini,ZacharyC.Lipton,AditiRaghunathan,andJ.ZicoKolter. Scaling
+laws for data filtering – data curation cannot be compute agnostic, 2024b. URL https://
+arxiv.org/abs/2404.07177.
+Yash Goyal, Tejas Khot, Douglas Summers-Stay, Dhruv Batra, and Devi Parikh. Making the v in
+vqamatter: Elevatingtheroleofimageunderstandinginvisualquestionanswering,2017. URL
+https://arxiv.org/abs/1612.00837.
+DannaGurari,QingLi,AbigaleJ.Stangl,AnhongGuo,ChiLin,KristenGrauman,JieboLuo,and
+JeffreyP.Bigham. Vizwizgrandchallenge: Answeringvisualquestionsfromblindpeople,2018.
+URLhttps://arxiv.org/abs/1802.08218.
+DannyHernandez,JaredKaplan,TomHenighan,andSamMcCandlish. Scalinglawsfortransfer,
+2021. URLhttps://arxiv.org/abs/2102.01293.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza
+Rutherford,DiegodeLasCasas,LisaAnneHendricks,JohannesWelbl,AidanClark,TomHen-
+nigan, Eric Noland, Katie Millican, George van den Driessche, Bogdan Damoc, Aurelia Guy,
+Simon Osindero, Karen Simonyan, Erich Elsen, Jack W. Rae, Oriol Vinyals, and Laurent Sifre.
+Trainingcompute-optimallargelanguagemodels, 2022. URLhttps://arxiv.org/abs/
+2203.15556.
+WenboHu,Zi-YiDou,LiunianHaroldLi,AmitaKamath,NanyunPeng,andKai-WeiChang. Ma-
+tryoshka query transformer for large vision-language models, 2024. URL https://arxiv.
+org/abs/2405.19315.
+DrewAHudsonandChristopherDManning. Gqa: Anewdatasetforreal-worldvisualreasoning
+andcompositionalquestionanswering. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pp.6700–6709,2019.
+12Preprint. UnderReview.
+Gagan Jain, Nidhi Hegde, Aditya Kusupati, Arsha Nagrani, Shyamal Buch, Prateek Jain, Anurag
+Arnab, andSujoyPaul. Mixtureofnestedexperts: Adaptiveprocessingofvisualtokens, 2024.
+URLhttps://arxiv.org/abs/2407.19985.
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child,
+Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language
+models,2020.
+Aniruddha Kembhavi, Mike Salvato, Eric Kolve, Minjoon Seo, Hannaneh Hajishirzi, and Ali
+Farhadi. Adiagramisworthadozenimages,2016.
+Bo Li, Hao Zhang, Kaichen Zhang, Dong Guo, Yuanhan Zhang, Renrui Zhang, Feng
+Li, Ziwei Liu, and Chunyuan Li. Llava-next: What else influences visual instruc-
+tion tuning beyond data?, May 2024a. URL https://llava-vl.github.io/blog/
+2024-05-25-llava-next-ablations/.
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2: Bootstrapping language-image
+pre-training with frozen image encoders and large language models, 2023a. URL https://
+arxiv.org/abs/2301.12597.
+KunChangLi, YinanHe, YiWang, YizhuoLi, WenhaiWang, PingLuo, YaliWang, LiminWang,
+and Yu Qiao. Videochat: Chat-centric video understanding, 2024b. URL https://arxiv.
+org/abs/2305.06355.
+WentongLi,YuqianYuan,JianLiu,DongqiTang,SongWang,JieQin,JiankeZhu,andLeiZhang.
+Tokenpacker: Efficient visual projector for multimodal llm, 2024c. URL https://arxiv.
+org/abs/2407.02392.
+YanweiLi,ChengyaoWang,andJiayaJia.Llama-vid:Animageisworth2tokensinlargelanguage
+models,2023b. URLhttps://arxiv.org/abs/2311.17043.
+YanweiLi,YuechenZhang,ChengyaoWang,ZhishengZhong,YixinChen,RuihangChu,Shaoteng
+Liu,andJiayaJia. Mini-gemini: Miningthepotentialofmulti-modalityvisionlanguagemodels,
+2024d. URLhttps://arxiv.org/abs/2403.18814.
+Yifan Li, Yifan Du, Kun Zhou, Jinpeng Wang, Wayne Xin Zhao, and Ji-Rong Wen. Evaluating
+object hallucination in large vision-language models, 2023c. URL https://arxiv.org/
+abs/2305.10355.
+HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning. InNeurIPS,
+2023.
+HaotianLiu,ChunyuanLi,YuhengLi,andYongJaeLee.Improvedbaselineswithvisualinstruction
+tuning,2024a. URLhttps://arxiv.org/abs/2310.03744.
+Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and Yong Jae Lee.
+Llava-next: Improved reasoning, ocr, and world knowledge, January 2024b. URL https://
+llava-vl.github.io/blog/2024-01-30-llava-next/.
+Hong Liu, Sang Michael Xie, Zhiyuan Li, and Tengyu Ma. Same pre-training loss, better down-
+stream: Implicitbiasmattersforlanguagemodels,2022. URLhttps://arxiv.org/abs/
+2210.14199.
+Yuan Liu, Haodong Duan, Yuanhan Zhang, Bo Li, Songyang Zhang, Wangbo Zhao, Yike Yuan,
+JiaqiWang,ConghuiHe,ZiweiLiu,KaiChen,andDahuaLin. Mmbench: Isyourmulti-modal
+modelanall-aroundplayer?,2024c. URLhttps://arxiv.org/abs/2307.06281.
+PanLu,SwaroopMishra,TonyXia,LiangQiu,Kai-WeiChang,Song-ChunZhu,OyvindTafjord,
+PeterClark,andAshwinKalyan. Learntoexplain: Multimodalreasoningviathoughtchainsfor
+sciencequestionanswering. InThe36thConferenceonNeuralInformationProcessingSystems
+(NeurIPS),2022.
+13Preprint. UnderReview.
+PanLu,HritikBansal,TonyXia,JiachengLiu,ChunyuanLi,HannanehHajishirzi,HaoCheng,Kai-
+WeiChang,MichelGalley,andJianfengGao. Mathvista: Evaluatingmathematicalreasoningof
+foundationmodelsinvisualcontexts. InInternationalConferenceonLearningRepresentations
+(ICLR),2024.
+Ahmed Masry, Do Xuan Long, Jia Qing Tan, Shafiq Joty, and Enamul Hoque. Chartqa: A
+benchmark for question answering about charts with visual and logical reasoning, 2022. URL
+https://arxiv.org/abs/2203.10244.
+MineshMathew,DimosthenisKaratzas,andC.V.Jawahar. Docvqa:Adatasetforvqaondocument
+images,2021. URLhttps://arxiv.org/abs/2007.00398.
+MatanelOren,MichaelHassid,NirYarden,YossiAdi,andRoySchwartz. Transformersaremulti-
+staternns,2024. URLhttps://arxiv.org/abs/2401.06104.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agar-
+wal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya
+Sutskever. Learning transferable visual models from natural language supervision, 2021. URL
+https://arxiv.org/abs/2103.00020.
+Nikhil Sardana, Jacob Portes, Sasha Doubov, and Jonathan Frankle. Beyond chinchilla-optimal:
+Accountingforinferenceinlanguagemodelscalinglaws,2024. URLhttps://arxiv.org/
+abs/2401.00448.
+YuzhangShang,MuCai,BingxinXu,YongJaeLee,andYanYan. Llava-prumerge:Adaptivetoken
+reduction for efficient large multimodal models, 2024. URL https://arxiv.org/abs/
+2403.15388.
+Leqi Shen, Tianxiang Hao, Sicheng Zhao, Yifeng Zhang, Pengzhang Liu, Yongjun Bao, and
+GuiguangDing. Tempme: Videotemporaltokenmergingforefficienttext-videoretrieval,2024.
+URLhttps://arxiv.org/abs/2409.01156.
+AmanpreetSingh, VivekNatarajan, MeetShah, YuJiang, XinleiChen, DhruvBatra, DeviParikh,
+andMarcusRohrbach.Towardsvqamodelsthatcanread,2019.URLhttps://arxiv.org/
+abs/1904.08920.
+CharlieSnell,JaehoonLee,KelvinXu,andAviralKumar. Scalingllmtest-timecomputeoptimally
+can be more effective than scaling model parameters, 2024. URL https://arxiv.org/
+abs/2408.03314.
+Yixuan Su, Tian Lan, Huayang Li, Jialu Xu, Yan Wang, and Deng Cai. Pandagpt: One model to
+instruction-followthemall,2023. URLhttps://arxiv.org/abs/2305.16355.
+Zhongwei Wan, Ziang Wu, Che Liu, Jinfa Huang, Zhihong Zhu, Peng Jin, Longyue Wang, and
+Li Yuan. Look-m: Look-once optimization in kv cache for efficient multimodal long-context
+inference,2024. URLhttps://arxiv.org/abs/2406.18139.
+WeihanWang,QingsongLv,WenmengYu,WenyiHong,JiQi,YanWang,JunhuiJi,ZhuoyiYang,
+LeiZhao,XixuanSong,JiazhengXu,BinXu,JuanziLi,YuxiaoDong,MingDing,andJieTang.
+Cogvlm: Visualexpertforpretrainedlanguagemodels,2024a. URLhttps://arxiv.org/
+abs/2311.03079.
+XidongWang, DingjieSong, ShunianChen, ChenZhang, andBenyouWang. Longllava: Scaling
+multi-modal llms to 1000 images efficiently via hybrid architecture, 2024b. URL https://
+arxiv.org/abs/2409.02889.
+Jason Wei, Yi Tay, Rishi Bommasani, Colin Raffel, Barret Zoph, Sebastian Borgeaud, Dani Yo-
+gatama, MaartenBosma, Denny Zhou, DonaldMetzler, Ed H. Chi, Tatsunori Hashimoto, Oriol
+Vinyals,PercyLiang,JeffDean,andWilliamFedus.Emergentabilitiesoflargelanguagemodels,
+2022. URLhttps://arxiv.org/abs/2206.07682.
+Yuetian Weng, Mingfei Han, Haoyu He, Xiaojun Chang, and Bohan Zhuang. Longvlm: Efficient
+long video understanding via large language models, 2024. URL https://arxiv.org/
+abs/2404.03384.
+14Preprint. UnderReview.
+JiaqiXu,CuilingLan,WenxuanXie,XuejinChen,andYanLu. Slot-vlm: Slowfastslotsforvideo-
+languagemodeling,2024. URLhttps://arxiv.org/abs/2402.13088.
+YuanYao, TianyuYu, AoZhang, ChongyiWang, JunboCui, HongjiZhu, TianchiCai, HaoyuLi,
+WeilinZhao,ZhihuiHe,QianyuChen,HuarongZhou,ZhenshengZou,HaoyeZhang,Shengding
+Hu,ZhiZheng,JieZhou,JieCai,XuHan,GuoyangZeng,DahaiLi,ZhiyuanLiu,andMaosong
+Sun. Minicpm-v: A gpt-4v level mllm on your phone, 2024. URL https://arxiv.org/
+abs/2408.01800.
+Gaotong Yu, Yi Chen, and Jian Xu. Balancing performance and efficiency: A multimodal large
+languagemodelpruningmethodbasedimagetextinteraction, 2024. URLhttps://arxiv.
+org/abs/2409.01162.
+Xiang Yue, Yuansheng Ni, Kai Zhang, Tianyu Zheng, Ruoqi Liu, Ge Zhang, Samuel Stevens,
+DongfuJiang,WeimingRen,YuxuanSun,etal. Mmmu: Amassivemulti-disciplinemultimodal
+understandingandreasoningbenchmarkforexpertagi. arXivpreprintarXiv:2311.16502,2023.
+Eric Zelikman, Georges Harik, Yijia Shao, Varuna Jayasiri, Nick Haber, and Noah D. Goodman.
+Quiet-star:Languagemodelscanteachthemselvestothinkbeforespeaking,2024.URLhttps:
+//arxiv.org/abs/2403.09629.
+Jiaxin Zhang, Wentao Yang, Songxuan Lai, Zecheng Xie, and Lianwen Jin. Dockylin: A large
+multimodalmodelforvisualdocumentunderstandingwithefficientvisualslimming,2024. URL
+https://arxiv.org/abs/2406.19101.
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song,
+YuandongTian,ChristopherRe´,ClarkBarrett,ZhangyangWang,andBeidiChen. H o: Heavy-
+2
+hitter oracle for efficient generative inference of large language models, 2023. URL https:
+//arxiv.org/abs/2306.14048.
+BaichuanZhou,YingHu,XiWeng,JunlongJia,JieLuo,XienLiu,JiWu,andLeiHuang.Tinyllava:
+A framework of small-scale large multimodal models, 2024. URL https://arxiv.org/
+abs/2402.14289.
+DeyaoZhu,JunChen,XiaoqianShen,XiangLi,andMohamedElhoseiny. Minigpt-4: Enhancing
+vision-language understanding with advanced large language models, 2023. URL https://
+arxiv.org/abs/2304.10592.
+15Preprint. UnderReview.
+A APPENDIX
+A.1 ADDITIONALRELATEDWORKS
+A.1.1 VISIONPROJECTORDESIGN
+Tobridgethegapbetweentheseparateimageandtextmodalitiespresentedbythevisionencoder
+and language model respectively, vision projectors map the image tokens from the vision encoder
+into the language space. Many design choices for the projector exist. Numerous VLMs utilize
+query-basedprojectors, whichcombinetheembeddingsofvisualtokenswiththatofquerytokens
+viacross-attentionorsimilarmechanisms,liketheQ-FormerprojectorintroducedBLIP-2(Lietal.,
+2023a) and used in following work (Dai et al., 2023; Zhu et al., 2023). Other VLMs use simple
+linearprojectorsorMLPstoconnecttheencoderandLLM(Liuetal.,2023;2024a;Suetal.,2023).
+WhilemostarchitecturesusetheprojectorstocreatenewtokenstofeedintotheLLMalongsidetext,
+some architectures like Flamingo (Alayrac et al., 2022) or CogVLM (Wang et al., 2024a) directly
+interweave the visual information into the language model. In our work, we will be focusing on
+projectorsthatfallintheformercategory.
+A.1.2 ADDITIONALAPPROACHESFOREFFICIENTVLMS
+Apartfromreducingthenumberofvisualinputtokenstothelanguagemodel,peoplehaveexplored
+variousothertechniques,includingamixofquantization(Liuetal.,2024a)andsmallerencodersor
+languagemodels(Yaoetal.,2024;Chuetal.,2023;Zhouetal.,2024)forimprovinginference.
+VLMsutilizedinvideoprocessingoftencombinedecreasesinvisionencoderoutputsizewithtoken
+compression techniques to prevent excessive latency and memory constraints. Visual tokens are
+often merged temporally across frames (Xu et al., 2024; Shen et al., 2024) as well as spatially
+for individual frames (Xu et al., 2024). Vision encoders, such as Q-Former (Li et al., 2023a), are
+preferredovermoretraditionalCLIPmodelsduetotheirabilitytoextractasmallerfixednumberof
+tokensperimage(Wengetal.,2024;Lietal.,2024b). Althoughcompressiontechniquesusedfor
+videoprocessingoftencanreducetokencountsbylargemargins,theyarerarelyevaluatedonimage
+datasets,andwhentheyare,compressvisualtokensverylittleornotatall(Lietal.,2023b).
+A.2 GRIDSEARCHDETAILS
+While there are many choices of optimizer for fitting the scaling laws like curve-fitting in SciPy,
+gradient descent based solvers, etc. We observed that these are not stable and give varying so-
+lutions. We converged to using grid-search to fit the scaling laws, similar to the recent works
+like Goyal et al. (2024b). The grid-search range for each of the parameters were as follows:
+α,β ∈{0,0.1},A,B,D ∈{0,1}.
+A.3 ADDITIONALRESULTS
+16Preprint. UnderReview.
+Accuracy of the estimated Scaling Laws Accuracy of the estimated Scaling Laws
+0.625 14B 0.625 14B Scaling Params Scaling Params
+=0.077 =0.077
+0.600 =0.015 0.600 =0.015
+Fitted Curves Fitted Curves 0.575 Test Points 0.575 Test Points
+Estimated Curve Estimated Curve
+0.550 0.550
+0.525 #Tokens(V) 7B 0.525 #Tokens(V) 7B
+1 1
+0.500 4 0.500 4
+16 16
+0.475 36 4B 0.475 36 4B 64 64
+0.450 144 1.8B 0.450 144 1.8B
+576 576
+0.5B 0.5B
+100 101 102 103 104 102 103 104
+Inference FLOP ( (NV))) Inference FLOP ( (N(50+V))))
+(a)Scalinglawpredictionfor14BLLMatQ=0. (b)Scalinglawpredictionfor14BLLMatQ=50.
+Figure6: ScalinglawpredictionsatvariousQ. ThescalinglawsfittedbasedonLLMsuptothe
+7B scale generalize well to the 14B scale, resulting in less than 2% error between predicted and
+actualVLMperformanceforbothQ=0andQ=50.
+17
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#
+rorrE
+maertsnwoD
+.gvA
+)N(
+smaraP
+MLL#
