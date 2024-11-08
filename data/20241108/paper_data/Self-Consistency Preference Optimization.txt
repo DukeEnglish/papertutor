@@ -1,0 +1,903 @@
+SELF-CONSISTENCY PREFERENCE OPTIMIZATION
+ArchikiPrasad1,2 WeizheYuan1,3 RichardYuanzhePang1 JingXu1
+MaryamFazel-Zarandi1 MohitBansal2 SainbayarSukhbaatar1 JasonWeston1,3JaneYu1
+1MetaFAIR 2UNCChapelHill 3NewYorkUniversity
+ABSTRACT
+Self-alignment,wherebymodelslearntoimprovethemselveswithouthumanan-
+notation, is a rapidly growing research area. However, existing techniques often
+failtoimprovecomplexreasoningtasksduetothedifficultyofassigningcorrect
+rewards. An orthogonal approach that is known to improve correctness is self-
+consistency,amethodappliedatinferencetimebasedonmultiplesamplinginor-
+dertofindthemostconsistentanswer.Inthiswork,weextendtheself-consistency
+concepttohelptrainmodels. Wethusintroduceself-consistencypreferenceopti-
+mization(SCPO),whichiterativelytrainsconsistentanswerstobepreferredover
+inconsistentonesonunsupervisednewproblems. Weshow SCPO leadstolarge
+improvementsoverconventionalrewardmodeltrainingonreasoningtaskssuchas
+GSM8KandMATH,closingthegapwithsupervisedtrainingwithgoldanswers
+orpreferences, andthatcombining SCPO withstandardsupervisedlearningim-
+proves results even further. On ZebraLogic, SCPO finetunes Llama-3 8B to be
+superiortoLlama-370B,Gemma-227B,andClaude-3Haiku.
+1 INTRODUCTION
+Traininglargelanguagemodels(LLMs)onhuman-annotateddatahasimprovedtheirperformance
+on a wide array of tasks (Bai et al., 2022; Touvron et al., 2023). However, the size and quality of
+human data remains a major bottleneck as the data collection process is often resource-intensive
+in terms of cost, time, and expertise. To address this challenge, recent works focus on iteratively
+trainingfrommodel-generateddataviaself-training(Yuanetal.,2024;Chenetal.,2024b).Notably,
+Yuanetal.(2024)proposea“self-rewarding”trainingpipelineforinstruction-following,comprising
+twosteps:(i)usingtheLLMtogeneratenewqueriesandself-evaluatingthegeneratedresponsesfor
+eachquery;and(ii)buildingpreferencepairsandtrainingtheLLMusingiterativedirectpreference
+optimization loss (DPO; Rafailov et al., 2024; Xu et al., 2023). However, Huang et al. (2024)
+demonstrate that LLMs struggle at evaluating the correctness of their own responses on complex
+problem-solvingtaskswhichhaveanunambiguouscorrectanswer,therebyrenderingYuanetal.’s
+self-evaluation approach ineffective. Using an external reward model (RM) to rank responses can
+havesimilarproblems; evenifsuchmodelsaretrainedonreasoningtaskstheymaystillsufferon
+out-of-distributionproblems(Casperetal.,2023;Zhangetal.,2024;Mahanetal.,2024).
+Toaddressthisissue,weintroduceSelf-consistencyPreferenceOptimization(SCPO). SCPO isan
+approachtoself-trainLLMsforcomplexproblem-solvingtaskswithoutaccesstogoldsolutionsor
+final answers in the training data. Our approach leverages the concept of self-consistency (Wang
+et al., 2023), an inference-time only approach that improves performance on reasoning tasks by
+generating multiple solutions using the LLM and choosing the most frequent final answer. More
+consistent answers are more likely to be correct because mistakes made by the model are often
+random, so incorrect solutions are unlikely to lead to the same answer multiple times (Fischler &
+Bolles, 1981; Chen et al., 2023). In SCPO, the self-consistency concept is instead applied during
+unsupervised self-training. The method consists of (i) selecting model-generated queries, (ii) an-
+notatingpreferencepairsusingthemostself-consistentresponse(winner)andleastself-consistent
+response(loser),and(iii)optimizingalossfunctionthatisweightedforeachinstancedependingon
+the model’s confidence in the preference pair. Additionally, we propose a semi-supervised variant
+of SCPO that jointly trains LLMs on labeled and unlabeled instances, taking advantage of human
+1
+4202
+voN
+6
+]LC.sc[
+1v90140.1142:viXraModel at Self-consistency Preference Optimization (ScPO)
+Iteration t Optimize with ScPO loss ( ) to obtain and iterate
+Generate problems Seed + Generated
+Problems Compute
+Q: Rachel has $120 to spend on a new bike that Q: Rachel has $120 ... costs pair's weight
+costs $80, and she has to pay a 5% sales tax on $15, ... will she have left?
+the bike. If she also wants to buy a helmet that
+costs $15, how much money will she have left? Sample k Chosen Rejected
+responses
+rS ea sm pop nle se k s A ifd md at xo ( vt ora tein s )d ata A Th: eL ne t .'s .. t Sh oin , k t hs ete ap n b sy w est re ip s 2.. 1. . Votes([C]) k- Votes([R])
+ScPO Loss =
+A: Let's think step by step ... [DPO + NLL]
+Then ... So, the answer is 21.
+Chosen Rejected
+Generating New Problems Building Preference Pairs Training w/ ScPO Loss
+Figure1: Self-consistencyPreferenceOptimization(SCPO).Givenaquery,wesamplemultiple
+responses from the current model M and count the frequency of each answer (i.e., votes). We
+t
+select the highest and lowest votes as chosen and rejected responses (middle), and use these pref-
+erencepairstotrainthemodelwithweightedL loss(right). Weemployasimilarpipelinefor
+SCPO
+generatingnewqueriesfromthemodelitself(left),filteringoutdatawhereself-consistencyislow.
+annotationswheneveravailable. Unlikeself-consistencyappliedatinferencetime, SCPO doesnot
+increaseinference-timecompute,buttheycanalsobecombinedtogetherforbetterperformance.
+InourexperimentsusingLlama-38Bmodels(Dubeyetal.,2024), weshowthatevenwithoutac-
+cesstoanygoldanswersduringtraining,twoiterationsofunsupervisedSCPOimproveszero-shot
+accuracyofthebasemodelby22.74%and5.26%(absolute)onGSM8K(Cobbeetal.,2021)and
+MATH(Hendrycksetal.,2021)respectively,closelymatchingtheperformance(< 1%difference)
+of the supervised baseline from Pang et al. (2024). Moreover, when supplied with the gold la-
+belsinthetrainingsetandadditionalmodel-generatedproblems,semi-supervisedSCPOimproves
+GSM8K accuracy over the supervised baseline by 2.35%. On challenging logical puzzles in Ze-
+braLogic(Dzirietal.,2024)–whereonlytestpuzzles(withoutsolutions)arepubliclyavailable–
+training Llama-3 8B with SCPO improves puzzle accuracy by 6.5%, outperforming larger LLMs
+suchasLlama-370B,Gemma-227B(Teametal.,2024),andClaude-3Haiku(Anthropic,2024).
+2 SELF-CONSISTENCY PREFERENCE OPTIMIZATION
+AsdepictedinFigure1, SCPO isanunsupervisediterativetrainingmethodthatstartswithabase
+language model. Each iteration makes use of existing training problems/queries (without labels)
+as well as newly generated problems. The self-consistency metric is used in both generating new
+problems and building preference pairs. We describe each step of SCPO’s iterative training setup
+below.AllpromptsforsolutiongenerationandnewproblemgenerationcanbefoundinAppendixC.
+Initialization. SCPO assumes access to an initial base model M
+0
+and a small amount of (seed)
+high-quality unlabeled queries, which are typically complex reasoning problems. The model will
+be trained and updated at each training iteration resulting in models M ,M ,··· ,M , where T
+1 2 T
+is the total number of iterations. Instead of gold labels (answers) for responses, SCPO uses the
+consistencyofthemodelM ,asmeasuredbyareal-valuedvotefunctionV(·)definedbelow,torate
+t
+andrankthequalityofeachresponse. Ourvotefunctionisbasedonself-consistency(Wangetal.,
+2023)ofthemodelSCPOcanalsobeusedwithanymeasureofmodelconsistencysuchasinternal
+consistency(Liangetal.,2024)oruniversalconsistency(Chenetal.,2024a).
+GeneratingNewProblems. Followingotherself-alignmentmethods(Yuanetal.,2024;Yuetal.,
+2024), we use few-shot prompting to self-generate additional problems from the model. Using
+the seed set, multiple example problems are chosen at random and placed in context to generate
+a new problem. Note that some prior works are constrained to simultaneously generating both a
+newqueryalongwithitscorrespondingcorrectanswer (Yuetal.,2024). Incontrast,with SCPO,
+wedonotrelyonaccuratelygeneratingthecorrespondinganswer,allowingthemodeltogenerate
+2morediverseproblemsaslongastheproblemsarewell-formed andatleastsomeareanswerable.
+Whilethemodelmaygeneratesomeunanswerablequeries,thesecanbefilteredoutusingthevote
+functionV(·). Specifically,wefilteroutqueryxifnoneoftheresponsesgeneratedbyM havevote
+t
+≥ τ (showninFigure1; left). Ateachiterationt,weaugmenttheseedquerieswiththeproblems
+generatedfromM toobtainthetrainingproblemsforthenextiterationD .
+t t+1
+Building Self-Consistency Preference Pairs. For each problem x in the training data D ,
+t
+we use temperature-based sampling with the current model M to generate k responses y¯ =
+t x
+{y ,y ,··· ,y }sampledfromM (·|x)includinganyrationales,e.g.,chain-of-thought(Weietal.,
+1 2 k t
+2022),followedbythefinalanswer.FollowingWangetal.(2023),thevotefunctionV(·)extractsthe
+finalanswercorrespondingtoeachresponsey ∈y¯ viaans(·)andreturnstherelativefrequencyof
+x
+thefinalanswer,i.e.,V(y)=(cid:80)k 1(ans(y )=ans(y)).AsillustratedinFigure1(middle),using
+m=1 m
+thevotefunction,wecreatepreferencepairsDpairsbyselectingthemostconsistentresponseasthe
+t
+chosen(winning)responseandselectingtheleastconsistent oneastherejected(losing)response,
+providedthatthevoteofthechosenresponseisgreaterthanathresholdτ.1 Inotherwords,
+Dpairs ={(x,y+,y−)|x∈D ,y+=argmaxV(y), y−=argminV(y), andV(y+)≥τ}.
+t t
+y∈y¯x y∈y¯x
+SCPO LossFunction. SCPO operatesundertheassumptionthatwhenmultipleresponsessam-
+pledforproblemxmaptothesameanswer,thenthepredictedanswerislikelytobecorrect,thesame
+assumptionasinWangetal.(2023). Consequently,weuseconsistencyviaavotefunctionV(·)as
+aproxytocreatepreferencepairs. However,atthesametime,thenumberofvotesattainedbyare-
+sponsecanalsoreflectthemodel’sconfidenceintheresponse(Xiongetal.,2024;Kabraetal.,2024),
+implying that pairs where the vote margin – the difference in votes attained by the chosen vs. the
+rejectedresponse–islarger,areofhigherqualityandvice-versa(refertoAppendixA).Wemodel
+this in SCPO’s training by using an instance-levelweight w(x) to the loss, i.e., for thepreference
+pair(x,y+,y−) ∈ Dpairs,w(x)=(cid:0) V(y+)−V(y−)(cid:1) /k,wherek isthetotalnumberofresponses
+t
+generatedforeachquestion(totalnumberofvotescast).2 Wethususethefollowinglossfunction:
+(cid:18) M (y+|x) M (y−|x)(cid:19) αw(x)
+L (y+,y−|x)=−w(x)logσ βlog θ −βlog θ − logM (y+|x).
+SCPO M (y+ |x) M (y−|x) |y+| θ
+t t
+(cid:124) (cid:123)(cid:122) (cid:125)(cid:124) (cid:123)(cid:122) (cid:125)
+WeightedDPOLoss WeightedNLLLoss
+ThelossincludesaDPOandNLLtermsimilartotherecentlyintroducedsupervisedIRPO(Pang
+etal.,2024)loss,butinourcasewehaveanunsupervisedobjectiveanduseourintroducedweighted
+loss. Here σ(·) denotes the sigmoid function, and α,β are hyperparameters of the loss function,
+andθ representstheLLMparametersbeingtrainedinthecurrentiteration. Atthetth iteration,we
+usetheinitializedmodelM asthereferencemodelintheDPOloss(Rafailovetal.,2024). After
+t
+trainingonthisloss,thetrainedmodelisusedtoinitializethenextiteration,i.e.,M ←M .
+t+1 θ
+IterativeTraining. StartingwithaninitialseedmodelM ,wetrainaseriesofmodelsM ,M ,
+0 1 2
+i.e. forT = 2iterations(wejustifythischoiceinAppendixB).EachmodelM istrainedusing
+t+1
+L onDpairs,thedatageneratedbythetthmodel,definedasfollows:
+SCPO t
+M : SeedLLM,initializedwithapretrainedLLM(neednotbeinstruction-finetuned).
+0
+M : InitializedwithM togenerateDpairsfromD (+newproblems)andtrainedusingL .
+1 0 0 0 SCPO
+M : InitializedwithM togenerateDpairsfromD (+newproblems)andtrainedusingL .
+2 1 1 1 SCPO
+ThisapproachissimilartotheSelf-RewardingLMtrainingloop(Yuanetal.,2024)exceptforthe
+factthatweusethemodel’sself-consistencytoscoreresponsesinsteadofusingthesamemodelasa
+judgetoverifyitsowncorrectness,whichHuangetal.(2024)showisoftenchallenging. Incontrast
+tootheriterativebootstrappingtechniquesforreasoning(Zelikmanetal.,2022;Pangetal.,2024),
+SCPOdoesnotrequireaccesstogoldlabelssuchasgoldresponsesorfinalanswers,allowingSCPO
+toscalebeyondtheproblemsfromanexistingtrainingdataset.
+1By design, several responses can share a final answer (but for example, their chain-of-thought may be
+different).So,weclustertheresponsesbyfinalanswerandpickaresponseatrandomamongthem.
+2Thisnormalizationmakessuretheweightsarealwaysbetween0and1.
+3Semi-SupervisedTrainingwithSCPO. Although SCPO doesnotrequireaccesstogoldlabels,
+we can easily incorporate datasets with gold labels in conjunction with unlabeled datasets during
+SCPO training. To this end, we alter the preference pair creation strategy described in that case.
+When gold labels are available for a query x , we sample k responses, and create pairs such
+gold
+thatthechosenresponsey+ iscorrectandtherejectedresponsey− isincorrect(discardingqueries
+wheresuchpairscannotbecreated). Sincewealreadyknowthesepairsareofhighquality,weset
+the weight of annotated instances w(x )=1. For queries that do not have gold labels, we use
+gold
+ourself-consistencycriterionforpaircreationandcomputetheweightedlossforthoseexamplesas
+before. Aspecialcaseisthatifalldataislabeled,thelossreducestotheIRPOloss.
+3 EXPERIMENTAL SETUP
+Datasets and Metrics. We evaluate the effectiveness of SCPO on a range of mathematical and
+logicalreasoningdatasets:
+• GSM8K (Cobbe et al., 2021) contains a train/test split of 7.5K/1.3K grade school math word
+problems. Forthepurposeofthiswork,wesplitthetrainsetintoatrain/devsplitwith6.7K/0.8K
+problemsrespectively. Weusethedevsplitforhyperparametertuningandcheckpointselection.
+The overall data split becomes 6.7K/0.8K/1.3K in the train/dev/test set, respectively. We report
+performancebasedonexactmatchaccuracyofthefinalnumericansweronthetestset.
+• MATH (Hendrycks et al., 2021) is a dataset of challenging high-school math competitions that
+containsatrain/testsplitof7.5K/5Kproblems,respectively. SimilartoGSM8K,wereserve10%
+ofsamplesfromthetrainsettocreateaheld-outdevsetformodelselectionandhyperparameter
+tuning, resulting in our final train/dev/test splits with 6.7K/0.8K/5K problems, respectively. We
+reporttheaccuracyofthefinalansweronthetestset.
+• ZebraLogic(Dzirietal.,2024)isalogicalreasoningbenchmark. Itisatestsetof1Klogicgrid
+puzzles(orEinstein’spuzzles)designedasaconstraintsatisfactionproblem(Prosser,1993).Each
+puzzle is comprised of n houses with m unique features, resulting in an n×m table. Given a
+list of clues, solving the puzzle requires deducing the correct (unique) assignment of values in
+thetable,i.e.,auniquevalueforeachfeatureandhouse. Evaluationmetricsforthisdatasetare:
+puzzleaccuracy(overall,easy,andhardpuzzles)aswellascellaccuracy.
+BaseModels. ForGSM8KandMATH,weuseLlama-3Base8B(Dubeyetal.,2024)astheseed
+model M . We note that the instruction-tuned version may have already been fine-tuned on the
+0
+golddatafromthesetasks,sonewexperimentalsettingscannotbereliablytestedinthatcase. For
+ZebraLogic,weuseLlama-3Instruct8B(Dubeyetal.,2024)astheseedmodel.
+PreferenceTrainingData. WeusetheLlama-3Instruct8Bmodeltogenerateadditionalproblems
+(queries). For GSM8K and MATH, we prompt the model to generate a problem similar to 4-shot
+examples of problems from the train set. Note that the prompt only requires valid human-written
+problemsandnottheircorrespondinganswers. Wefilteroutproblemswheremax V(y )<0.5k
+i≤k i
+(or, τ = 0.5k) where k is the number of responses sampled or votes cast for each query. That
+is, wherelessthanhalfofthevotesgotowardsthemajorityanswer, whichwefoundtobeagood
+thresholdbasedonthedevsetaccuracy(seeSection5).SinceM modelstendtobemoreconsistent
+1
+thanM (cf. Section5),forM trainingdata,weincreasethefilteringthresholdτ to0.7kand0.6k
+0 2
+onGSM8KandMATH,respectively. ForZebraLogic,wepromptthemodeltorephraseorperturb
+featuresofapuzzlefromthedatasetinaone-shotmanner. Then,weusetheunderlyingmodelM
+t
+togeneratek=16responsesforeachquestionandfilteroutquestionswherenoneoftheresponses
+accrueτ =2ormorevotes(exactlymatchingsolutions)forM andsetτ =0.5kfortrainingM .
+1 2
+Baselines. WecomparemodelstrainedwithSCPOinunsupervised(denotedasSCPO Unsup.)and
+semi-supervised(denotedasSCPO Semi-Sup.)settingsagainstthefollowingbaselines:
+• Seedmodel(Zero-shotCoT).Wecompareagainsttheseedmodel(M )usingzero-shotchain-
+0
+of-thoughtprompting(Kojimaetal.,2022)generatedwithgreedydecodingandreportresultswith
+orwithoutinference-timeself-consistency(SC;Wangetal.,2023).
+• SupervisedTrainingwithGoldAnswers(IRPO ). Weuseastrongsupervisedpreference
+Gold
+optimization method for reasoning tasks (Pang et al., 2024), to serve as an upper-bound on per-
+4Method TrainData(K) TestAcc.(%)
+#Seed/Gen. Greedy SC(8-way)
+withoutaccesstogoldlabels /
+Seedmodel(zero-shot) M -/- 41.17 51.80
+0
+IRPO iterM 5.5/- 48.67 69.98
+RM 1
+iterM 4.4/- 50.11 61.25
+2
+SCPO
+Unsup.
+iterM
+1
+5.3/- 61.03 71.49
+iterM 1.4/5.1 63.91 71.11
+2
+withaccesstogoldlabels /
+IRPO iterM 4.4†/- 61.41 72.93
+Gold 1
+iterM 5.7†/- 64.29 72.56
+2
+SCPO
+Semi-Sup.
+iterM
+1
+4.4†/1.9 63.61 74.30
+iterM 5.7†/4.5 66.64 74.75
+2
+Table 1: GSM8K zero-shot accuracy after training Llama-3 Base 8B with SCPO and baselines,
+usinggreedyorself-consistency(SC)-basedinference.Thebestperformanceisinbold,andsecond-
+best is underlined. We list train set sizes for each method: “Seed” corresponds to seed problems
+in the train set, whereas “Gen.” indicates additional problems generated by the model (without
+answers). IRPO Gold, and SCPO Semi-Sup., highlighted in green, use the gold answers to create
+preferencepairs(whenavailable,indicatedwith†).
+formanceforunsupervisedtrainingasthisusesgolddatafromthetrainset,whichwecompareto
+unsupervisedandsemi-supervisedSCPO.Foreachqueryx,preferencepairsareconstructedsuch
+thatchosenresponsesarecorrectandrejectedresponsesareincorrectwithw(x)=1.
+• Unsupervised Training with External RM (IRPO ). We propose a new variant of IRPO
+RM
+thatwealsoexpecttobeastrongbaseline. Giventheplethoraofpublicly-availablerewardmod-
+els(RMs;Lambertetal.,2024), intheabsenceofgoldlabels, off-the-shelfRMscanbeusedto
+scoreasetofresponsesy¯∼M (·|x)andcreatepreferencepairssuchthatchosenandrejectedre-
+t
+sponseshavethemaximumandminimumreward,respectively,i.e.,y+=argmax RM(y|x)
+y∈y¯
+and y− = argmin RM(y|x) with w(x) = 1. We use the strongly performing ArmoRM-
+y∈y¯
+Llama3-8Bmodel(Wangetal.,2024a)asarewardmodel.3
+Hyperparameters. WhengeneratingmultipleresponseornewproblemsfromtheLLM,wesam-
+ple with temperature of 0.7 and top-p = 0.9. For GSM8K and MATH, we set k=8. With every
+iterationoftraining,themodelsbecomemoreconsistentduetothetrainingobjective(seeSection5),
+thereby,makingpickingtherejectedresponseharder,i.e.,noneoftheresponsesareincorrectorall
+theresponsessharethesamefinalanswer. Therefore,tosamplerejectedresponses,wefurthergen-
+erate8responsessampledwithahighertemperatureof1.2toencouragemorediverseanswers. On
+ZebraLogic, due to the complex nature of the response (an n×m table), we find that sampling a
+responsethatgetsmultiplevotesisrelativelyinfrequent,sowesetk=16forthistask. Allmodels
+aretrainedfor10epochswithalearningrateof5e-6(cosinescheduling), andeffectivebatchsize
+of 16. Lastly, we set DPO loss term hyperparameter β = 0.5 and NLL regularization coefficient
+α = 1. When a dev set is available (e.g., GSM8K and MATH), we use accuracy on the dev set
+forcheckpointselection(ateveryepoch). ForZebraLogic,whichissimilarlychallengingtoMATH
+anddoesnothaveatrainordevset,foreachiteration,wetrainforthesamenumberofepochsthat
+performedbestduringMATHtraining.
+4 MAIN RESULTS
+4.1 MATHREASONING
+SCPO outperforms unsupervised baselines. Comparing methods on GSM8K, in Table 1, we
+observe that training with only one iteration of SCPO outperforms the zero-shot seed model and
+IRPO , by 22.74% and 12.36%, respectively, using greedy decoding. Similarly, on MATH (cf.
+RM
+3Wangetal.(2024a)usetrainingsplitsofGSM8KandMATHtotrainArmoRM,renderingthesedatasets
+highlyin-distributionfortheRMwhileZebraLogicisout-of-distribution(furtherdiscussedinSection5).
+5Method TrainData(K) TestAcc.(%)
+#Seed/Gen. Greedy SC(8-way)
+withoutaccesstogoldlabels /
+Seedmodel(zero-shot) M -/- 14.46 18.20
+0
+IRPO iterM 6.4/- 18.06 24.20
+RM 1
+iterM 6.5/- 18.08 22.64
+2
+SCPO
+Unsup.
+iterM
+1
+0.6/1.2 17.36 25.70
+iterM 1.2/2.5 19.72 24.58
+2
+withaccesstogoldlabels /
+IRPO iterM 2.7†/- 18.64 26.88
+Gold 1
+iterM 3.0†/- 20.32 26.88
+2
+SCPO
+Semi-Sup.
+iterM
+1
+2.7†/1.2 19.88 27.35
+iterM 3.0†/2.2 20.48 26.92
+2
+Table 2: MATH zero-shot accuracy after training Llama-3 Base 8B with SCPO and baselines,
+using greedy or self-consistency (SC)-based inference. Train data size: “Seed” corresponds to
+seed queries in the train set, “Gen.” are additional model-generated problems (without answers).
+IRPO GoldandSCPO Semi-Sup.,highlightedin green,usegoldanswerstotrain(indicatedwith†).
+Table 2), two iterations of SCPO
+Unsup.
+yields an improvement of 5.26% and 1.64% respectively
+comparedtothesametwobaselines. WefurthernotethatwhileIRPO isnotgivendirectaccess
+RM
+tothegoldlabels,itusestheArmoRM,whichhasbeentrainedonhuman-annotatedstep-leveldata
+basedonMATH’strainset(Lightmanetal.,2023;Wangetal.,2024a).Hence,SCPO’simprovement
+overIRPO wouldlikelybelargeriftheRMhadnotusedin-domaingoldlabelsduringtraining.
+RM
+Overall,wefindSCPOhastheabilitytooutperformRMs,especiallyinout-of-distributionsettings.
+IterationsofSCPOimprovereasoning. FromTables1and2,weobservethattwoiterationsof
+SCPOconsistentlyimprovestheLLM’sperformancewhenusinggreedydecodinginbothunsuper-
+vised and semi-supervised settings compared to one iteration. On GSM8K, greedy test accuracy
+improvesby2.88%,and3.03%whenusing SCPO forunsupervisedandsemi-supervisedtraining,
+respectively. Similarly,onMATH,inTable2,wefindthatM 2modelswithSCPOoutperformstheir
+M counterparts by up to 2.36% in greedy accuracy. This can be explained by models becoming
+1
+moreaccurateandconsistentafteroneroundofSCPOtraining(showninSection5). Consequently,
+thisallowsustobootstrapfromadditionalproblemsintheoriginalandgeneratedtrainingdata,for
+whichtheM modeldidnothaveaconsistentresponse. However,wefindthattheaccuracycom-
+0
+putedusing8-wayself-consistency(SC)saturatesafterthefirstiteration,sometimesevenresulting
+inaslightdecreasecomparedtoM . Thismayhappenbecausenowthatthemodelistrainedtobe
+1
+moreconsistentthereislessbenefitfromapplyingself-consistencyatinferencetime(seeanalysis
+inSection5). Wefindthatathirditerationoftrainingalsoshowsminimalgains,howeverifweuti-
+lizethe(unlabeled)problemsfromthetestsettobuildpreferencepairs,wefindthatwecanobtain
+additionalperformanceboostsontopofM ,asdiscussedinAppendixB.
+2
+Unsupervised SCPO is comparable to IRPO training with gold labels. We can compare the
+unsupervisedtrainingof SCPO withthesupervisedtrainingusinggoldlabelsofIRPOinTables1
+and 2. The results show that SCPO
+Unsup.
+without using any gold labels can yield comparable
+accuracy to IRPO on GSM8K and MATH with < 1% gap in greedy performance and < 2%
+Gold
+gapinaccuracyusing8-wayself-consistencyaftertwoiterationsoftraining(M ). Thiscomparable
+2
+performanceof SCPO
+Unsup.
+islikelyduetohighcorrelation(0.8acrossthedatasets)betweenthe
+vote shares and accuracy on the test set, as further discussed in Appendix A. Note that on tasks
+that are challenging for the seed model M , such as MATH, we can only bootstrap a small set of
+0
+examplesfromtheoriginalsetoftrainingproblemascomparedtoIRPO(i.e.,onlyaroundaquarter
+of examples obtain a clear majority answer). However, we can offset this gap in training data by
+generating new problems using few-shot prompting (cf. Section 2) and creating preference pairs
+usingourself-consistencymethod. Thishelpsprovideimprovementsduringtheseconditeration.
+Semi-supervisedtrainingwithSCPOoutperformsIRPO. Lastly,inTables1and2,weevaluate
+the semi-supervised version of SCPO combined with using gold labels. We find that on GSM8K,
+SCPO
+Semi-Sup.
+improvesthegreedyaccuracyby2.35%andSCaccuracyby2.19%incomparison
+6Method TrainData(K) PuzzleAcc.(%) CellAcc.
+#Seed/Gen. Overall Easy Hard (%)
+Llama-3Instruct70B -/- 17.2 52.1 3.6 42.9
+Gemma-227BIT∗ -/- 16.3 50.7 2.9 41.2
+Claude-3Haiku∗ -/- 14.3 47.9 1.2 37.9
+M (Llama-3Instruct8B) -/- 11.6 40.0 0.4 39.1
+0
+M w/IRPO 1.0/- 11.3 37.9 1.0 42.1
+1 RM
+M 1w/SCPO
+Unsup.
+0.4/1.0 17.0 54.3 2.5 47.6
+M 2w/SCPO
+Unsup.
+0.4/2.2 18.1 58.2 2.5 45.2
+Table 3: ZebraLogic test performance after unsupervised training of Llama-3 Instruct 8B with
+SCPO,comparedtobaselines.“Seed”correspondstooriginalpuzzlesinthetestset,whereas“Gen.”
+indicatesadditionalpuzzlesgenerated. ∗Model’sperformancereportedfromtheLeaderboard.
+to IRPO Gold. Similar trends hold on the MATH dataset, where one iteration of SCPO
+Semi-Sup.
+outperforms IRPO by 1.24% using greedy decoding. These results show the utility of using
+Gold
+SCPOtobootstrapfrommodel-generatedproblemsevengivenaccesstoalabeledtrainingset.
+4.2 ZEBRALOGIC: ACHALLENGINGLOGICALREASONINGTASK
+SCPO outperforms unsupervised baselines. Table 3 reports performance on ZebraLogic of
+SCPO and various baselines, using greedy decoding. We observe large improvements over the
+seedmodel, Llama-3Instruct8B(M 0)withoneiterationofunsupervised SCPO (M 1), improving
+performanceby5.4%and8.5%inoverallpuzzleaccuracy(exactmatchoftables)andcellaccuracy
+(matchofeachcellinthetable),respectively. Incontrast,unsupervisedtrainingofIRPO yields
+RM
+onlymildgainsovertheseedmodelby3%incellaccuracyandevenaslightdropinpuzzleaccu-
+racy(11.6%to11.3%). ThiscanbeattributedtoZebraLogicpuzzlesbeingout-of-distributionfor
+theArmoRM(cf.Section5),thustrailingbehindoneiterationofSCPOby5.7%inpuzzleaccuracy
+and5.5%incellaccuracy.Overall,trainingwithSCPOfortwoiterationsimprovestheperformance
+oftheseedmodelby8positionsontheleaderboard(from38thto30th)witha6.5%boostinpuzzle
+accuracyand,tothebestofourknowledge,isthebest8B-scaleLLMonZebraLogic.
+8BLLMtrainedwithSCPOoutperformslargermodels. ComparisonofSCPO-trainedmodels
+toothermodelsinTable3demonstratesthat SCPO-trainingaftertwoiterations(M 2)outperforms
+significantly larger models such as Llama-3 Instruct 70B, Gemma-2 27B, and Claude-3 Haiku by
+0.9%, 1.8%, and 3.8% in overall puzzle accuracy, respectively. Additionally, we find that models
+trainedusingSCPOalsoyieldthehighestcellaccuracy. Weattributethesegainsoverlargermodels
+tothesubstantialimprovementinsolvingeasypuzzleswithSCPO(upto10.3%).
+5 ABLATIONS AND ANALYSIS
+Importance of weighted SCPO loss.
+Method Train(K) TestAcc.(%)
+While the results in Section 4 are ob-
+tainedusingtheweightedL lossthat #Seed/Gen. Greedy SC(8-way)
+SCPO
+isafunctionofconsistency,herewecom- M w/w(x)=1 5.3/- 58.53 69.07
+1
+pare SCPO using an unweighted loss. M w/w(x)=1 1.4/5.1 62.62 69.90
+2
+Morespecifically,wetrainusingthesame
+preference dataset created based on self-
+M 1w/SCPO
+Unsup.
+5.3/- 61.03 71.49
+consistencyofresponses,butwithw(x)=
+M 2w/SCPO
+Unsup.
+1.4/5.1 63.91 71.11
+s1 erin veth the aL
+t
+S aC cP rO osslo dss a. taI sn etsTa ab nl de i4 t, erw ate ioo nb s-
+,
+M M1 2w w/ /w w( (x x) )= =1 1 0 1. .6 2/ /1 2. .2 5 1 15 8. .9 72 4 2 25 5. .3 54 8
+theweightedlossconsistentlyoutperforms M 1w/SCPO
+Unsup.
+0.6/1.2 17.36 25.70
+theunweightedversion.Theimprovement M 2w/SCPO Unsup. 1.2/2.5 19.72 24.58
+in accuracy is even more pronounced for
+Table4: Ablationcomparingunweightedloss(w(x)=
+the first iteration of training M , yield-
+1 1)totheproposedweightedlossusedinSCPO.SCPO
+ing an improvement of 2.5% in accuracy
+outperformstheunweightedlossinallcases.
+on GSM8K and 1.44% on MATH with
+7
+K8MSG
+HTAMgreedy inference. Even in the second iteration, M
+2
+models trained with SCPO outperform their
+unweightedcounterpartsbyroughly1%onbothGSM8KandMATH.Thisindicatesthatitisbetter
+to take the amount of votes into account when optimizing for consistency, as this indicates confi-
+denceinthechosenandrejectedlabeling.
+Modelsbecomemoreconsistentacrossiterations.
+In Figure 2, we analyze how the degree of model 70 M0
+consistency varies across iterations. To this end, 60 M1
+we measure the vote share V(y+)/k of the most
+50
+M2
+consistent response, i.e., chosen response in self-
+40
+consistency of models trained using unsupervised
+30
+SCPO. From Figure 2, we conclude that SCPO
+20
+training increases the consistency of models with
+eachtrainingiterationacrossdifferenttasks.Wesus- 10
+pect this finding stems from three contributing fac- 0
+GSM8K MATH ZebraLogic
+tors: (i) with increasing iterations models become
+Figure2: Voteshare(%)ofthemostconsis-
+more accurate (Section 4); (ii) additional rounds
+tentresponse: V(y+)/kincreaseswithitera-
+of preference-optimization decreases model diver-
+tionsacrossalldatasets.
+sity(Kirketal.,2024);and(iii)trainingwithSCPO
+effectivelydistillstheSCdistributionintothemodel’ssingle-sampledistribution. Additionally,we
+findthatmodelsaremoreconsistentontaskswithhighertestaccuracy,i.e.,onGSM8KtheLLMis
+mostconsistentandaccuratewhereasonZebraLogicitistheleastconsistentandaccurate.
+Impact of consistency-based filtering on con-
+Setting Margin #Train TestAcc.
+structing preferences. In Section 3, when gener-
+ating self-consistency preference data for GSM8K M - - 14.46
+0
+andMATH,wefilteroutinstanceswherefewerthan M 1(τ =0.1k) 18% 6.7K 15.44
+half of the votes go towards the majority answer, M 1(τ =0.3k) 44% 2.4K 16.34
+i.e.,τ=0.5k. Thechoiceofthisthresholdpresents M 1(τ =0.5k) 57% 1.8K 17.36
+M (τ =0.7k) 68% 0.7K 14.76
+a trade-off between the number of preference pairs 1
+availablefortrainingandthequalityofthetraining
+Table 5: Impact of using different thresh-
+data,andaffectsthedifference(margin)inaccuracy
+oldsonmajorityvotetofiltertrainingdataon
+of the chosen and the rejected response. Assum-
+MATH.Margin(%)denotesthedifferencein
+ingaccesstothegoldanswerstomeasurequalityof
+accuracyofthechosenandrejectedresponse.
+preferencedata,inTable5,weanalyzethistrade-off
+onMATH.Asthevotethresholdincreasesfromτ=0.1k toτ=0.7k,thequalityoftrainingpref-
+erencepairsincreases,withtheaccuracymarginincreasingfrom18%to68%. Ontheotherhand,
+thesizeofthetrainingdatadecreasesfrom6.7Kpairstofewerthat700pairs. Interestingly,Table5
+shows that as we vary the threshold, the performance of the trained model increases till τ =0.5k
+and then decreases. In other words, from τ =0.1k to τ =0.5k the quality of the preference data
+(or the accuracy margin) takes precedence over the quantity, improving downstream performance
+by1.92%. However,whenwesetτ=0.7k,weendupwithfewerthan700pairstotrainwhichwe
+suspectisinsufficient(intermsofbothdatasizeanddiversity)totrainamodelwith8Bparameters.
+Comparison of self-consistency to RMs. GSM8K
+Our results in Section 4 show that models SC7.8% 25.9% 66.3%
+trained with unsupervised SCPO outperform Armo 19.1% 80.3%
+MATH
+models trained with IRPO using ArmoRM to
+SC 11.8% 38.3% 49.8%
+build preference pairs. To study this further,
+Armo 32.4% 66.6%
+we conduct additional analysis by measuring ZebraLogic
+the ability of the two methods to distinguish SC 16.0% 17.8% 66.2%
+between correct and incorrect responses, com- Armo 40.5% 53.9%
+paring the methods to gold labels. Results are Metric(Correct) < Metric(Wrong) Metric(Correct) > Metric(Wrong)
+Tied Metrics
+giveninFigure3. WefindthatArmoRMcon-
+Figure3: Comparingthequalityofmetrics: self-
+sistently has more incorrect orderings of pair-
+consistency(SC)andArmoRMtodistinguishbe-
+wise preferences (the chosen is incorrect and
+tweencorrectandincorrectresponses.
+the rejected is correct) than SCPO across all
+threedatasets(showninred). ThisaddednoiseintrainingmaybeamajorfactorastowhyIRPO
+RM
+8
+)%(
+erahS
+etoV
+ytirojaMperformspoorlycomparedto SCPO Unsup. Ontheotherhand, self-consistencyresultsinagreater
+numberofties,i.e.,whenthechosenandrejectedanswersgetthesamenumberofvotes;theseare
+ignoredin SCPO’slosssincew(x)=0. Lastly,wefindthatinout-of-distributionsettingslikeZe-
+braLogic, self-consistencyoutperformsArmoRMwith12.3%highercorrectorderingsofpairwise
+preferences(showningreeninFigure3).
+6 RELATED WORK
+Iterative Training of LLMs. Iterative training or self-training has shown meaningful improve-
+mentsinanumberofdomainssuchassafety(Baietal.,2022), multilingualreasoning(Sheetal.,
+2024), and evaluation (Wang et al., 2024b). Because LLMs often struggle with both generating
+and validating solutions to complex reasoning tasks, prior works on training LLMs for complex
+problem-solvingtaskslargelyrelyonhuman-annotated(gold)finalanswers(Zelikmanetal.,2022;
+Chen et al., 2024b; Pang et al., 2024) or access to an external reward model that performs well
+on the underlying task (Singh et al., 2024; Dong et al., 2023). However, both these classes of ap-
+proaches suffer from their own shortcomings. Firstly, manually annotating or verifying the final
+answerrequiresworkingthroughthesolutionstep-by-step,makingitespeciallyresource-intensive
+forcomplexmulti-stepproblems. Trainingstrongrewardmodelsforsuchreasoningandproblem-
+solvingtasksalsooftenrequireshumanjudgementsofLLMgenerations(Cobbeetal.,2021;Uesato
+etal.,2022;Lightmanetal.,2023),makingitsimilarlyexpensive. Ourworkfocusesonthesetting
+withoutaccesstogoldsolutionsorfinalanswers,whichremainslargelyunaddressed. Whileother
+workssuchasSheetal.(2024);Yuanetal.(2024);Rossetetal.(2024);Tranetal.(2023)geared
+towardsgeneralinstructionfollowingtasks(asopposedtoreasoningtasksspecifically)circumvent
+theneedforhuman-annotatedlabelsinthedatasetbyusingthemodelitselftoscoretheresponses,
+theseworksdemonstrateonlymodestgainsinthecontextofreasoningtasks.
+ConsistencyinLLMs. Self-consistency(Wangetal.,2023)reliesupontheintuitionthatsampling
+severalresponses,someofwhichleadtothesameanswer,lendshighercertaintythattheconsistent
+answeristhecorrectone.Applicationofself-consistencyatinferencetimehasenabledperformance
+improvements in a number of domains like math (Wang et al., 2023), code generation (Shi et al.,
+2022;Lietal.,2022;Chenetal.,2018),andevenopen-endedtaskslikesummarizationandquestion
+answering(Chenetal.,2024a). Inthiswork,weexploreusingself-consistencyattrainingtimefor
+reasoning tasks, constructing preference pairs according to the self-consistent final answer. We
+employapreferenceoptimizationlossfunctionthatisweightedaccordingtotheconsistencyofan
+answer. Intuitively,theconsistencyofananswerisareflectionofthemodelconfidence,andseveral
+priorworkshavedemonstratedthatleveragingmodeluncertaintycanleadtofasterconvergenceand
+improvedperformance(Gal&Ghahramani,2016;Krishnan&Tickoo,2020;Corbie`reetal.,2019).
+7 CONCLUSION
+Inthispaper,weintroducedSelf-ConsistencyPreferenceOptimization(SCPO).SCPOleveragesthe
+conceptofself-consistency,usuallyemployedonlyatinferencetime,toimprovetheself-trainingof
+largelanguagemodels. Byiterativelyoptimizingtopreferconsistentanswerstoinconsistentones,
+SCPO achieves significant improvements over traditional reward model training without the need
+foradditionalgoldlabels. OurexperimentsdemonstratetheefficacyofSCPOonvariousreasoning
+tasks,includingGSM8K,MATH,andZebraLogic,whereinthelatteritoutperformsseverallarger
+state-of-the-artlanguagemodels. WealsoshowedthatSCPOworkswellinsemi-supervisedsetups
+with access to some gold labels, in addition to unlabeled inputs – improving performance further.
+These results highlight the potential of SCPO to improve self-alignment across reasoning tasks –
+adomainthatpriorself-alignmentmethodsstillstrugglewith. Futureworkcouldextend SCPO to
+tasks where a single final answer cannot be easily parsed (e.g., summarization) through universal
+self-consistency(Chenetal.,2024a),whichleveragesanLLMtoselectthemostconsistentanswer
+amongmultiplesamples. Whileweexploreconsistencyinthisworkaccordingtoonemodelclass
+(Llama-38BBaseandInstruct),futureworkcouldalsoinvestigateconsistencyaccordingtoasuite
+ofothermodelsandtasks.
+9REFERENCES
+Anthropic. The claude 3 model family: Opus, sonnet, haiku. 2024. URL
+https://www-cdn.anthropic.com/de8ba9b01c9ab7cbabf5c33b80b7bbc618857627/
+Model Card Claude 3.pdf.
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma, Dawn
+Drain, Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and harmless
+assistant with reinforcement learning from human feedback. arXiv preprint arXiv:2204.05862,
+2022.
+Stephen Casper, Xander Davies, Claudia Shi, Thomas Krendl Gilbert, Je´re´my Scheurer, Javier
+Rando, Rachel Freedman, Tomasz Korbak, David Lindner, Pedro Freire, et al. Open problems
+and fundamental limitations of reinforcement learning from human feedback. arXiv preprint
+arXiv:2307.15217,2023.
+Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu
+Chen. Codet:Codegenerationwithgeneratedtests. InTheEleventhInternationalConferenceon
+LearningRepresentations,2023.
+XinyunChen,ChangLiu,andDawnSong. Execution-guidedneuralprogramsynthesis. InInterna-
+tionalConferenceonLearningRepresentations,2018.
+Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Kefan Xiao, Pengcheng Yin, Sushant Prakash,
+Charles Sutton, Xuezhi Wang, and Denny Zhou. Universal self-consistency for large language
+models. InICML2024WorkshoponIn-ContextLearning,2024a. URLhttps://openreview.
+net/forum?id=LjsjHF7nAN.
+ZixiangChen,YiheDeng,HuizhuoYuan,KaixuanJi,andQuanquanGu. Self-playfine-tuningcon-
+vertsweaklanguagemodelstostronglanguagemodels. InForty-firstInternationalConference
+onMachineLearning,2024b. URLhttps://openreview.net/forum?id=O4cHTxW9BS.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to
+solvemathwordproblems. arXivpreprintarXiv:2110.14168,2021.
+CharlesCorbie`re, NicolasThome, AvnerBar-Hen, MatthieuCord, andPatrickPe´rez. Addressing
+failure prediction by learning model confidence. Advances in Neural Information Processing
+Systems,32,2019.
+Hanze Dong, Wei Xiong, Deepanshu Goyal, Yihan Zhang, Winnie Chow, Rui Pan, Shizhe Diao,
+JipengZhang,KaShunShum,andTongZhang. RAFT:Rewardrankedfinetuningforgenerative
+foundation model alignment. Transactions on Machine Learning Research, 2023. ISSN 2835-
+8856. URLhttps://openreview.net/forum?id=m7p5O7zblY.
+AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,etal. Thellama3herdofmodels.
+arXivpreprintarXiv:2407.21783,2024.
+Nouha Dziri, Ximing Lu, Melanie Sclar, Xiang Lorraine Li, Liwei Jiang, Bill Yuchen Lin, Sean
+Welleck, Peter West, Chandra Bhagavatula, Ronan Le Bras, et al. Faith and fate: Limits of
+transformersoncompositionality. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Martin A Fischler and Robert C Bolles. Random sample consensus: a paradigm for model fitting
+withapplicationstoimageanalysisandautomatedcartography. CommunicationsoftheACM,24
+(6):381–395,1981.
+YarinGalandZoubinGhahramani. Dropoutasabayesianapproximation: Representingmodelun-
+certaintyindeeplearning. InMariaFlorinaBalcanandKilianQ.Weinberger(eds.),Proceedings
+of The 33rd International Conference on Machine Learning, volume 48 of Proceedings of Ma-
+chineLearningResearch,pp.1050–1059,NewYork,NewYork,USA,20–22Jun2016.PMLR.
+URLhttps://proceedings.mlr.press/v48/gal16.html.
+10DanHendrycks,CollinBurns,SauravKadavath,AkulArora,StevenBasart,EricTang,DawnSong,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv
+preprintarXiv:2103.03874,2021.
+JieHuang,XinyunChen,SwaroopMishra,HuaixiuStevenZheng,AdamsWeiYu,XinyingSong,
+and Denny Zhou. Large language models cannot self-correct reasoning yet. In The Twelfth
+InternationalConferenceonLearningRepresentations,2024. URLhttps://openreview.net/
+forum?id=IkmD3fKBPQ.
+Anubha Kabra, Sanketh Rangreji, Yash Mathur, Aman Madaan, Emmy Liu, and Graham Neubig.
+Program-aidedreasoners(better)knowwhattheyknow.InProceedingsofthe2024Conferenceof
+theNorthAmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguage
+Technologies(Volume1: LongPapers),pp.2262–2278,2024.
+Robert Kirk, Ishita Mediratta, Christoforos Nalmpantis, Jelena Luketina, Eric Hambro, Edward
+Grefenstette, andRobertaRaileanu. Understandingtheeffectsofrlhfonllmgeneralisationand
+diversity. InTheTwelfthInternationalConferenceonLearningRepresentations,2024.
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yutaka Matsuo, and Yusuke Iwasawa. Large
+language models are zero-shot reasoners. Advances in neural information processing systems,
+35:22199–22213,2022.
+Ranganath Krishnan and Omesh Tickoo. Improving model calibration with accuracy versus un-
+certainty optimization. Advances in Neural Information Processing Systems, 33:18237–18248,
+2020.
+NathanLambert,ValentinaPyatkin,JacobMorrison,LJMiranda,BillYuchenLin,KhyathiChandu,
+Nouha Dziri, Sachin Kumar, Tom Zick, Yejin Choi, et al. Rewardbench: Evaluating reward
+modelsforlanguagemodeling. arXivpreprintarXiv:2403.13787,2024.
+Yujia Li, David Choi, JunyoungChung, Nate Kushman, Julian Schrittwieser, Re´mi Leblond, Tom
+Eccles,JamesKeeling,FelixGimeno,AgustinDalLago,etal.Competition-levelcodegeneration
+withalphacode. Science,378(6624):1092–1097,2022.
+Xun Liang, Shichao Song, Zifan Zheng, Hanyu Wang, Qingchen Yu, Xunkai Li, Rong-Hua Li,
+FeiyuXiong,andZhiyuLi. Internalconsistencyandself-feedbackinlargelanguagemodels: A
+survey. arXivpreprintarXiv:2407.14507,2024.
+Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan
+Leike,JohnSchulman,IlyaSutskever,andKarlCobbe. Let’sverifystepbystep. arXivpreprint
+arXiv:2305.20050,2023.
+Dakota Mahan, Duy Van Phung, Rafael Rafailov, Chase Blagden, Nathan Lile, Louis Castricato,
+Jan-PhilippFra¨nken,ChelseaFinn,andAlonAlbalak. Generativerewardmodels. arXivpreprint
+arXiv:2410.12832,2024.
+Richard Yuanzhe Pang, Weizhe Yuan, Kyunghyun Cho, He He, Sainbayar Sukhbaatar, and Jason
+Weston. Iterativereasoningpreferenceoptimization. arXivpreprintarXiv:2404.19733,2024.
+Patrick Prosser. Hybrid algorithms for the constraint satisfaction problem. Computational intelli-
+gence,9(3):268–299,1993.
+RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,andChelsea
+Finn. Directpreferenceoptimization:Yourlanguagemodelissecretlyarewardmodel. Advances
+inNeuralInformationProcessingSystems,36,2024.
+Corby Rosset, Ching-An Cheng, Arindam Mitra, Michael Santacroce, Ahmed Awadallah, and
+TengyangXie. Directnashoptimization: Teachinglanguagemodelstoself-improvewithgeneral
+preferences. arXivpreprintarXiv:2404.03715,2024.
+Shuaijie She, Shujian Huang, Wei Zou, Wenhao Zhu, Xiang Liu, Xiang Geng, and Jiajun Chen.
+MAPO: Advancing multilingual reasoning through multilingual alignment-as-preference opti-
+mization. arXivpreprintarXiv:2401.06838,2024.
+11FredaShi, DanielFried, MarjanGhazvininejad, LukeZettlemoyer, andSidaIWang. Naturallan-
+guage to code translation with execution. In Proceedings of the 2022 Conference on Empirical
+MethodsinNaturalLanguageProcessing,pp.3533–3546,2022.
+AviSingh,JohnDCo-Reyes,RishabhAgarwal,AnkeshAnand,PiyushPatil,XavierGarcia,PeterJ
+Liu, James Harrison, Jaehoon Lee, Kelvin Xu, Aaron T Parisi, Abhishek Kumar, Alexander A
+Alemi, Alex Rizkowsky, Azade Nova, Ben Adlam, Bernd Bohnet, Gamaleldin Fathy Elsayed,
+Hanie Sedghi, Igor Mordatch, Isabelle Simpson, Izzeddin Gur, Jasper Snoek, Jeffrey Penning-
+ton,JiriHron,KathleenKenealy,KevinSwersky,KshiteejMahajan,LauraACulp,LechaoXiao,
+MaxwellBileschi,NoahConstant,RomanNovak,RosanneLiu,TrisWarkentin,YaminiBansal,
+EthanDyer,BehnamNeyshabur,JaschaSohl-Dickstein,andNoahFiedel. Beyondhumandata:
+Scalingself-trainingforproblem-solvingwithlanguagemodels.TransactionsonMachineLearn-
+ingResearch,2024.ISSN2835-8856.URLhttps://openreview.net/forum?id=lNAyUngGFK.
+ExpertCertification.
+RobertHSomers. Anewasymmetricmeasureofassociationforordinalvariables. Americansoci-
+ologicalreview,pp.799–811,1962.
+GemmaTeam,MorganeRiviere,ShreyaPathak,PierGiuseppeSessa,CassidyHardin,SuryaBhu-
+patiraju,Le´onardHussenot,ThomasMesnard,BobakShahriari,AlexandreRame´,etal. Gemma
+2: Improvingopenlanguagemodelsatapracticalsize. arXivpreprintarXiv:2408.00118,2024.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Niko-
+lay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, Dan Bikel, Lukas Blecher,
+Cristian Canton Ferrer, Moya Chen, Guillem Cucurull, David Esiobu, Jude Fernandes, Jeremy
+Fu,WenyinFu,BrianFuller,CynthiaGao,VedanujGoswami,NamanGoyal,AnthonyHartshorn,
+Saghar Hosseini, Rui Hou, Hakan Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa, Isabel
+Kloumann,ArtemKorenev,PunitSinghKoura,Marie-AnneLachaux,ThibautLavril,JenyaLee,
+Diana Liskovich, Yinghai Lu, Yuning Mao, Xavier Martinet, Todor Mihaylov, Pushkar Mishra,
+Igor Molybog, Yixin Nie, Andrew Poulton, Jeremy Reizenstein, Rashi Rungta, Kalyan Saladi,
+AlanSchelten,RuanSilva,EricMichaelSmith,RanjanSubramanian,XiaoqingEllenTan,Binh
+Tang,RossTaylor,AdinaWilliams,JianXiangKuan,PuxinXu,ZhengYan,IliyanZarov,Yuchen
+Zhang, Angela Fan, Melanie Kambadur, Sharan Narang, Aurelien Rodriguez, Robert Stojnic,
+Sergey Edunov, and Thomas Scialom. Llama 2: Open foundation and fine-tuned chat models,
+2023. URLhttps://arxiv.org/abs/2307.09288.
+HoangTran,ChrisGlaze,andBradenHancock. IterativeDPOalignment. Technicalreport,Snorkel
+AI,2023.
+JonathanUesato,NateKushman,RamanaKumar,FrancisSong,NoahSiegel,LisaWang,Antonia
+Creswell, Geoffrey Irving, and Irina Higgins. Solving math word problems with process-and
+outcome-basedfeedback. arXivpreprintarXiv:2211.14275,2022.
+HaoxiangWang,WeiXiong,TengyangXie,HanZhao,andTongZhang. Interpretablepreferences
+via multi-objective reward modeling and mixture-of-experts. arXiv preprint arXiv:2406.12845,
+2024a.
+Tianlu Wang, Ilia Kulikov, Olga Golovneva, Ping Yu, Weizhe Yuan, Jane Dwivedi-Yu,
+Richard Yuanzhe Pang, Maryam Fazel-Zarandi, Jason Weston, and Xian Li. Self-taught eval-
+uators. arXivpreprintarXiv:2408.02666,2024b.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H. Chi, Sharan Narang, Aakanksha
+Chowdhery,andDennyZhou. Self-consistencyimproveschainofthoughtreasoninginlanguage
+models. In The Eleventh International Conference on Learning Representations, 2023. URL
+https://openreview.net/forum?id=1PL1NIMMrw.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,Denny
+Zhou,etal. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. Advancesin
+neuralinformationprocessingsystems,35:24824–24837,2022.
+MiaoXiong,ZhiyuanHu,XinyangLu,YIFEILI,JieFu,JunxianHe,andBryanHooi. CanLLMs
+express their uncertainty? an empirical evaluation of confidence elicitation in LLMs. In The
+TwelfthInternationalConferenceonLearningRepresentations,2024.
+12JingXu,AndrewLee,SainbayarSukhbaatar,andJasonWeston. Somethingsaremorecringethan
+others: Preferenceoptimizationwiththepairwisecringeloss. arXivpreprintarXiv:2312.16682,
+2023.
+LonghuiYu,WeisenJiang,HanShi,JinchengYU,ZhengyingLiu,YuZhang,JamesKwok,Zhen-
+guoLi,AdrianWeller,andWeiyangLiu. MetaMath:Bootstrapyourownmathematicalquestions
+forlargelanguagemodels.InTheTwelfthInternationalConferenceonLearningRepresentations,
+2024.
+Weizhe Yuan, Richard Yuanzhe Pang, Kyunghyun Cho, Xian Li, Sainbayar Sukhbaatar, Jing Xu,
+andJasonEWeston. Self-rewardinglanguagemodels. InForty-firstInternationalConferenceon
+MachineLearning,2024. URLhttps://openreview.net/forum?id=0NphYCmgua.
+Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah Goodman. STaR: Bootstrapping reasoning with
+reasoning. AdvancesinNeuralInformationProcessingSystems,35:15476–15488,2022.
+Lunjun Zhang, Arian Hosseini, Hritik Bansal, Mehran Kazemi, Aviral Kumar, and Rishabh
+Agarwal. Generative verifiers: Reward modeling as next-token prediction. arXiv preprint
+arXiv:2408.15240,2024.
+13A RELATIONSHIP BETWEEN CONSISTENCY AND ACCURACY
+Level of consistency or vote share correlates with accuracy.
+Dataset Somers’D
+We observe that the degree of consistency, or vote share, is posi-
+tively and strongly correlated with accuracy. This relationship is GSM8K 0.80
+evidenced in Table 6 by a high rank order correlation for all three MATH 0.68
+datasets,asdeterminedbySomer’sD(Somers,1962),whichmea- ZebraLogic 0.92
+sures the degree of association between two possibly dependent
+Table6:Somers’Dcomputed
+variables. ThisassociationislowestforMATH,likelybecausethe
+betweenAcc(y)andV(y)for
+challenging nature of this task makes it difficult for the model to
+y ∈{y+,y−}ontestset.
+produceconsistentanswers.
+GSM8KAcc. MATHAcc.
+Method
+Greedy SC(8-way) Greedy SC(8-way)
+M 41.17 58.80 14.46 18.20
+0
+M 1w/SCPO
+Unsup.
+61.03 71.49 17.36 25.70
+M 2w/SCPO
+Unsup.
+63.91 71.11 19.72 24.58
+M 3w/SCPO
+Unsup.
+64.21 70.81 19.76 24.66
+M 3w/SCPO Unsup.ontestqueries 65.35 70.96 20.00 25.84
+Table7:Additionaliterationoftraining(M )bybootrappingfromquestionsinthetrainandtestset.
+3
+On GSM8K, we bootstrap 8.7K pairs using train problems and 5.8K pairs with the test problems.
+OnMATH,webuild4.4K,and4.2Kpreferencepairsusingtrainandtestproblems,respectively.
+B TRANSDUCTION DURING INFERENCE
+Bootstrappingpreferencepairsfromtestqueriesfurtherboostsperformance. Inourprimary
+experiments, wereportresultsfortworoundsofiterativetraining. However, asshowninTable7,
+introducingathirdroundofSCPOyieldsonlymarginalimprovements,withgainsoflessthan1%
+overthesecondround. Toaddressthissaturation,weexploregeneratingnewproblemsandbuilding
+preferencepairsusingthequeriesfromtestsplitasexemplarsinsteadofthetrainsplit. Thisstrategy
+results in more substantial improvements (+1.44% for GSM8K), as it enables the model to better
+adapttotheuniquecharacteristicsofthetestset.ForMATH,weseemoresubstantialimprovements
+whenusingSCaccuracy,resultinginanimprovementbumpof1.26%. WenotethatZebraLogicis
+excludedfromthisanalysis,asitonlyprovidestestsamples.
+C PROMPTS
+Inthissection,weprovidealltask-specificpromptsusedforbothgeneratingnewproblemsandfor
+generatingcandidatesolutions.
+14ResponseGeneration: ZebraLogic
+ExamplePuzzle:
+Thereare3houses,numbered1to3fromlefttoright,asseenfromacrossthestreet. Each
+house is occupied by a different person. Each house has a unique attribute for each of the
+followingcharacteristics:
+-Eachpersonhasauniquename: ‘Peter’,‘Eric’,‘Arnold’.
+-Eachpersonhasauniquefavoritedrink: ‘tea’,‘water’,‘milk’
+##Clues:
+1. Peterisinthesecondhouse.
+2. Arnoldisdirectlyleftoftheonewhoonlydrinkswater.
+3. Theonewhoonlydrinkswaterisdirectlyleftofthepersonwholikesmilk.
+AnswertotheExamplePuzzle:
+{
+“reasoning”: “GivenClue1,weknowPeterisinHouse2. AccordingtoClue2,Arnoldis
+directlyleftoftheonewhoonlydrinkswater. ThepersoninHouse3cannotbeontheleft
+ofanyone,soArnoldmustbeinHouse1. Thus,Peterdrinkswater,andEriclivesinHouse
+3. Then,accordingtoClue3,Ericdrinksmilk. Therefore,Arnolddrinkstea.”,
+“solution”: {“House1”: {“Name”: “Arnold”,“Drink”: “tea”},
+“House2”: {“Name”: “Peter”,“Drink”: “water”},
+“House3”: {“Name”: “Eric”,“Drink”: “milk”}}
+}
+PuzzletoSolve: {puzzle}
+Prompt: Now please solve the above puzzle. Present your reasoning and solution in the
+followingjsonformat: {jsontemplate}
+ResponseGeneration: GSM8K
+Prompt: Answerthefollowingquestionstep-by-step. Whenyouareready,placethefinal
+answerinanewlineas####<number>.
+Q:{question}
+A:Let’sthinkstepbystep.
+ResponseGeneration: MATH
+Prompt: Answerthefollowingquestionstep-by-step. Whenyouareready,placethefinal
+answerinanewlineas: Thefinalansweris$\boxed{<youranswer>}$
+Q:{question}
+A:Let’sthinkstepbystep.
+15QueryGeneration: ZebraLogic
+ExamplePuzzle:
+AttributestoChange: [“Name”,“Drink”]
+“‘ There are 3 houses, numbered 1 to 3 from left to right, as seen from across the street.
+Eachhouseisoccupiedbyadifferentperson. Eachhousehasauniqueattributeforeachof
+thefollowingcharacteristics:
+-Eachpersonhasauniquename: ‘Peter’,‘Eric’,‘Arnold’.
+-Eachpersonhasauniquefavoritedrink: ‘tea’,‘water’,‘milk’
+##Clues:
+1. Peterisinthesecondhouse.
+2. Arnoldisdirectlyleftoftheonewhoonlydrinkswater.
+3. Theonewhoonlydrinkswaterisdirectlyleftofthepersonwholikesmilk.
+”’
+Answer:
+Let’schangethe“Name”and“Drink”attributesofthegivenpuzzletocreateanewpuzzle.
+There are 3 names and drinks involved Mentions of “Name” changes from ‘Peter’, ‘Eric’,
+‘Arnold’ to mentions of “Name”: ‘Molly’, ‘Shannon’, ‘Kelly’ respectively. Instead of
+“Drink” as the attribute, let’s their “Food” preferences as the attribute. So mentions of
+“Drink” changes from ‘tea’, ‘water’, ‘milk’ to mentions of ”Food”: ‘pizza’, ‘burgers’,
+‘fries‘’respectively. Now,changingthelanguageofthepuzzleandcluesweget,
+NewAttributeMap: {”Name”: ”Name”,”Drink”: ”Food”}
+Puzzle:
+”’ There are 3 houses, numbered 1 to 3 from left to right, as seen from across the street.
+Eachhouseisoccupiedbyadifferentperson. Eachhousehasauniqueattributeforeachof
+thefollowingcharacteristics:
+-Eachpersonhasauniquename: ‘Molly’,‘Shannon’,‘Kelly’.
+-Eachpersonhasauniquefavoritefood: ‘pizza’,‘burgers’,‘fries’
+##Clues:
+1. Mollyisinthesecondhouse.
+2. Kellyisdirectlyleftoftheonewhoonlyeatsburgers.
+3. Theonewhoonlyeatsburgersisdirectlyleftofthepersonwholikesfries.
+“‘
+Puzzletorephrase:
+AttributestoChange: {attributesdict}
+“‘{inputpuzzle}”’
+Prompt: Rephrase the above puzzle by changing only the attributes above. AL-
+WAYS mention the “New Attribute Map” and enclose the new puzzle within “‘ ”’. Aside
+from these attributes keep the logic of the puzzle as similar as possible. Similar to the
+exampleabove,giveyourreasoningbeforerephrasingthepuzzle.
+QueryGeneration: GSM8KandMATH
+Q:{few-shotquestion1}
+Q:{few-shotquestion2}
+Q:{few-shotquestion3}
+Q:{few-shotquestion4}
+Prompt: Based on the examples above, generate ONE solvable math word problem
+withsimilardifficulty. Notethatalltheinformationneededtosolvetheproblemshouldbe
+includedinthequestion. Outputthequestionandnothingelse.
+Q:
+16

@@ -1,0 +1,1178 @@
+Preprint. Underreview.
+HOW TRANSFORMERS SOLVE PROPOSITIONAL LOGIC
+PROBLEMS: A MECHANISTIC ANALYSIS
+GuanZheHong∗1 NishanthDikkala2 EnmingLuo2 CyrusRashtchian2
+XinWang2 RinaPanigrahy2
+1PurdueUniversity 2GoogleResearch
+hong288@purdue.edu,
+{nishanthd, enming, cyroid, wanxin, rinap}@google.com
+ABSTRACT
+Large language models (LLMs) have shown amazing performance on tasks that
+require planning and reasoning. Motivated by this, we investigate the internal
+mechanismsthatunderpinanetwork’sabilitytoperformcomplexlogicalreason-
+ing. We first construct a synthetic propositional logic problem that serves as a
+concretetest-bedfornetworktrainingandevaluation. Crucially,thisproblemde-
+mandsnontrivialplanningtosolve,butwecantrainasmalltransformertoachieve
+perfectaccuracy. Buildingonourset-up,wethenpursueanunderstandingofpre-
+cisely how a three-layer transformer, trained from scratch, solves this problem.
+Weareabletoidentifycertain“planning”and“reasoning”circuitsinthenetwork
+thatnecessitatecooperationbetweentheattentionblockstoimplementthedesired
+logic. To expand our findings, we then study a larger model, Mistral 7B. Using
+activationpatching,wecharacterizeinternalcomponentsthatarecriticalinsolv-
+ingourlogicproblem. Overall,ourworksystemicallyuncoversnovelaspectsof
+smallandlargetransformers,andcontinuesthestudyofhowtheyplanandreason.
+1 INTRODUCTION
+Languagemodelsusingthetransformerarchitecture(Vaswanietal.,2017)haveshownremarkable
+capabilities on many natural language tasks (Brown et al., 2020; Radford et al., 2019b). Trained
+withcausallanguagemodelingwhereinthegoalisnext-tokenpredictiononhugeamountsoftext,
+thesemodelsexhibitdeeplanguageunderstandingandgenerationskills. Anessentialmilestonein
+thepursuitofmodelswhichcanachieveahuman-likeartificialintelligence,istheabilitytoperform
+human-like reasoning and planning in complex unseen scenarios. While some recent works using
+probinganalyseshaveshownthattheactivationsofthedeeperlayersofatransformercontainrich
+informationaboutcertainmathematicalreasoningproblems(Yeetal.,2024),thequestionofwhat
+mechanismsinsidethemodelenablessuchabilitiesremainsunclear.
+While the study of how transformers reason in general remains a daunting task, in this work,
+we aim to improve our mechanistic understanding of how a Transformer reason through simple
+propositionallogicproblems. Forconcreteness’sake,considerthefollowingproblem:
+Rules: AorBimpliesC.DimpliesE.Facts: Aistrue. Bisfalse. Distrue.
+Question: whatisthetruthvalueofC?
+Ananswerwithminimalproofis“Aistrue. AorBimpliesC;Cistrue.”
+Thereasoningproblem,whilesimple-lookingonthesurface,requiresthemodeltoperformseveral
+actionsthatareessentialtomorecomplexreasoningproblems,allwithoutchainofthought(CoT).
+Beforewritingdownanytoken,themodelhastofirstdiscerntherulewhichisbeingqueried:inthis
+case,itis“AorBimpliesC”.Then,itneedstorelyonthepremisevariablesAandBtothelocate
+therelevantfacts,andfind“Aistrue”and“Bisfalse”. Finally,itneedstodecidethat“Aistrue”is
+thecorrectonetoinvokeinitsanswerduetothenatureofdisjunction. Itfollowsthat,towritedown
+the first token “A”, the model already has to form a “mental map” of the variable relations, value
+∗WorkdoneasastudentresearcheratGoogleResearch.
+1
+4202
+voN
+7
+]GL.sc[
+2v50140.1142:viXraPreprint. Underreview.
+assignmentsandquery! Therefore,webelievethatthisisclosetotheminimalproblemtoexamine
+howamodelinternalizesandplansforsolvinganontrivialmathematicalreasoningproblemwhere
+apparentambiguitiesintheproblemspecificationcannotberesolvedtrivially.
+Tounderstandtheinternalmechanismsofhowatransformersolvesproblemsresemblingthemini-
+malformabove,weperformtwoflavorsofexperiments. Thefirstisonshallowtransformerstrained
+purelyonthesyntheticpropositionallogicproblems. Thisenablesafine-grainedanalysisinacon-
+trolledsetting. Theothersetofexperimentsareonapre-trainedLLM(Mistral-7B),wherewepri-
+marilyrelyonactivationpatchingtouncovernecessarycircuitsforsolvingthereasoningproblem,
+includingspecializedrolesofcertaincomponents.
+Atahighlevel,wemakethefollowingdiscoveriesbasedonourtwofrontsofanalysis:
+1. We discover that small transformers, trained purely on the synthetic problem, utilize certain
+“routingembeddings”tosignificantlyaltertheinformationflowofthedeeperlayerswhensolv-
+ingdifferentsub-categoriesofthereasoningproblem. Wealsocharacterizethedifferentreason-
+ingpathways: wefindthatproblemsqueryingforreasoningchainsinvolvinglogicaloperators
+typicallyrequiregreaterinvolvementofallthelayersinthemodel.
+2. WeuncoverpropertiesofthecircuitwhichthepretrainedLLMMistral-7B-v0.1employstosolve
+theminimalversionofthereasoningproblem. Wefindfourfamiliesofattentionheads,which
+havesurprisinglyspecializedrolesinprocessingdifferentsectionsofthecontext: queried-rule
+locating heads, queried-rule mover heads, fact-processing heads, and decision heads. We find
+evidence suggesting that the model follows the natural reasoning path of “QUERY→Relevant
+Rule→RelevantFact(s)→Decision”.
+Additionally,wedefinethescopeofouranalysisasfollows.First,intheshallowtransformerexperi-
+ments,wefocusonthevariantwhichonlyhasself-attentionlayersinadditiontolayernormalization,
+positionalencoding,embeddingandsoftmaxparameters. WhilewecouldhavealsoincludedMLP
+layers,wechoosenottobecausetheno-MLPmodelsalreadyachieve100%accuracyontheprob-
+lem,andaddingMLPswouldunnecessarilycomplicatetheanalysis. Asasecondwaytofocusthe
+scopeofpaper, intheMistral-7Bexperiments, wedonot seektouncovereverymodelcomponent
+thatparticipatesinsolvingthereasoningproblem.Wefocusmoreonfindingandanalyzingthecom-
+ponentsthatarenecessarytothemodel’sreasoningcircuit,andnecessarytowardsimplementingthe
+reasoningpathwayasdescribedbefore. Bydoingso,wecanfullyjustifythenecessityofthesekey
+components,withoutguessingabouttherolesofless-impactfulsub-circuits.
+1.1 RELATEDWORKS
+Mechanisticinterpretability.Ourworkfallsintheareaofmechanisticinterpretability,whichaims
+tounderstandthemechanismsthatenablecapabilitiesoftheLLM;suchstudiesinvolveuncovering
+certain“circuits”inthenetwork(Elhageetal.,2021;Olssonetal.,2022;Mengetal.,2022;Vigetal.,
+2020;Feng&Steinhardt,2024;Wuetal.,2023;Wangetal.,2023;Hannaetal.,2024;Merulloetal.,
+2024;McGrathetal.,2023;Singhetal.,2024;Fengetal.,2024). Whilethedefinitionofa“circuit”
+variesacrossdifferentworks,inthispaper,ourdefinitionissimilartotheoneinWangetal.(2023):
+itisacollectionofmodelcomponents(attentionheads,neurons,etc.) withthe“edges”inthecircuit
+indicatingtheinformationflowbetweenthecomponentsintheforwardpass;the“excitation”ofthe
+circuitistheinputtokens.
+Evaluation of reasoning abilities of LLMs. Our work is also related to the line of work which
+focusonempiricallyevaluatingthereasoningabilitiesofLLMsacrossdifferenttypesoftasks(Xue
+etal.,2024;Chenetal.,2024;Pateletal.,2024;Morishitaetal.,2023;Seals&Shalin,2024;Zhang
+etal.,2023;Saparov&He,2023;Saparovetal.,2024;Luoetal.,2024;Hanetal.,2024;Tafjord
+et al., 2021; Hendrycks et al., 2021; Dziri et al., 2024; Yang et al., 2024). While these studies
+primarilybenchmarktheirperformanceonsophisticatedtasks,ourworkfocusesonunderstanding
+“how”transformersreasononlogicproblemsaccessibletofine-grainedanalysis.
+Analysis of how LLMs reason. There are far fewer studies that focus on providing fine-grained
+analysis of how LLMs reason. To the best of our knowledge, only a handful of works, such as
+Brinkmann et al. (2024); Xue et al. (2024); Zecˇevic´ et al. (2023); Ye et al. (2024), share similar
+goals of understanding how transformers perform multi-step reasoning through detailed empirical
+ortheoreticalanalysis. However, nonestudiesthe[Variablerelationships]+[Variablevalueassign-
+2Preprint. Underreview.
+ment]+[Query]typeprobleminconjunctionwithanalysisonbothsmalltransformerstrainedpurely
+onthesyntheticproblem,andlargelanguagemodelstrainedonalargecorpusofinternetdata.
+Activationpatching. Atitscore, activationpatching, a.k.a. causalmediationanalysis(Vigetal.,
+2020;Mengetal.,2022;Haseetal.,2024;Heimersheim&Nanda,2024;Zhang&Nanda,2024),
+uses causal interventions for uncovering the internal mechanisms or “circuits” of LLMs that en-
+able them to perform certain tasks. Typically, the LLM is run on pairs of “original” and “altered”
+prompts,andwesearchforcomponentsinsidethemodelthat“alter”themodel’s“originalbehavior”
+byreplacingpartsofthemodel’sactivationwith“alteredactivations”whenrunningontheoriginal
+prompts. Theopposite“altered→original”interventioncanalsobeadopted.
+2 DATA MODEL: A PROPOSITIONAL LOGIC PROBLEM
+Inthissection,wedescribethesyntheticpropositionallogicproblemthatshallbethedatamodelof
+thispaper. Ourproblemfollowsanimplicitcausalstructure,asillustratedinFigure1. Thestructure
+consists of two distinct chains: One containing a logical operator at the end of the chain, and the
+otherformingapurelylinearchain.
+We require the model to generate a minimal
+reasoningchain, consistingof“relevantfacts”,
+proper rule invocations, and intermediate truth K D
+values, to answer the truth-value query. Con- Logical
+A
+sider an example constructed from the causal operator
+graphinFigure1,writteninEnglish:
+V E
+• Rules: K implies D. D or E implies A. V
+impliesE.TimpliesS.PimpliesT.
+P T S
+• Facts: Kistrue. Pistrue. Visfalse.
+• Query: A.
+• Answer: Kistrue. KimpliesD;Distrue. Figure1: Syntheticdatamodel. Thecausalstruc-
+DorEimpliesA;Aistrue. ture has two chains: one with a logical operator
+(LogOp) at the end and the other being purely a
+Inthisexample,theQUERYtokenAistheter- linear causal chain. This example is the length-3
+minatingnodeoftheORchain. Sinceanytrue caseandallsymbolsareexplainedinSection2.
+inputtoanORgate(eitherDorE)resultsinA
+being true, the minimal solution chooses only
+oneofthestartingnodesfromtheORchaintoconstructitsargument: inthiscase,nodeKischo-
+sen.
+Minimal proof and solution strategy. In general, the problem requires a careful examination of
+therules,factsandquerytocorrectlyanswerthequestion. First,theQUERYtokendeterminesthe
+chain to deduce its truth value. Second, if it is the logical-operator (LogOp) chain being queried,
+the model needs to check the facts to determine the correct facts to write down at the start of the
+reasoningsteps(thisstepcanbeskippedforqueriesonthelinearchain). Third,theproofrequires
+invokingtherulestoproperlydeducethetruthvalueofthequerytoken.
+Importance of the first answer token. Correctly writing down the first answer token is central
+to the accuracy of the proof, because as discussed in Section 1, it requires the model to mentally
+processeverypartofthecontextproperlyduetotheminimal-proofrequirementofthesolution.
+3 MECHANISMS OF PLANNING AND REASONING: A CASE STUDY OF THE
+LENGTH-3 PROBLEM
+In this section, we study how small GPT-2-like transformers, trained solely on the logic problem,
+approachandsolveit. Whiletherearemanypartsoftheanswerofthetransformerwhichcanlead
+tointerestingobservations,inthiswork,weprimarilyfocusonthefollowingquestions:
+1. Howdoesthetransformermentallyprocessthecontextandplanitsanswerbeforewritingdown
+anytoken? Inparticular,howdoesituseits“mentalnotes”topredictthecrucialfirsttoken?
+3Preprint. Underreview.
+2. Howdoesthetransformerdeterminethetruthvalueofthequeryattheend?
+Wepayparticularattentiontothefirstquestion,becauseasnotedinSection2,thefirstanswertoken
+revealsthemostabouthowthetransformermentallyprocessesallthecontextinformationwithout
+any access to chain of thought (CoT). We delay the less interesting answer of question 2 to the
+Appendixduetospacelimitations.
+3.1 LEARNER: ADECODER-ONLYATTENTION-ONLYTRANSFORMER
+Inthissection, westudydecoder-onlyattention-onlytransformers, closelyresemblingtheformof
+GPT-2 (Radford et al., 2019a). We train these models exclusively on the synthetic logic problem.
+The LogOp chain is queried 80% of the time, while the linear chain is queried 20% of the time
+duringtraining. DetailsofthemodelarchitectureareprovidedinAppendixB.2.
+Architecture choice for mechanistic analysis. We select a 3-layer 3-head transformer to initiate
+ouranalysissinceitisthesmallesttransformerthatcanachieve100%accuracy; wealsoshowthe
+accuraciesofseveralcandidatemodelsizesinFigure7inAppendixBformoreevidence. Notethat
+amodel’sansweronaproblemisconsideredaccurateonlyifeverytokeninitsanswermatchesthat
+ofthecorrectanswer.
+3.2 MECHANISMANALYSIS
+Themodelapproximatelyfollowsthestrategybelowtopredictthefirstanswertoken:
+1. (Linearvs.LogOpchain)AttheQUERYposition,thelayer-2attentionblocksendsoutaspecial
+“routing”signaltothelayer-3attentionblock,whichinformsthelatterwhetherthechainbeing
+queriedisthelinearoneornot. Thethirdlayerthenactsaccordingly.
+2. (Linearchainqueried)IfQUERYisforthelinearchain,thethirdattentionblockfocusesalmost
+100% of its attention weights on the QUERY position, that is, it serves a simple “message
+passing”role: indeed, layer-2residualstreamatQUERYpositionalreadyhasthecorrect(and
+linearlydecodable)answerinthiscase.
+3. (LogOpchainqueried)ThethirdattentionblockservesamorecomplexpurposewhentheLo-
+gOpchainisqueried. Inparticular, thefirsttwolayersconstructapartialanswer, followedby
+thethirdlayerrefiningittothecorrectone.
+3.2.1 LINEARORLOGOPCHAIN: ROUTINGSIGNALATTHEQUERYPOSITION
+The QUERY token is likely the most important token in the context for the model: it determines
+whether the linear chain is being queried, and significantly influences the behavior of the third
+attentionblock. Thetransformermakesuseofthistokeninitsanswerinanintriguingway.
+RoutingdirectionatQUERY.Thereexistsa“routing”directionh presentintheembedding
+route
+generatedbythelayer-2attentionblock,satisfyingthefollowingproperties:
+1. α (X)h ispresentintheembeddingwhenthelinearchainisqueried, andα (X)h
+1 route 2 route
+ispresentwhentheLogOpchainisqueried,wherethetwoα (X)’saresampledependent,and
+i
+satisfythepropertythatα (X)>0,andα (X)<0.
+1 2
+2. The“sign”oftheh signaldeterminesthe“mode”whichlayer-3attentionoperatesinatthe
+route
+ANSWERposition. Whenasufficiently“positive”h ispresent,layer-3attentionactsasif
+route
+QUERYisforthelinearchainbyplacingsignificantattentionweightattheQUERYposition.
+Asufficiently“negative”h causeslayer-3tobehaveasiftheinputistheLogOpchain: the
+route
+modelfocusesattentionontherulesandfactsections,andinfactoutputsthecorrectfirsttoken
+oftheLogOpchain!
+Wediscussourempiricalevidencebelowtosupportandelaborateontheabovemechanism.
+Evidence1a: chain-typedisentanglementatQUERY.Wefirstobservethat,attheQUERYposition,
+the layer-2 attention block’s output exhibits disentanglement in its output direction depending on
+whetherthelinearorLogOpchainisbeingqueried,asillustratedinFigure2.
+4Preprint. Underreview.
+TogenerateFigure2,weconstructed200samples,withthefirsthalfqueryingthelinearchainand
+thesecondhalfqueryingtheLogOpchain. Wethenextractedthelayer-2self-attentionblockoutput
+attheQUERYpositionforeachsample,andcalculatedthepairwisecosinesimilaritybetweenthese
+outputs.
+Evidence 1b: distinct layer-3 attention behav-
+ior w.r.t. chain type. When the linear chain
+isqueried,thelayer-3attentionheadspredomi-
+nantlyfocusontheQUERYposition,withover
+90% of their attention weights on the QUERY
+position on average (based on 1k test sam-
+ples). In contrast, when the LogOp chain is
+queried, less than 5% of layer-3 attention is
+on the QUERY on average. Instead, attention
+shiftstotheRulesandFactssectionsofthecon-
+text.
+Observations 1a and 1b suggest that given a
+chain type (linear or LogOp), certain direc-
+tion(s) in the layer-2 embedding significantly
+influences the behavior of the third attention
+block in the aforementioned manner. We con-
+firmtheexistenceandroleofthisspecialdirec-
+Figure2:Cosinesimilaritymatrixbetweenoutput
+tionandrevealmoreintriguingdetailsbelow.
+embeddings from layer-2 attention block. Sam-
+Evidence1c:computingh ,andprovingits ples 0 to 99 query for the linear chain, samples
+route
+role with interventions. To erase the instance- 100 to 199 query for the LogOp chain. Observe
+dependent information, we average the output thein-groupclusteringinangle(topleftandbot-
+of the second attention block over 1k samples tom right), and the negative cross-group cosine
+where QUERY is for the linear chain. We de- similarity(toprightandbottomleft).
+notethisestimatedaverageashˆ whicheffectivelypreservesthesample-invariantsignal.Totest
+route
+theinfluenceofhˆ ,weinvestigateitsimpactonthemodel’sreasoningprocess,andweobserve
+route
+twointriguingproperties:
+1. (Linear→LogOp intervention) We generate 500 test samples where QUERY is for the linear
+chain. Subtracting the embedding hˆ from the second attention block’s output causes the
+route
+modeltoconsistentlypredictthecorrectfirsttokenfortheLogOpchainonthetestsamples. In
+otherwords,the“mode”inwhichthemodelreasonsisflippedfrom“linear”to“LogOp”.
+2. (LogOp→linear intervention) We generate 500 test samples where QUERY is for the LogOp
+chain. Addinghˆ tothesecondattentionblock’soutputcausesthethreeattentionheadsin
+route
+layer3tofocusontheQUERYposition: greaterthan95%oftheattentionweightsareonthis
+position averaged over the test samples. In this case, however, the model does not output the
+correctstartingnodeforthelinearchainonmorethan90%ofthetestsamples.
+Itfollowsthath indeedexists,andthe“sign”ofitdeterminestheattentionpatternsinlayer3
+route
+(andtheoverallnetwork’soutput!) intheaforementionedmanner.
+3.2.2 ANSWERFORTHELINEARCHAIN
+Atthispoint,itiscleartousthat,whenQUERYisforthelinearchain,thethirdlayermainlyserves
+a simple “message passing” role: it passes the information in the layer-2 residual stream at the
+QUERYpositiontotheANSWERposition. Onenaturalquestionarises: doestheinputtothethird
+layer truly contain the information to determine the first token of the answer, namely the starting
+nodeofthelinearchain? Theanswerisyes.
+Evidence 2: linearly-decodable linear-chain answer at layer 2. We train an affine classifier with
+thesameinputasthethirdattentionblockattheQUERYposition,withthetargetbeingthestartof
+thelinearchain; thetrainingsamplesonlyqueryforthelinearchain, andwegenerate5kofthem.
+Weobtainatestaccuracyabove97%forthisclassifier(on5ktestsamples),confirmingthatlayer2
+alreadyhastheanswerattheQUERYposition.
+5Preprint. Underreview.
+A or B implies C Component Legend
+Key/value
+D implies E Query Attention head type Output
+(Layer idx, head idx)
+D is true
+A is true
+B is false
+Queried-rule
+Query: E locating heads
+(9,25;26), (12,9), (14,24;26)
+Queried-rule Fact-processing
+Decision head
+Answer: mover head heads
+(19,8;9;16), (17,25)
+(13,11), (15,8) (16,12;14)
+Figure3: High-levelpropertiesofMistral-7B’sreasoningcircuit. The(chunksof)inputtokensare
+on the left, which are passed into the residual stream and processed by the attention heads. We
+illustratetheinformationflowmanipulatedbythedifferenttypesofattentionheadsweidentifiedto
+bevitaltothereasoningtask.
+3.2.3 ANSWERFORTHELOGOPCHAIN
+LogOp chain: partial answer in layers 1 & 2 + refinement in layer 3. To predict the correct
+startingnodeoftheLogOpchain,themodelemploysthefollowingstrategy:
+1. ThefirsttwolayersencodetheLogOpandonlya“partialanswer”. Morespecifically,wefind
+evidencethat(1)whentheLogOpisanANDgate,layers1and2tendtopassthenode(s)with
+FALSE assignment to layer 3, (2) when the LogOp is an OR gate, layers 1 and 2 tend to pass
+node(s)withTRUEassignmenttolayer3.
+2. The third layer, combining information of the two starting nodes of the LogOp chain, and the
+informationinthelayer-2residualstreamattheANSWERposition,outputthecorrectanswer.
+WedelaythefullsetofevidencefortheaboveclaimstoAppendixB.3. Ourargumentmainlyrelies
+on linear probing and activation patching. At a high level, we show that while it is not possible
+tolinearlydecodetheanswerfromlayer-2residualstream,thepredictor’sansweralreadytakeson
+veryspecificstructureresemblinga“partialanswer”;thisreisdualstreamalsocontainsrichanswer-
+specificinformationsuchaswhichLogOpisinthecontext. Moreover,throughactivationpatching,
+wefoundthatthelayer-2residualstreamindeedhavestrongcausalinfluenceonthecorrectanswer,
+whichstrengthensthe“partialanswerinlayer2→refinementinlayer3”claim.
+4 THE REASONING CIRCUIT IN MISTRAL-7B
+We now turn to examine how a pretrained LLM, namely Mistral-7B-v0.1, solves this reasoning
+problem. WechoosethisLLMasitisamongstthesmallestaccessiblemodelwhichachievesabove
+70% accuracy on (a minimal version of) our problem. Our primary focus here is the same as in
+the previous section: how does the model infer the first answer token without any CoT? We are
+interestedinthisquestionasthefirstanswertokenrequirestomodeltoprocessalltheinformation
+inthecontextproperlywithoutaccesstoanyCoT.
+Wedescribethemainpropertiesofthereasoningcircuitinsidethemodelforthispredictiontaskin
+Figure3.Atahighlevel,thereareseveralintriguingpropertiesofthereasoningcircuitoftheLLM:1
+1. Comparedtotheattentionblocks,theMLPsarerelativelyunimportanttocorrectprediction.
+2. Thereisasparsesetofattentionheadsthatarefoundtobecentraltothereasoningcircuit:
+• (Queried-rulelocatinghead)Attentionheads(9,25;26),(12,9),(14,24;26)locatethequeried
+ruleusingtheQUERYtoken,andstoresthisinformationattheQUERYposition.
+1Weuse(ℓ,h)todenoteanattentionhead. Whenreferencingmultipleheadsinthesamelayer,wewrite
+(ℓ,h ;h ;...;h )forbrevity.
+1 2 n
+6Preprint. Underreview.
+• (Queried-rulemoverhead)Attentionheads(13,11), (15,8)moveQUERYandthequeried-
+ruleinformationfromtheQUERYpositiontothe“:” position.
+• (Fact processing heads) Attention heads (16,12;14) locate the relevant facts, and move in-
+formationtothe“:” position.
+• (Decisionhead)Attentionheads(19,8;9;16),(17,25),relyingontheaggregatedinformation,
+makesadecisiononwhichtokentooutput.
+4.1 MINIMALPROBLEMDESCRIPTION
+InourMistral-7Bexperiments,theinputsampleshavethefollowingproperties:
+1. Wegivethemodel6(randomlychosen)in-contextexamplesbeforeaskingfortheanswer.
+2. Theproblemislength-2: onlyoneruleinvolvingtheORgate,andonelinear-chainrule. More-
+over, the answer is always true. In particular, the truth values of the two premise nodes of the
+ORchainalwayshaveoneFALSEandoneTRUE.
+3. Thepropositionvariablesareall(single-token)capitalEnglishletters.
+ThedesigndecisioninthefirstpointistoensurefairnesstotheLLMwhichwasnottrainedonour
+specificlogicproblem. Asforthelasttwopoint, werestricttheprobleminthisfashionmainlyto
+ensure that the first answer token is unique, which improves the tractability of the analysis. Note
+that these restrictions do not take away the core challenge of this problem: the LLM still needs to
+processallthecontextinformationwithoutCoTtodeterminethecorrectfirsttoken.
+4.2 CAUSALMEDIATIONANALYSIS
+Weprovideevidenceinthispartofthepaperprimarilyrelyingonapopulartechniqueinmechanistic
+interpretability: causalmediationanalysis. Ourmethodologyisroughlyasfollows:
+1. SupposeweareinterestedintheroleoftheactivationsofcertaincomponentsoftheLLMina
+certain (sub-)task. For a running example, say we want to understand what role the attention
+headsplayinprocessingandpassingQUERYinformationtothe“:” positionforinference. Let
+usdenotetheactivationsasA (X),representingtheactivationofheadhinlayerℓ,attoken
+ℓ,h;t
+positiont.
+2. Typically,theanalysisbeginsbyconstructingtwosetsofpromptswhichdifferinsubtleways.A
+naturalconstructioninourexampleisasfollows: definesetsofsamplesD andD ,where
+orig alt
+X andX haveexactlythesamecontext,exceptinX ,QUERYisfortheLogOp
+orig,n alt,n orig,n
+chain, while in X , QUERY is for the linear chain. Moreover, denote the correct targets
+alt,n
+y andy respectively.
+orig,n alt,n
+3. WeruntheLLMonD andD ,cachingtheattention-headactivations. Wealsoobtainthe
+orig alt
+logitsofthemodel. Wecancomputethemodel’slogitdifferences
+∆ =logit(X )[y ]−logit(X )[y ].
+orig,n orig,n orig,n orig,n alt,n
+Forahigh-accuracymodel,∆ shouldbelargeformostn’s,sinceitmustbeabletoclearly
+orig,n
+tellthatonanX ,itistheLogOpchainwhichisbeingqueried,notthelinearchain.
+orig,n
+4. Wenowperforminterventionforalln,ℓ,handt:
+(a) Run the model on X , however, replacing the original activation A (X ) by
+orig,n ℓ,h;t orig,n
+the altered A (X ). Now let the rest of the run continue.2 Let us denote the logits
+ℓ,h;t alt,n
+obtainedinthisintervenedrunaslogit→alt;(ℓ,h,t)(X ).
+orig,n
+(b) Nowcomputetheintervenedlogitdifference
+∆ =logit→alt;(ℓ,h,t)(X )[y ]−logit→alt;(ℓ,h,t)(X )[y ].
+orig→alt,n;(ℓ,h,t) orig,n alt,n orig,n orig,n
+5. Now average the ∆ ’s over n for every ℓ,h and t (recall that n is the sample
+orig→alt,n;(ℓ,h,t)
+index).
+2Pleasenotethatlayersℓ+1toLareinfluencedatandaftertokenpositiont,andtechnicallyspeaking,
+nowoperate“outofdistribution”.
+7Preprint. Underreview.
+(a)Residualstreampatching (b)Attentionblockpatching (c)MLPpatching
+Figure4: Querypatchingatthelevelofresidualstreams,attentionblocksandMLPs. Highlylocal-
+izedprocessingofQUERYisobserved: asharptransitionoccursatlayer13in(a),andin(b),only
+a sparse set of attention blocks play a major role in this subtask. Furthermore, (c) shows that the
+MLPsplayalimitedroleinthissubtask(besidesMLP0). (Pleasezoominforthedetails)
+6. Thisprocedurehelpsusidentifycomponentsthataresignificantinprocessingandpassingthe
+QUERY information for inference. Intuitively, an activation that result in a positive and large
+∆ play a significant role in this subtask, because this activation helps “altering”
+orig→alt,n;(ℓ,t)
+themodel’s“belief”from“QUERYisfortheLogOpchain”to“QUERYisforthelinearchain”.
+7. Remark: duetothesymmetryofthisrunningexample,itisperfectlysensibletoperformalt→
+originterventionstoo,bymirroringtheaboveprocedures.
+4.3 CIRCUITANALYSIS
+In this section, we discuss properties of the reasoning circuit of Mistral-7B. The order by which
+wepresenttheresultswillbefromthecoarser-tothefiner-grained, roughlyfollowingtheprocess
+whichwediscoveredthecircuit; webelievethisaddsgreatertransparencytothecircuitdiscovery
+process. Wedelaythemoreinvolved(andcomplete)setofexperimentalresultstoAppendixC.
+4.3.1 QUERY-BASEDPATCHING: DISCOVERINGTHEIMPORTANTATTENTIONHEADS
+We initiate our analysis with QUERY patching, following the same procedure as detailed in sub-
+section4.2. Inthissetofexperiments,wediscoverthemainattentionheadsresponsibleforprocess-
+ingthecontextandperforminginferenceasintroducedinthebeginningofthisSection.
+WhyisQUERY-basedpatchingimportanttoreasoningcircuitdiscovery? Toanswerthisques-
+tion, there are two points to emphasize first. (1) We know that to solve the reasoning problem,
+the QUERY token is critical to initiating the reasoning chain: without it, the rules and facts are
+completely useless; with it, the reasoner can then proceed to identify the relevant rules and facts
+to predict the answer. (2) The prompt pairs differ only by the QUERY token. Based on (1) and
+(2),weknowthatifperformingtheaforementionedQUERY-basedcausalinterventiononamodel
+componentleadstoalargeintervenedlogitdifference(i.e. italtersthemodel’s“belief”),thenthis
+componentmustbeintegraltothereasoningcircuit,becausethecomponentisnowidentifiedtobe
+QUERY-sensitiveandhascausalinfluenceon(partsof)themodel’sreasoningactions.
+High-levelinterventions.Webeginbypresentinghigher-levelpatchingresultsinFigure4,wherewe
+interveneatthelevelofresidualstreams,attentionblocks,andMLPs. Wecandrawafewinsights
+fromtheseresults:
+1. Asharptransitionof“QUERYprocessing”occursfromlayer12tolayer13(indexedfrom0)in
+Figure4(a)and(b).
+2. Figure4(b)showsthatasmallsetofattentionblocksareobservedtobesignificantforthe“belief
+altering”action,namelythoseinlayers9,12,13,14,16and19.
+3. The MLPs, shown in Figure 4(c), play little role in this circuit, except for MLP-0. However,
+MLP-0hadbeenobservedtoactmoreasa“nonlineartokenembedding”thanacomplexhigh-
+level processing unit (Wang et al., 2023). In the rest of this section, we primarily devote our
+analysistotheattentionheads,andleavetheexactroleoftheMLPstofuturework.
+8Preprint. Underreview.
+Remark. InFigure4andtherest,weadoptacalibratedversionofthelogitdifference(seeAppendix
+C):thecloserto1,themoresignificantthecomponentisin“altering”the“belief”ofthemodelon
+theselectedsubtask.
+Attention-head interventions. Figure 4 helps us locate a small set of attention blocks which are
+importanttothetask. However, theseresultsalonestillleaveuswithfartoomanycomponentsto
+examineindetail. Therefore,werunasetoffiner-grainedexperiments,interveningontheattention
+heads(overtherelevantcontext). TheresultsareshowninFigure5. Wefindthat,interestingly,only
+averysmallsetofattentionheadsarecentraltothe“beliefaltering”oftheLLM.Morespecifically,
+in Figure 5(a), only attention heads (12,9), (13,11), (14,24;26), (16,0;12;14), (17,25), (19,8;9;16)
+areobservedwithrelativelyhighintervenedlogitdifferences.
+(9,24 - 27)
+(13,11)
+(12,9)
+(14,24;26)
+(15,8) (16,12;14)
+(16,0)
+(17,25)
+(19,8;9;16)
+(a) Single-head patching (b) Head group patching
+Figure5:Attentionheadpatching,highlightingtheoneswiththehighestintervenedlogitdifference;
+x-axis is the head index. (a) shows single-head patching, and (b) shows a coarser-grained head
+patchingingroups. In(b),weonlyhighlighttheheadgroupsthatarenotcapturedwellby(a).
+WenotethatGrouped-QueryAttentionusedbyMistral-7Baddssubtletytotheanalysis3:patchinga
+singleheadmightnotyieldahighlogitdifferencesinceotherheadsinthesamegroup(whichpossi-
+blyperformasimilarfunction)couldoverwhelmthepatchedheadandmaintainthemodel’sprevious
+“belief”. Therefore,wealsorunacoarser-grainedexperimentwhichsimultaneouslypatchestheat-
+tention heads sharing the same key and value activations, shown in Figure 5(b). This experiment
+revealsthatheadsbelongingtothegroup(9,24-27)alsohavehighintervenedlogitdifference.
+4.3.2 FINEREXAMINATIONSOFTHEATTENTIONHEADS
+Attention-headsub-componentpatching(QUERY-basedpatching). Wenowaimtounderstand
+whytheattentionheadsidentifiedinthelastsub-sectionareimportant. Fornow,wecontinuewith
+QUERYalteringinthepromptpairs. Throughinterveningonthesub-componentsofeachattention
+head,namelytheirvalue,key,andquery,andthroughexaminingdetailsoftheirattentionweights,
+wefindthatthereareroughlyfourtypesofattentionheads. WeshowtheresultsinFigure6:
+1. Queried-rule locating head. Attention head (12,9)’s query activation has a large intervened
+logitdifferenceaccordingtoFigure6(a),therefore,itsqueryandattentionpatternsareQUERY-
+dependentandcontributetoalteringthemodel’s“belief”. Furthermore,attheQUERYposition,
+we find that on average, its attention weight is above 90% at the “conclusion” variable of the
+rulebeingqueried.Inotherwords,itisresponsibleforlocatingthequeriedrule,andstoringthat
+rule’sinformationattheQUERYposition.4
+2. Queried-rulemoverhead. Attentionhead(13,11)’svalueactivationshavelargeintervenedlogit
+difference, and intriguingly, its query and key activations do not share that tendency. This al-
+readysuggeststhatitsattentionpatternperformsafixedactiononboththeoriginalandaltered
+prompts,andonlythevalueinformationissensitivetoQUERY.Furthermore,withintherelevant
+3InMistral-7B-v0.1,eachattentionlayerhas8keyandvalueactivations,and32queryactivations. There-
+fore,heads(ℓ,h×4)to(ℓ,h×4+3)sharethesamekeyandvalueactivation.
+4(9,25;26),(14,24;26)exhibitsimilartendencies,albeitwithsmallerintervenedlogitdifferences.
+9Preprint. Underreview.
+Queried-rule locating
+Queried-rule mover
+Fact processing
+Decision
+(a) Query (b) Typical attention pattern (c) Value
+Figure6: Patchingofqueryandvalueactivationsin(a)and(c); wefoundthatinterveningthekey
+activations only yield trivial scores, so we do not report them here. We show in (b) the typical
+attentionpatternsofarepresentativesetoftheattentionheadswhichareidentifiedtobeimportant
+intheinterventionexperimentsshownin(a)and(c). Thereareseveraldistinctobservationswhich
+canbemadein(b). Queried-rulelocatinghead(12,9): observethatitcorrectlylocatesthequeried
+rulewhichendswithQ.Queried-rulemoverhead(13,11): theonlytokenpositionwhichitfocuses
+onistheQUERYtokenQ.Factprocessinghead(16,14): attentionconcentratesinthefactsection.
+Decisionhead(19,8): attentionfocusedonthecorrectfirstanswertokenK.
+context(excludingthe6in-contextexamplesgiven),head(13,11)assignsabove50%attention
+weighttotheQUERYposition,anditsattentionweightatQUERYisabout10timeslargerthan
+the second largest one on average. Recalling the role of layer 12, we find evidence that head
+(13,11)movestheQUERYandqueried-ruleinformationtothe“:” position.5
+3. Factprocessingheads.Attentionheads(16,12;14)’squeryactivationshavelargeintervenedlogit
+differences. Withintherelevantcontext,theyplacegreaterthan56%,and70%oftheirattention
+respectively in the fact section of the context (starting from “Fact” and ending on “.” before
+“Question”).
+4. Decisionhead. Attentionhead(19,8)’squeryactivationshavelargeintervenedlogitdifferences.
+Itsattentionpatternsuggeststhatitisa“decision”head: withintherelevantcontext,whenthe
+model is correct, the head’s top-2 attention weights are always on the correct starting node of
+thequeriedruleandthecorrectvariableinthefactsection,andthetwotokenpositionsoccupy
+morethan60%ofitstotalattentionintherelevantcontextonaverage. Inotherwords,italready
+hastheanswer.6
+Due to space limits, we delay our more involved experiments to Appendix C, including closer in-
+spection of the attention patterns of the attention head families (App. C.2.2), and further insights
+andvalidatingevidenceforthequeried-rulelocatingheads(App.C.3)andthefact-processingand
+decisionheads(App.C.4).
+5 CONCLUSION
+WestudiedthereasoningmechanismsofbothsmalltransformersandLLMsonasyntheticproposi-
+tionallogicproblem. Weanalyzedashallowdecoder-onlyattention-onlytransformertrainedpurely
+on this problem as well as a pretrained Mistral-7B LLM. We uncovered interesting mechanisms
+the small and large transformers adopt to solve the problem. For the small models, we found the
+existenceof“routing”signalsthatsignificantlyalterthemodel’sreasoningpathwaydependingon
+thesub-categoryoftheprobleminstance. ForMistral-7B,wefoundfourfamiliesofattentionheads
+that implement the reasoning pathway of “QUERY→Relevant Rule→Relevant Facts→Decision”.
+ThesefindingsprovidevaluableinsightsintotheinnerworkingsofLLMsonmathematicalreason-
+ingproblems.
+5(15,8),(16,0)alsoappeartobelongtothistype,albeitwithsmallerintervenedlogitdifference.
+6(17,25),(19,9;16)exhibitsimilartendencies,albeitwithsmallerintervenedlogitdifferences.
+10Preprint. Underreview.
+Infuturework,weplantoexpandouranalysistouncoverpossiblygreaterfamiliesofmodelcom-
+ponents which are important to an LLM’s reasoning circuit on simple logic problems resembling
+the one in this paper. We also plan to investigate if similar circuits are employed when an LLM
+solvesGSM-likeproblems. Finally,weareinterestedinunderstandingthecircuitinarchitecturally
+differentLLMssuchMistral8x7B,whichusesmixtureofexperts.
+11Preprint. Underreview.
+REFERENCES
+Jannik Brinkmann, Abhay Sheshadri, Victor Levoso, Paul Swoboda, and Christian Bartelt. A
+mechanistic analysis of a transformer trained on a symbolic multi-step reasoning task. In Lun-
+Wei Ku, Andre Martins, and Vivek Srikumar (eds.), Findings of the Association for Computa-
+tional Linguistics ACL 2024, pp. 4082–4102, Bangkok, Thailand and virtual meeting, August
+2024.AssociationforComputationalLinguistics. doi: 10.18653/v1/2024.findings-acl.242. URL
+https://aclanthology.org/2024.findings-acl.242.
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhari-
+wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal,
+ArielHerbert-Voss,GretchenKrueger,TomHenighan,RewonChild,AdityaRamesh,DanielM.
+Ziegler,JeffreyWu,ClemensWinter,ChristopherHesse,MarkChen,EricSigler,MateuszLitwin,
+Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford,
+IlyaSutskever,andDarioAmodei. Languagemodelsarefew-shotlearners. InNeurIPS,2020.
+Xinyun Chen, Ryan A. Chi, Xuezhi Wang, and Denny Zhou. Premise order matters in reasoning
+withlargelanguagemodels,2024. URLhttps://arxiv.org/abs/2402.08939.
+Nouha Dziri, Ximing Lu, Melanie Sclar, Xiang Lorraine Li, Liwei Jiang, Bill Yuchen Lin, Sean
+Welleck, Peter West, Chandra Bhagavatula, Ronan Le Bras, et al. Faith and fate: Limits of
+transformersoncompositionality. AdvancesinNeuralInformationProcessingSystems,36,2024.
+Nelson Elhage, Neel Nanda, Catherine Olsson, Tom Henighan, Nicholas Joseph, Ben Mann,
+Amanda Askell, Yuntao Bai, Anna Chen, Tom Conerly, Nova DasSarma, Dawn Drain, Deep
+Ganguli, Zac Hatfield-Dodds, Danny Hernandez, Andy Jones, Jackson Kernion, Liane Lovitt,
+Kamal Ndousse, Dario Amodei, Tom Brown, Jack Clark, Jared Kaplan, Sam McCandlish, and
+Chris Olah. A mathematical framework for transformer circuits. Transformer Circuits Thread,
+2021. https://transformer-circuits.pub/2021/framework/index.html.
+JiahaiFengandJacobSteinhardt. Howdolanguagemodelsbindentitiesincontext? InTheTwelfth
+InternationalConferenceonLearningRepresentations,2024. URLhttps://openreview.
+net/forum?id=zb3b6oKO77.
+JiahaiFeng,StuartRussell,andJacobSteinhardt.Monitoringlatentworldstatesinlanguagemodels
+withpropositionalprobes,2024. URLhttps://arxiv.org/abs/2406.19501.
+Simeng Han, Hailey Schoelkopf, Yilun Zhao, Zhenting Qi, Martin Riddell, Wenfei Zhou, James
+Coady, David Peng, Yujie Qiao, Luke Benson, Lucy Sun, Alex Wardle-Solano, Hannah Szabo,
+EkaterinaZubova,MatthewBurtell,JonathanFan,YixinLiu,BrianWong,MalcolmSailor,An-
+songNi,LinyongNan,JungoKasai,TaoYu,RuiZhang,AlexanderR.Fabbri,WojciechKryscin-
+ski,SemihYavuz,YeLiu,XiVictoriaLin,ShafiqJoty,YingboZhou,CaimingXiong,RexYing,
+Arman Cohan, and Dragomir Radev. Folio: Natural language reasoning with first-order logic,
+2024. URLhttps://arxiv.org/abs/2209.00840.
+Michael Hanna, Ollie Liu, and Alexandre Variengien. How does gpt-2 compute greater-than? in-
+terpreting mathematical abilities in a pre-trained language model. In Proceedings of the 37th
+InternationalConferenceonNeuralInformationProcessingSystems,NIPS’23,RedHook,NY,
+USA,2024.CurranAssociatesInc.
+PeterHase,MohitBansal,BeenKim,andAsmaGhandeharioun. Doeslocalizationinformediting?
+surprisingdifferencesincausality-basedlocalizationvs.knowledgeeditinginlanguagemodels.
+InProceedingsofthe37thInternationalConferenceonNeuralInformationProcessingSystems,
+NIPS’23,RedHook,NY,USA,2024.CurranAssociatesInc.
+Stefan Heimersheim and Neel Nanda. How to use and interpret activation patching, 2024. URL
+https://arxiv.org/abs/2404.15255.
+DanHendrycks,CollinBurns,SauravKadavath,AkulArora,StevenBasart,EricTang,DawnSong,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv
+preprintarXiv:2103.03874,2021.
+12Preprint. Underreview.
+ManLuo,ShrinidhiKumbhar,Mingshen,MihirParmar,NeerajVarshney,PratyayBanerjee,Somak
+Aditya,andChittaBaral.Towardslogiglue:Abriefsurveyandabenchmarkforanalyzinglogical
+reasoningcapabilitiesoflanguagemodels, 2024. URLhttps://arxiv.org/abs/2310.
+00836.
+Thomas McGrath, Matthew Rahtz, Janos Kramar, Vladimir Mikulik, and Shane Legg. The hydra
+effect: Emergent self-repair inlanguage model computations, 2023. URL https://arxiv.
+org/abs/2307.15771.
+KevinMeng,DavidBau,AlexJAndonian,andYonatanBelinkov.Locatingandeditingfactualasso-
+ciationsinGPT. InAliceH.Oh,AlekhAgarwal,DanielleBelgrave,andKyunghyunCho(eds.),
+Advances in Neural Information Processing Systems, 2022. URL https://openreview.
+net/forum?id=-h6WAS6eE4.
+Jack Merullo, Carsten Eickhoff, and Ellie Pavlick. Circuit component reuse across tasks in trans-
+formerlanguagemodels. InTheTwelfthInternationalConferenceonLearningRepresentations,
+2024. URLhttps://openreview.net/forum?id=fpoAYV6Wsk.
+Terufumi Morishita, Gaku Morio, Atsuki Yamaguchi, and Yasuhiro Sogawa. Learning deduc-
+tive reasoning from synthetic corpus based on formal logic. In Andreas Krause, Emma Brun-
+skill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett (eds.), Pro-
+ceedings of the 40th International Conference on Machine Learning, volume 202 of Proceed-
+ingsofMachineLearningResearch, pp.25254–25274.PMLR,23–29Jul2023. URLhttps:
+//proceedings.mlr.press/v202/morishita23a.html.
+CatherineOlsson, NelsonElhage, NeelNanda, NicholasJoseph, NovaDasSarma, TomHenighan,
+BenMann,AmandaAskell,YuntaoBai,AnnaChen,TomConerly,DawnDrain,DeepGanguli,
+Zac Hatfield-Dodds, Danny Hernandez, Scott Johnston, Andy Jones, Jackson Kernion, Liane
+Lovitt,KamalNdousse,DarioAmodei,TomBrown,JackClark,JaredKaplan,SamMcCandlish,
+and Chris Olah. In-context learning and induction heads. Transformer Circuits Thread, 2022.
+https://transformer-circuits.pub/2022/in-context-learning-and-induction-heads/index.html.
+NisargPatel,MohithKulkarni,MihirParmar,AashnaBudhiraja,MutsumiNakamura,NeerajVarsh-
+ney,andChittaBaral. Multi-logieval: Towardsevaluatingmulti-steplogicalreasoningabilityof
+largelanguagemodels,2024. URLhttps://arxiv.org/abs/2406.17169.
+Alec Radford, Jeff Wu, Rewon Child, David Luan, Dario Amodei, and Ilya Sutskever.
+Language models are unsupervised multitask learners. 2019a. URL https://api.
+semanticscholar.org/CorpusID:160025533.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal.Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019b.
+AbulhairSaparovandHeHe. Languagemodelsaregreedyreasoners: Asystematicformalanalysis
+of chain-of-thought. In The Eleventh International Conference on Learning Representations,
+2023. URLhttps://openreview.net/forum?id=qFVVBzXxR2V.
+Abulhair Saparov, Richard Yuanzhe Pang, Vishakh Padmakumar, Nitish Joshi, Seyed Mehran
+Kazemi, Najoung Kim, and He He. Testing the general deductive reasoning capacity of large
+language models using ood examples. In Proceedings of the 37th International Conference on
+NeuralInformationProcessingSystems,NIPS’23,RedHook,NY,USA,2024.CurranAssociates
+Inc.
+S Seals and Valerie Shalin. Evaluating the deductive competence of large language models. In
+Kevin Duh, Helena Gomez, and Steven Bethard (eds.), Proceedings of the 2024 Conference of
+the North American Chapter of the Association for Computational Linguistics: Human Lan-
+guage Technologies (Volume 1: Long Papers), pp. 8614–8630, Mexico City, Mexico, June
+2024.AssociationforComputationalLinguistics. doi: 10.18653/v1/2024.naacl-long.476. URL
+https://aclanthology.org/2024.naacl-long.476.
+ChandanSingh, JeevanaPriyaInala, MichelGalley, RichCaruana, andJianfengGao. Rethinking
+interpretabilityintheeraoflargelanguagemodels,2024. URLhttps://arxiv.org/abs/
+2402.01761.
+13Preprint. Underreview.
+OyvindTafjord,BhavanaDalvi,andPeterClark. ProofWriter:Generatingimplications,proofs,and
+abductivestatementsovernaturallanguage. InChengqingZong,FeiXia,WenjieLi,andRoberto
+Navigli (eds.), Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021,
+pp.3621–3634,Online,August2021.AssociationforComputationalLinguistics. doi: 10.18653/
+v1/2021.findings-acl.317. URLhttps://aclanthology.org/2021.findings-acl.
+317.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez,
+LukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. InNIPS,2017.
+Jesse Vig, Sebastian Gehrmann, Yonatan Belinkov, Sharon Qian, Daniel Nevo, Yaron Singer,
+and Stuart Shieber. Investigating gender bias in language models using causal mediation
+analysis. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (eds.), Ad-
+vances in Neural Information Processing Systems, volume 33, pp. 12388–12401. Curran
+Associates, Inc., 2020. URL https://proceedings.neurips.cc/paper_files/
+paper/2020/file/92650b2e92217715fe312e6fa7b90d82-Paper.pdf.
+Kevin Ro Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt.
+Interpretability in the wild: a circuit for indirect object identification in GPT-2 small. In
+The Eleventh International Conference on Learning Representations, 2023. URL https:
+//openreview.net/forum?id=NpsVSN6o4ul.
+Zhengxuan Wu, Atticus Geiger, Thomas Icard, Christopher Potts, and Noah Goodman. Inter-
+pretability at scale: Identifying causal mechanisms in alpaca. In Thirty-seventh Conference on
+NeuralInformationProcessingSystems,2023. URLhttps://openreview.net/forum?
+id=nRfClnMhVX.
+AntonXue,AvishreeKhare,RajeevAlur,SurbhiGoel,andEricWong. Logicbreaks: Aframework
+for understanding subversion of rule-based inference, 2024. URL https://arxiv.org/
+abs/2407.00075.
+Sohee Yang, Elena Gribovskaya, Nora Kassner, Mor Geva, and Sebastian Riedel. Do large lan-
+guage models latently perform multi-hop reasoning? In Lun-Wei Ku, Andre Martins, and
+Vivek Srikumar (eds.), Proceedings of the 62nd Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers), pp. 10210–10229, Bangkok, Thailand, August
+2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.550. URL
+https://aclanthology.org/2024.acl-long.550.
+Tian Ye, Zicheng Xu, Yuanzhi Li, and Zeyuan Allen-Zhu. Physics of language models: Part 2.1,
+grade-school math and the hidden reasoning process, 2024. URL https://arxiv.org/
+abs/2407.20311.
+Matej Zecˇevic´, Moritz Willig, Devendra Singh Dhami, and Kristian Kersting. Causal parrots:
+Large language models may talk causality but are not causal. Transactions on Machine Learn-
+ing Research, 2023. ISSN 2835-8856. URL https://openreview.net/forum?id=
+tv46tCzs83.
+Fred Zhang and Neel Nanda. Towards best practices of activation patching in language models:
+Metricsandmethods. InICLR,2024.
+Honghua Zhang, Liunian Harold Li, Tao Meng, Kai-Wei Chang, and Guy Van Den Broeck. On
+the paradox of learning to reason from data. In Proceedings of the Thirty-Second International
+Joint Conference on Artificial Intelligence, IJCAI ’23, 2023. ISBN 978-1-956792-03-4. doi:
+10.24963/ijcai.2023/375. URLhttps://doi.org/10.24963/ijcai.2023/375.
+14Appendix
+Contents
+1 Introduction 1
+1.1 Relatedworks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+2 Datamodel: apropositionallogicproblem 3
+3 Mechanismsofplanningandreasoning: acasestudyofthelength-3problem 3
+3.1 Learner: adecoder-onlyattention-onlytransformer . . . . . . . . . . . . . . . . . 4
+3.2 Mechanismanalysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+3.2.1 LinearorLogOpchain: routingsignalattheQUERYposition . . . . . . . 4
+3.2.2 Answerforthelinearchain . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+3.2.3 AnswerfortheLogOpchain . . . . . . . . . . . . . . . . . . . . . . . . . 6
+4 ThereasoningcircuitinMistral-7B 6
+4.1 Minimalproblemdescription . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+4.2 Causalmediationanalysis. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+4.3 Circuitanalysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+4.3.1 QUERY-basedpatching: discoveringtheimportantattentionheads . . . . . 8
+4.3.2 Finerexaminationsoftheattentionheads . . . . . . . . . . . . . . . . . . 9
+5 Conclusion 10
+A Propositionallogicproblemandexamples 16
+B Length-3smalltransformerstudy: experimentaldetails 17
+B.1 Datadefinitionandexamples . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+B.2 Small-transformercharacteristics,andtrainingdetails . . . . . . . . . . . . . . . . 18
+B.2.1 Transformerdefinition . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+B.2.2 Trainingdetails . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+B.3 AnswerfortheLogOpChain . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+B.4 Extraremarks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+C Mistral-7Bexperimentdetails 20
+C.1 Problemformat . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+C.2 Finerdetailsofquery-basedactivationpatching . . . . . . . . . . . . . . . . . . . 21
+C.2.1 QUERY-basedactivationpatchingexperiments: metrics . . . . . . . . . . 21
+C.2.2 AttentionpatternsofQUERY-sensitiveattentionheads . . . . . . . . . . . 22
+C.3 Queried-rulelocationinterventions: analyzingthequeried-rulelocatingheads . . . 24
+C.4 Factsinterventions: analyzingthefact-processinganddecisionheads. . . . . . . . 25
+15Preprint. Underreview.
+A PROPOSITIONAL LOGIC PROBLEM AND EXAMPLES
+Inthissection,weprovideamoredetaileddescriptionofthepropositionallogicproblemwestudy
+inthispaper,andlistrepresentativeexamplesoftheproblem.
+Atitscore,thepropositionallogicproblemrequiresthereasonerto(1)distinguishwhichchaintype
+isbeingqueried(LogOporlinear),and(2)ifitistheLogOpchainbeingqueried,thereasonermust
+knowwhattruthvaluethelogicoperatoroutputsbasedonthetwoinputtruthvalues.
+Below we provide a comprehensive list of representative examples of our logic problem at length
+2(i.e. eachchain isformed byone rule). We use[Truth values]to denotethe relevantinput truth
+valueassignments(i.e. relevantfacts)tothechainbeingqueriedbelow.
+1. Linearchainqueried,[True]
+• Rules: AorBimpliesC.DimpliesE.
+• Facts: Aistrue. Bistrue. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: Dtrue. DimpliesE;ETrue.
+2. Linearchainqueried,[False]
+• Rules: AorBimpliesC.DimpliesE.
+• Facts: Aistrue. Bistrue. Disfalse.
+• Question: whatisthetruthvalueofC?
+• Answer: Dfalse. DimpliesE;Eundetermined.
+3. LogOpchainqueried,LogOp=OR,[True,True]
+• Rules: AorBimpliesC.DimpliesE.
+• Facts: Aistrue. Bistrue. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: Btrue. AorBimpliesC;CTrue.
+Remark. Inthiscase,theanswer“Atrue. AorBimpliesC;CTrue”isalsocorrect.
+4. LogOpchainqueried,LogOp=OR,[True,False]
+• Rules: AorBimpliesC.DimpliesE.
+• Facts: Aistrue. Bisfalse. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: Atrue. AorBimplesC;CTrue.
+5. LogOpchainqueried,LogOp=OR,[False,False]
+• Rules: AorBimpliesC.DimpliesE.
+• Facts: Aisfalse. Bisfalse. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: AfalseBfalse. AorBimpliesC;Cundetermined.
+6. LogOpchainqueried,LogOp=AND,[True,True]
+• Rules: AandBimpliesC.DimpliesE.
+• Facts: Aistrue. Bistrue. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: AtrueBtrue. AandBimpliesC;CTrue.
+7. LogOpchainqueried,LogOp=AND,[True,False]
+• Rules: AandBimpliesC.DimpliesE.
+• Facts: Aistrue. Bisfalse. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: Bfalse. AandBimpliesC;Cundetermined.
+8. LogOpchainqueried,LogOp=AND,[False,False]
+• Rules: AandBimpliesC.DimpliesE.
+16Preprint. Underreview.
+• Facts: Aisfalse. Bisfalse. Distrue.
+• Question: whatisthetruthvalueofC?
+• Answer: Afalse. AandBimpliesC;Cundetermined.
+Remark. Inthiscase,theanswer“Bfalse. AandBimpliesC;Cundetermined”isalsocorrect.
+The length-3 case is a simple generalization of this set of examples, so we do not cover those
+exampleshere.
+B LENGTH-3 SMALL TRANSFORMER STUDY: EXPERIMENTAL DETAILS
+B.1 DATADEFINITIONANDEXAMPLES
+AsillustratedinFigure1,thepropositionallogicproblemalwaysinvolveonelogical-operator(Lo-
+gOp)chainandonelinearchain. Inthispaper,westudythelength-3caseforthesmall-transformer
+setting,andlength-2casefortheMistral-7B-v0.1case.
+Theinputcontexthasthefollowingform:
+RULES_START K implies D. V implies E. D or E implies A.
+P implies T. T implies S. RULES_END
+FACTS_START K TRUE. V FALSE. P TRUE. FACTS_END
+QUERY_START A. QUERY_END
+ANSWER
+andtheansweriswrittenas
+K TRUE. K implies D; D TRUE. D or E implies A; A TRUE.
+In terms the the English-to-token mapping, RULES_START, RULES_END, FACTS_START,
+FACTS_END,QUERY_START,QUERY_ENDANSWER,.and;arealluniquesingletokens. The
+logicaloperatorsandandorandtheconnectiveimpliesareuniquesingletokens. Theproposi-
+tionvariablesarealsouniquesingletokens.
+Remark. Therulesandfactsarepresentedinarandomorderintherespectivesectionsofthecontext
+inallofourexperimentsunlessotherwisespecified.Thispreventsthemodelfromadoptingposition-
+basedshortcutsinsolvingtheproblem.
+Additionally,formoreclarity,itisentirelypossibletorunintothescenariowheretheLogOpchain
+isqueried,LogOp=ORandthetworelevantfactsbothhaveFALSEtruthvalues(orLogOp=AND
+and both relevant facts are TRUE), in which case the answer is not unique. For instance, if in the
+aboveexample,bothKandVareassignedFALSE,thenbothanswersbelowarelogicallycorrect:
+K FALSE V FALSE. K implies D; D UNDETERMINED. V implies E;
+E UNDETERMINED. D or E implies A; A UNDETERMINED.
+and
+V FALSE K FALSE. V implies E; E UNDETERMINED.
+K implies D; D UNDETERMINED. D or E implies A; A UNDETERMINED.
+Problem specification. In each logic problem instance, the proposition variables are randomly
+sampledfromapoolof80variables(tokens). Thetruthvaluesinthefactsectionarealsorandomly
+chosen. Inthetrainingset,thelinearchainisqueried20%ofthetime;theLogOpchainisqueried
+80%ofthetime. Wetraineverymodelon2millionsamples.
+Architecturechoice. Figure7indicatesthereasoningaccuraciesofseveralcandidatemodelvari-
+ants. Weobservethatthe3-layer3-headvariantisthesmallestmodelwhichachieves100%accu-
+racy. Wefoundthat3-layer2-headmodels,trainedofsomerandomseeds,doconvergeandobtain
+near100%inaccuracy(typicallyabove97%),however,theysometimesfailtoconverge.The3-layer
+3-headvariantswetrained(3randomseeds)allconvergedsuccessfully.
+17Preprint. Underreview.
+100
+90
+80
+70
+60
+50
+L=2, H=1 L=2, H=12 L=3, H=1 L=3, H=3 L=3, H=12
+Figure7: Reasoningaccuraciesofseveralmodelsonthelength-3problem. x-axis: modelarchitec-
+ture(numberoflayers,numberofheads);y-axis: reasoningaccuracy. Notethatthe3-layer3-head
+variantisthesmallestwhichobtains100%accuracyonthelogicproblems.
+B.2 SMALL-TRANSFORMERCHARACTERISTICS,ANDTRAININGDETAILS
+B.2.1 TRANSFORMERDEFINITION
+ThearchitecturedefinitionfollowsthatofGPT-2closely.
+Define input x = (x ,x ,...,x ) ∈ Nt, a sequence of tokens with length t. It is converted into a
+1 2 t
+sequenceof(trainable)tokenembeddingsX
+token
+=(e(x 1),e(x 2),...,e(x t))∈Rdin×t. Addingto
+itthe(trainable)positionalembeddingsP = (p 1,p 2,...,p t) ∈ Rdin×t, weformthezero-thlayer
+embedding of the transformer X = (e(x )+p ,...,e(x )+p ). The input is processed by the
+0 1 1 t t
+attentionblocksasfollows.
+LetthemodelhaveLlayersandH heads. Forlayerindexℓ ∈ [L]andheadindexj ∈ [H],atten-
+(cid:16) (cid:104) (cid:105) √ (cid:17)
+tionheadA iscomputedbyA (X )=S causal X˜ QT K X˜T / d X˜ VT,
+ℓ,j ℓ,j ℓ−1 ℓ−1 ℓ,j ℓ,j ℓ−1 H ℓ−1 ℓ
+withX˜ =LayerNorm(X ),S(·)beingthesoftmaxoperator,causal[·]thecausalmaskopera-
+ℓ−1 ℓ−1
+tor. TheoutputoftheattentionblockisX =X +Concat[A (X ),...,A (X )]WT ,
+ℓ ℓ−1 ℓ,1 ℓ−1 ℓ,H ℓ−1 O,ℓ
+withW thesquareoutputmatrix(withbias). Finally,weapplyanaffineclassifier(withsoftmax)
+O,ℓ
+f(x)=S(X˜ WT +b )topredictthenextword.
+L,t class class
+Inthispaper,wesetthehiddenspaceembeddingto768.
+B.2.2 TRAININGDETAILS
+Inallofourexperiments,wesetthelearningrateto5×10−5,andweightdecayto10−4. Weusea
+batchsizeof512,andtrainthemodelfor60kiterations. WeusetheAdamWoptimizerinPyTorch,
+with5kiterationsoflinearwarmup,followedbycosineannealingtoalearningrateof0.Eachmodel
+istrainedonasingleV100GPU;thefullsetofmodelstakearound2-3daystofinishtraining.
+B.3 ANSWERFORTHELOGOPCHAIN
+Evidence3a:Distinctbehaviorsofaffinepredictorsatdifferentlayers.Wetraintwoaffineclassifiers
+at two positions inside the model (each with 10k samples): W at layer-2 residual stream,
+resid,ℓ=2
+andW atlayer-3attention-blockoutput, bothatthepositionofANSWER,withthetarget
+attn,ℓ=3
+being the correct first token. In training, if there are two correct answers possible (e.g. OR gate,
+starting nodes are both TRUE or both FALSE), we randomly choose one as the target; in testing,
+we deem the top-1 prediction “correct” if it coincides with one of the answers. We observe the
+followingpredictorbehavioronthetestsamples:
+18
+ycarucca
+gninosaeRPreprint. Underreview.
+1. W predictsthecorrectanswer100%ofthetime.
+attn,ℓ=3
+2. W alwayspredictsoneofthevariablesassignedFALSE(inthefactsection)ifLogOp
+resid,ℓ=2
+istheANDgate,andpredictsoneassignedTRUEifLogOpistheORgate.
+Evidence3b: linearlydecodableLogOpinformationfromfirsttwolayers. Wetrainanaffineclas-
+sifieratthelayer-2residualstreamtopredicttheLogOpoftheprobleminstance, over5ksamples
+(andtestedonanother5ksamples). Theclassifierachievesgreaterthan98%accuracy. Wenotethat
+trainingthisclassifieratthelayer-1residualstreamalsoyieldsabove95%accuracy.
+Evidence 3c: identification of LogOp-chain starting nodes at layer 3. Attention heads (3,1) and
+(3,3),whenconcatenated,produceembeddingswhichwecanlinearlydecodethetwostartingnodes
+oftheLogOpchainwithtestaccuracygreaterthan98%. Wealsofindthattheyfocustheirattention
+in the rule section of the context (as shown in Figure 8). Due to causal attention, this means that
+theydeterminethetwostartingnodesfromtheLogOp-relevantrules.
+Remark. Theabovepiecesofobservationssuggestthe“partialinformation→refinement”process.7
+To further validate that the embedding from the first two layers are indeed causally linked to the
+correctansweratthethirdlayer,weperformanactivationpatchingexperiment.
+Evidence3d: layer-2residualstreamatANSWERisimportanttocorrectprediction. Weverifythat
+layer-3attentiondoesrelyoninformationinthelayer-2residualstream(attheANSWERposition):
+• Construct two sets of samples D and D , each of size 10k: for every sample X ∈ D
+1 2 1,n 1
+and X ∈ D , the context of the two samples are exactly the same, except the LogOp is
+2,n 2
+flipped, i.e. if X has disjunction, then X has the conjunction operator. If layer 3 of the
+1,n 2,n
+model has no reliance on the Resid (layer-2 residual stream) for LogOp information at the
+ℓ=2
+ANSWERposition,thenwhenwerunthemodelonanyX ,patchingResid (X )with
+2,n ℓ=2 n,2
+Resid (X ) at ANSWER should not cause significant change to the model’s accuracy of
+ℓ=2 n,1
+prediction. However,weobservethecontrary: theaccuracyofpredictiondegradesfrom100%
+to70.87%,withstandarddeviation3.91%(repeatedover3setsofexperiments).
+Observation: LogOp-relevantreasoningatthethirdlayer. Weshowthattheoutputfromattention
+heads (3,1) and (3,3) (before the output/projection matrix of the layer-3 attention block), namely
+A (X )andA (X ),whenconcatenated,containlinearlydecodableinformationaboutthetwo
+3,1 2 3,3 2
+startingnodesoftheLogOpchain. Weframethisasamulti-labelclassificationproblem,detailedas
+follows:
+1. Wegenerate5ktrainingsamplesand5ktestsamples,eachofwhoseQUERYisfortheLogOp
+chain. Foreverysample,werecordthetargetasa80-dimensionvector,witheveryentrysetto0
+exceptforthetwoindicescorrespondingtothetwopropositionvariableswhicharethestarting
+nodesoftheLogOpchain.
+2. Insteadofplacingsoftmaxonthefinalclassifierofthetransformer,weusetheSigmoidfunction.
+Moreover,insteadoftheCross-Entropyloss,weusetheBinaryCross-Entropyloss(namelythe
+torch.nn.functional.binary cross entropy with logits in PyTorch, which
+directlyincludestheSigmoidfornumericalstability).
+3. Wetrainanaffineclassifier,withitsinputbeingtheconcatenatedConcat[A (X ),A (X )]
+3,1 2 3,3 2
+(a512-dimensionalvector)oneverytrainingsample,andwiththetargetsandtraininglossde-
+fined above. We use a constant learning rate of 0.5×10−3, and weight decay of 10−2. The
+optimizerisAdamWinPyTorch.
+4. We assign a “correct” evaluation of the model on a test sample only if it correctly outputs the
+two target proposition variable as the top-2 entries in its logits. We observe that the classifier
+achievesgreaterthan98%onceitconverges.
+7Infact,theobservationssuggestthatlayer3performsacertain“matching”operation. TaketheORgate
+asanexample. Knowingwhichofthethreestartingnodes(forLogOpandlinearchain)areTRUE,andwhich
+two nodes are the starting nodes for the LogOp chain are sufficient to determine the first token! This exact
+algorithm,however,isnotfullyvalidatedbyourevidence;weleavethisaspartofourfuturework.
+19Preprint. Underreview.
+Figure8: Attentionstatistics,averagedover500samples,allofwhichqueryfortheLogOpchain.
+Thex-axisissimplyanexamplepromptthathelpsillustratewheretheattentionisreallyplacedat.
+Observethatonlyattentionhead(3,2)payssignificantattentiontothefactsection. Theothertwo
+headsfocusontherulesection.
+Reminder: due the the design of the problem, the rule, fact and query sections all have consistent
+lengthforeverysample!
+B.4 EXTRAREMARKS
+Observation3supplement:linearly-decodablelinear-chainansweratlayer2.Wesimplyframe
+thelearningproblemasalinearclassificationproblem. Theinputvectoroftheclassifieristhesame
+astheinputtothelayer-3self-attentionblock,equivalentlythelayer-2residual-streamembedding.
+Theoutputspaceisthesetofpropositionvariables(80-dimensionalvector). Wetraintheclassifier
+on5ktrainingsamples(allwhoseQUERYisforthelinearchain)usingtheAdamWoptimizer,with
+learningratesetto5×10−3andweightdecayof10−2. Weverifythatthetrainedclassifierobtains
+anaccuracygreaterthan97%onanindependentlysampledtestsetofsize5k(allwhoseQUERYis
+forthelinearchaintoo).
+Remarksontruthvaluedetermination. Evidencesuggeststhatdeterminingthetruthvalueofthe
+simple propositional logic problem is easy for the model, as the truth value of the final answer is
+linearlydecodablefromlayer-2residualstream(with100%testaccuracy,trainedon10ksamples)
+whenwegivethemodelthecontext+chainofthoughtrightbeforethefinaltruthvaluetoken. This
+isexpected, asthemainchallengeofthislogicproblemisnotaboutdeterminingthequery’struth
+value, but about the model spelling out the minimal proof with careful planning. When abundant
+CoTtokensareavailable,itisnaturalthatthemodelknowstheanswereveninitssecondlayer.
+C MISTRAL-7B EXPERIMENT DETAILS
+C.1 PROBLEMFORMAT
+Wepresentsixexamplesofthepropositional-logicproblemincontexttotheMistral-7Bmodel,and
+askforitsanswertotheseventhproblem. Anexampleproblemispresentedbelow.
+20Preprint. Underreview.
+Rules: Z or F implies B. D implies C.
+Facts: D is true. Z is true. F is false.
+Question: state the truth value of C.
+Answer: D is true. D implies C; C is true.
+Rules: U implies Y. G or I implies Q.
+Facts: I is true. U is true. G is false.
+Question: state the truth value of Y.
+Answer: U is true. U implies Y; Y is true.
+Rules: G or Z implies E. U implies K.
+Facts: U is true. G is true. Z is false.
+Question: state the truth value of E.
+Answer: G is true. G or Z implies E; E is true.
+Rules: G implies U. Y or A implies V.
+Facts: Y is true. G is true. A is false.
+Question: state the truth value of V.
+Answer: Y is true. Y or A implies V; V is true.
+Rules: U implies W. H or B implies L.
+Facts: B is false. U is true. H is true.
+Question: state the truth value of W.
+Answer: U is true. U implies W; W is true.
+Rules: F or A implies Y. E implies I.
+Facts: A is false. F is true. E is false.
+Question: state the truth value of Y.
+Answer: F is true. F or A implies Y; Y is true.
+Rules: B or F implies D. S implies T.
+Facts: S is true. F is true. B is false.
+Question: state the truth value of T.
+Answer:
+Remark. To ensure fairness to the LLM, we balance the number of in-context examples which
+queriestheORchainandthelinearchain: eachhas3in-contextexamples. Theorderinwhichthe
+in-context examples are presented (i.e. the order in which the examples with OR or linear-chain
+answer) is random. Please note that, in the six in-context examples, we do allow the truth value
+assignment for the premise variable of the linear chain to be FALSE when this chain is not being
+queried,however,theactualquestion(theseventhexamplewhichthemodelneedstoanswer)always
+setsthetruthvalueassignmentofthelinearchaintobeTRUE,sothemodelcannottakeashortcut
+andbypassthe“QUERY→RelevantRule”portionofthereasoningpath.
+Additionally, when reporting the accuracy of the model being above 70% in the main text, we
+are querying the model for the LogOp and linear chain with 50% probability respectively. More
+precisely, we test the model on 400 samples, and we find that the model has 96% accuracy when
+QUERYisforthelinearchain,and70%accuracywhenQUERYisfortheORchain(sotheyaverage
+above70%accuracy).
+C.2 FINERDETAILSOFQUERY-BASEDACTIVATIONPATCHING
+Inthissubsection,wepresentandvisualizetheattentionheadswiththehighestaverageintervenes
+logitdifferences,alongwiththeirstandarddeviations(errorbars).
+C.2.1 QUERY-BASEDACTIVATIONPATCHINGEXPERIMENTS: METRICS
+Werelyonacalibratedversionofthelogit-differencemetricoftenadoptedintheliteratureforthe
+QUERY-basedactivationpatchingexperiments(aimedatkeepingthescore’smagnitudebetween0
+and1). Inparticular,wecomputethefollowingmetricforhead(ℓ,h)attokenpositiont:
+1 (cid:80) ∆ −∆†
+N n∈[N] orig→alt,n;(ℓ,h,t) orig . (1)
+∆† −∆†
+alt orig
+where ∆† = 1 (cid:80) logit(X )[y ] − logit(X )[y ], and ∆† =
+orig N n∈[N] n alt,n n orig,n alt
+1 (cid:80) logit(X′)[y ] − logit(X′)[y ]. The closer to 1 this score is, the stronger
+N n∈[N] n alt,n n orig,n
+21Preprint. Underreview.
+themodel’s“belief”isaltered;thecloserto0itis,thecloserthemodel’s“belief”istotheoriginal
+unalteredone.
+Each of our experiments are done on 60 samples unless otherwise specified — we repeat some
+experiments (especially the attention-head patching experiments) to ensure statistical significance
+whennecessary.
+C.2.2 ATTENTIONPATTERNSOFQUERY-SENSITIVEATTENTIONHEADS
+In this subsection, we provide finer details on the attention patterns of the attention heads we dis-
+coveredinSection4.3.1. Notethattheattentionweightspercentagewepresentinthissectionare
+calculated by dividing the observed attention weight at a token position by the total amount of at-
+tentiontheheadplacesintherelevantcontext,i.e. theportionofthepromptwhichexcludesthe6
+in-contextexamples.
+Queried-rulelocatingheads. Figure9presentstheaverageattentionweightthequeried-rulelocat-
+ingheadsplaceonthe“conclusion”variableandtheperiod“.” immediatelyafterthequeriedrule
+attheQUERYtokenposition(i.e. thequeryactivationoftheheadscomefromtheresidualstream
+at the QUERY token position) — (12,9) is an exception to this recording method, where we only
+recorditsweightontheconclusionvariablesalone,andalreadyobserveveryhighweightonaver-
+age. Theheads(12,9),(14,24),(14,26),(9,25),(9,26)indeedplacethemajorityoftheirattentionon
+thecorrectpositionconsistentlyacrossthetestsamples. Thereasonforcountingtheperiodafterthe
+correctconclusionvariableas“correctly”locatingtheruleisthat,itisknownthatLLMstendtouse
+certain“registertokens”torecordinformationintheprecedingsentence.
+Figure9: Averageattentionweightsofthequeried-rulelocatingheads,alongwiththestandardde-
+viations. The weights are calculated by dividing the actual attention weight placed on the correct
+“conclusion” variable of the rule and the period “.” immediately after, by the total amount of at-
+tentionplacedintherelevantcontext(i.e. thepromptexcludingthe6in-contextexamples). Head
+(12,9)isanexception:weonlyrecorditsattentionrightontheconclusionvariable,andstillobserve
+93.0±9.4%“correctlyplaced”attentiononaverage.
+Wecanobservethathead(12,9)hasthe“cleanest”attentionpatternoutoftheonesidentified,placing
+onaverage93.0±9.4%ofitattentiononthecorrectconclusionvariablealone. Themorediluted
+attention patterns of the other heads likely contribute to their weaker intervened logit difference
+scoreshowninSection4.3.1inthemaintext.
+Queried-rulemoverheads. Figure10showstheattentionweightofthequeried-rulemoverheads.
+While they do not place close to 100% attention on the QUERY location consistently (when the
+queryactivationcomesfromtheresidualstreamfromtoken“:”,rightbeforethefirstanswertoken),
+thetop-1attentionweightconsistentlyfallsontheQUERYposition,andthesecondlargestattention
+weightismuchsmaller. Inparticular, head(13,11)places54.2±12.5%attentionontheQUERY
+positiononaverage,whilethesecondlargestattentionweightintherelevantcontextis5.2±1.1%
+onaverage(around10timessmaller;thisratioiscomputedpersampleandthenaveraged).
+An extra note about head (16,0): it does not primarily act like a “mover” head, as its attention
+statisticssuggestthatitprocessesthemixtureofinformationfromtheQUERYpositionandthe“:”
+22Preprint. Underreview.
+position. Therefore, while we present its statistics along with the other queried-rule mover heads
+here since it does allocate significant attention weight on the QUERY position on average, we do
+notlistitassuchinthecircuitdiagramofFigure3.
+Figure 10: Average attention weights of the queried-rule mover heads, along with the standard
+deviations. The raw attention patterns are obtained at token position “:” (i.e. the query activation
+comesfromtheresidualstreamatthe“:”position),rightbeforethefirstanswertoken,andtheexact
+attention weight (indicated by the blue bars) is taken at the QUERY position; for head (16,0), we
+alsoobtainitsattentionweightatthe“:” position,aswefoundthatitalsoallocatesalargeamount
+ofattentionweighttothispositioninadditiontotheQUERYposition. Note: for(15,8),wefound
+thatitonlyactsasa“mover”headwhenthelinearchainisbeingqueried,soweareonlyreporting
+itsattentionweightstatisticsinthisspecificscenario;theotherheadsdonotexhibitthisinteresting
+behavior,sowereportthoseheads’statisticsinallqueryscenarios.
+Factprocessingheads. Figure11belowshowstheattentionweightsofthefactprocessingheads;
+theattentionpatternsareobtainedatthe“:”position,rightbeforethefirstanswertoken,andwesum
+theattentionweightsintheFactsection(startingatthefirstfactassignment,endingonthelast“.” in
+thissectionoftheprompt). ItisclearthattheyplacesignificantattentionontheFactsectionofthe
+relevantcontext. Additionally,acrossmostsamples,wefindthattheseheadsexhibitthetendencyto
+assignloweramountofattentiononthefactswithFALSEvalueassignmentsacrossmostsamples,
+andonanontrivialportionofthesamples,theytendtoplacegreaterattentionweightonthecorrect
+fact (this second ability is not consistent across all samples, however). Therefore, they do appear
+toperform somelevel of“processing” ofthe facts, insteadof purely“moving” thefacts tothe “:”
+position.
+Figure 11: Average attention weights of the fact processing heads, along with the standard devia-
+tions. TheweightsarecalculatedbydividingtheactualattentionweightplacedintheFactsection
+bythetotalamountofattentionplacedintherelevantcontext(i.e. thepartofthepromptexcluding
+the6in-contextexamples).
+23Preprint. Underreview.
+Decisionheads. Figure12showstheattentionweightsofthedecisionheadsonsampleswherethe
+modeloutputsthecorrectanswer(therefore,about70%ofthesamples). Theattentionpatternsare
+obtainedatthe“:” position. Wecountthefollowingtokenpositionsasthe“correct”positions:
+• IntheRulessection,wecountthecorrectanswertokenandthetokenimmediatelyfollowingit
+ascorrect.
+• In the Facts section, we count the sentence of truth value assignment of the correct answer
+variableascorrect(forexample,“Aistrue.”).
+• Note: theonlyexceptionishead(19,8),whereweonlyfinditsattentiononexactlythecorrect
+tokens(notcountinganyothertokensinthecontext);wecanobservethatitstillhasthecleanest
+attentionpatternforidentifyingthecorrectanswertoken.
+Figure12: Averageattentionweightsofthedecisionheads,alongwiththestandarddeviations. The
+weightsarecalculatedbydividingtheactualattentionweightplacedonthecorrectanswertokens
+bythetotalattentionthemodelplacesintherelevantcontext.
+An interesting side note worth pointing out is that, (17,25) tends to only concentrate its attention
+in the facts section, similar to the fact-processing heads. The reason which we do not classify
+it as a fact-processing head and instead as a decision head is that, in addition to finding that their
+attentionpatternstendtoconcentrateonthecorrectfact,evidencepresentedinsubsectionC.4below
+suggest that they are not directly responsible for locating and moving the facts information to the
+“:” position,whiletheheads(16,12;14)exhibitsuchtendencystrongly.
+C.3 QUERIED-RULELOCATIONINTERVENTIONS: ANALYZINGTHEQUERIED-RULE
+LOCATINGHEADS
+Inthisexperiment,weonlyswapthelocationofthelinearrulewiththeLogOpruleintheRulesec-
+tionofthequestion,whilekeepingeverythingelsethesame(includingallthein-contextexamples);
+we choose to query for the linear chain in every sample. As an example, we alter “Rules: A or B
+impliesC.DimpliesE.”to“Rules: DimpliesE.AorBimpliesC.”whilekeepingeverythingelse
+thesame. Thetwopromptshavethesameanswer.
+If the queried-rule locating heads (with heads (12,9), (14,25;26), (9,25;26) being the QUERY-
+sensitive representatives) indeed perform their functions as we described, then when we run the
+modelonthecleanprompts,patchinginthealteredkeyactivationsattheseheads(withintheRules
+section) should cause “negative” change to the model’s output, since it will cause these heads to
+mistakethequeried-rulelocationinthealteredprompttobetherightone,consequentlystoringthe
+wrong rule information at the QUERY position. In particular, the model’s cross-entropy loss with
+respecttotheoriginaltargetshouldincrease. Thisisindeedwhatweobserve.
+Theaverageincreaseincross-entropylossexhibitatrendwhichcorroboratethehypothesisabove,
+showninFigure13. Whiletheaveragecross-entropylossontheoriginalsamplesis0.463,patching
+(12,9),(14,24;26)and(9,25;26)’skeys(withcorrespondingkeyindices(12,2),(14,6)and(9,6))in
+theRulesectionresultinlossincreaseof0.375±0.246,0.148±0.091and0.260±0.293respectively
+onaverage(81%,32%and56%increase).PatchingtheotherQUERY-sensitiveattentionheads’keys
+24Preprint. Underreview.
+(a) Key patching - loss increase (b) Average increase in loss
+Figure13: Keyactivationspatchingresults. Inthisexperiment, weswapthelocationofthelinear
+rule and the LogOp rule in the Rule section and keep everything else in the prompt the same; we
+patchthekeyactivationsoftheattentionheadsintheRulesectiononly. (a)visualizestheaverage
+increaseinthecross-entropylosswithrespecttothetruetarget(thetruefirsttokenoftheanswer)
+for all key indices, and (b) shows the average and standard deviation of the top three key indices
+with the highest loss increase. Observe that these are the keys for the queried-rule locating heads
+(12,9),(14,24;26)and(9,25;26)identifiedinSection4.3.1.
+intheRulesection,incontrast,showsignificantlysmallerinfluenceonthelossonaverage,telling
+usthattheirresponsibilitiesaremuchlessinvolvedwithdirectlyfindingorlocatingthequeriedrule
+viaattention.
+Note: this set of experiments was run on 200 samples instead of 60, since we noticed that the
+standarddeviationofsomeoftheattentionheads’lossincreaseislarge.
+Remark. Whileattentionheadswithkeyindex(15,5)(i.e. heads(15, 20-23))didnotexhibitnon-
+trivialsensitivitytoQUERY-basedpatching(discussedinSection4.3.1inthemaintext),patching
+thiskeyactivationdoesresultinanontrivial0.101±0.113increaseinloss. Examiningtheattention
+heads belonging to this group, we find that they indeed also perform the function of locating the
+queried rule similar to head (12,9). We find them to be less accurate and place less attention on
+theexactrulebeingqueriedonaverage,however: thisweaker“queried-rulelocatingability”likely
+contributed to their low scores in the QUERY-based patching experiments presented in the main
+text.
+C.4 FACTSINTERVENTIONS: ANALYZINGTHEFACT-PROCESSINGANDDECISIONHEADS
+Inthissection,weaimtoprovidefurthervalidatingevidenceforthefact-processingheadsandthe
+decision heads. We experiment with flipping the truth value assignment for the OR chain while
+keepingeverythingelsethesamein theprompt(wealwaysqueryfortheORchainin thisexperi-
+ment). Asanexample,wealter“Rules: AorBimpliesC.DimpliesE.Facts: Aistrue. Bisfalse.
+Distrue. Query: pleasestatethetruthvalueofC.”to“Rules: AorBimpliesC.DimpliesE.Facts:
+A is false. B is true. D is true. Query: please state the truth value of C.”. In this example, the
+answerisflippedfromAtoB.The(calibrated)intervenedlogitdifferenceisstillagoodchoicein
+thisexperiment,thereforewestillrelyonittodeterminethecausalinfluenceofattentionheadson
+themodel’sinference,justlikeintheQUERY-basedpatchingexperiments.
+If the fact-processing heads (with (16,12;14) being the QUERY-sensitive representatives) indeed
+perform their function as described (moving and performing some preliminary processing of the
+25Preprint. Underreview.
+factsasdescribedbefore),thenpatchingthealteredkeyactivationsintheFactssectionoftheprob-
+lem’s context would cause these attention heads to obtain a nontrivial intervened logit difference,
+i.e. itwouldhelpinbendingthemodel’s“belief”inwhatthefactsare(especiallytheTRUEassign-
+mentsinthefactssection),thuspushingthemodeltoflipitsfirstanswertoken. Thisisindeedwhat
+weobserve. InFigure14,weseethatonlythekeyactivationswithindex(16,3)(correspondingto
+heads(16,12-15))obtainamuchhigherscorethaneveryotherkeyindex,yieldingevidencethat
+only the heads with key index (16,3) rely on the facts (especially the truth value assignments) for
+answer. Moreover, notice that patching the key activations of the decision heads does not yield a
+highlogitdifferenceonaverage, tellingusthatthedecisionheadsdonotdirectlyrelyonthetruth
+valueassignmentofthevariablesforinference(wewishtoemphasizeagainthat,thepositionsofthe
+variablesintheFactssectionarenotaltered,onlythetruthvalueassignmentsforthetwovariables
+oftheORchainareflipped).
+Finally,foradditionalinsightsonthedecisionheads(19,8;9;16)and(17,25),wefindthatbypatch-
+ingthequeryactivationsofthesedecisionheadsatthe“:”positionyieldsnontrivialintervenedlogit
+difference, as shown in Figure 15(c) ((19,8) has an especially high score of about 0.27). In other
+words, the query activation at the “:” position (which should contain information for flipping the
+answerfromonevariableoftheORchaintotheother,asgatheredbythefact-processingheads)be-
+ingfedintothedecisionheadsindeedhavecausalinfluenceontheir“decision”making. Moreover,
+patchingthevalueactivationoftheseheadsat“:” doesnotyieldnontriviallogitdifference,further
+suggestingthatitistheirattentionpatterns(dictatedbythequeryinformationfedintotheseheads)
+whichinfluencethemodel’soutputlogits.
+(a) Key (b) Value (c) Query
+Figure14: Key,valueandqueryactivationpatchingintheFactssection,withthemetricbeingthe
+calibratedintervenedlogitdifference.ThetruthvalueassignmentsfortheORchainisflipped(while
+keepingeverythingelseinthepromptthesame),andtheORchainisalwaysqueried. Observethat
+only the key activations at index (16,3) obtain a high intervened logit difference score of approxi-
+mately0.34(thiskeyindexcorrespondstotheattentionheads(16,12-15)). Alsoobservethatthe
+valueandqueryactivationsinthefactssectiondonotexhibitstrongcausalinfluenceonthecorrect
+inferenceofthemodel.
+26Preprint. Underreview.
+(a) Key (b) Value (c) Query
+Figure 15: Key, value and query activation patching at the “:” position (last token position in the
+context,rightbeforetheanswertoken),withthemetricbeingthecalibratedintervenedlogitdiffer-
+ence. ThetruthvalueassignmentsfortheORchainisflipped(whilekeepingeverythingelseinthe
+prompt the same), andthe OR chain is always queried. Observe that only the query activations at
+index(19,8)obtainahighintervenedlogitdifferencescoreofapproximately0.28;theotherdecision
+heads(19,9;16)and(17,25)alsoobtainnontrivialscoreswhentheirqueriesarepatched. Alsoob-
+servethatthekeyandvalueactivationsatthe“:” positiondonotexhibitstrongcausalinfluenceon
+thecorrectinferenceofthemodelwhenweonlyflipthetruthvalueassignmentsfortheORchain.
+27
