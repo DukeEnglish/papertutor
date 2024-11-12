@@ -1,0 +1,840 @@
+RECYCLED ATTENTION: EFFICIENT INFERENCE FOR
+LONG-CONTEXT LANGUAGE MODELS
+FangyuanXu1,3,TanyaGoyal2∗,EunsolChoi1∗
+DepartmentofComputerScience
+1NewYorkUniversity,2CornellUniversity,3TheUniversityofTexasatAustin
+{fx2145,eunsol}@nyu.edu,tanyagoyal@cornell.edu
+ABSTRACT
+Generatinglongsequencesoftokensgivenalong-contextinputimposesaheavy
+computational burden for large language models (LLMs). One of the computa-
+tionalbottleneckcomesfromcomputingattentionoveralongsequenceofinputat
+eachgenerationstep. Inthispaper,weproposeRecycledAttention,aninference-
+timemethodwhichalternatesbetweenfullcontextattentionandattentionovera
+subset of input tokens. When performing partial attention, we recycle the atten-
+tionpatternofaprevioustokenthathasperformedfullattentionandattendonly
+tothetopKmostattendedtokens,reducingthecostofdatamovementandatten-
+tioncomputation. Compared topreviously proposedinference-time acceleration
+methodwhichattendsonlytolocalcontextortokenswithhighaccumulativeat-
+tentionscores,ourapproachflexiblychoosestokensthatarerelevanttothecurrent
+decodingstep. WeevaluateourmethodsonRULER,asuiteoftasksdesignedto
+comprehensivelyevaluatelong-contextabilities,andlong-contextlanguagemod-
+eling tasks. Applying our method to off-the-shelf LLMs achieves comparable
+speeduptobaselineswhichonlyconsiderlocalcontextwhileimprovingtheper-
+formanceby2x. Wefurtherexploretwoideastoimproveperformance-efficiency
+trade-offs: (1)dynamicallydecidewhentoperformrecycledorfullattentionstep
+basedonthequerysimilaritiesand(2)continuedpre-trainingthemodelwithRe-
+cycledAttention.
+1 INTRODUCTION
+Largelanguagemodels(LLMs)aretrainedtoingestextremelylonginputsandgeneratelongout-
+puts(Meta,2024;Gemini,2024)tosupportawiderangeofapplications. However,deployingsuch
+long-contextLLMscanbeverycostly. Asthecontextlengthincreases,LLMsseealinearincrease
+inmemorytostoretheKey-Value(KV)cacheandaquadraticincreaseintimeforattentioncompu-
+tation. Thesetwofactorsleadtohighlatencyduringinference;Adnanetal.(2024)showedthatthe
+latencyincreasedby50xascontextlengthincreased16xfortheMPT-7Bmodel(MosaicML,2023).
+To improve inference efficiency, prior works propose to maintain a smaller KV cache by evicting
+a subset of past tokens. This includes retaining only the most recent input tokens (Beltagy et al.,
+2020; Child et al., 2019), plus a fixed number of initial tokens (i.e., StreamingLLM (Xiao et al.,
+2023)); dynamically constructing a fixed-sized KV cache by identifying key past tokens from ob-
+served attention patterns (e.g., H O (Zhang et al., 2024), Keyformer (Adnan et al., 2024)). These
+2
+approaches perform well on perplexity-based evaluation for the next token prediction task where
+localcontextsoftensuffice. However,theyreportasignificantdropinperformanceonlong-context
+benchmarks(Hsiehetal.,2024)thatrequiresynthesizinginformationfromnon-localcontexts(Sun
+et al., 2024). For example, on the simple needle-in-a-haystack (NIAH) task, both StreamingLLM
+and H O report less than 8% accuracy compared to 100% for vanilla attention over the full KV
+2
+cache.Fortheseapproaches,onceakeyinputtokeniseliminatedfromtheKVcache(eitherthrough
+localityassumptionorbyevictionduringthegenerationprocess),thereisnowaytorecoveraccess
+totheeliminatedtoken. ThisisespeciallyproblematicwhenLLMsaretaskedwithgeneratinglong
+∗Equaladvising
+1
+4202
+voN
+8
+]LC.sc[
+1v78750.1142:viXra(a) Full Attention (b) StreamingLLM (c) H2O Ours: Recycled Attention
+Full attention
+every S steps
+Recycling Step:
+only attends to
+topK tokens
+from prev. full
+attention step.
+KV Cache Size = KV Cache Size = KV Cache Size = K
+L tokens K tokens (local + tokens (local + most
+sink tokens) influential past tokens)
+Full KV Cache (C f) Size = L tokens
+Evicted Tokens can never be recovered!
+/ Current Token Local Tokens Evicted Tokens from KV Recycled KV Cache (C r) Size = K
+tokens (local + topK tokens from
+Sink Tokens (for StreamingLLM) Key Tokens (for H2O and ours) previous full attention step)
+Figure 1: Illustration of our Recycled Attention method (right) compared to baselines (left). Our
+approach alternates between full attention steps (i.e. over all past tokens) and recycled attention
+steps(i.e. overareducedKVcacheofkeytokens)duringgeneration. Byrestrictingthefullatten-
+tioncomputationtoonceineverySsteps,RecycledAttentioncanachievecomparablespeedupsto
+baselinemodelswithsmallerKVwithoutdegradingperformanceonlong-contextbenchmarks.
+text or when instructions are at the end of long contexts as it gets harder to predict which input
+tokensareusefulinadvance.
+Inthiswork,weproposeanovelapproach,RecycledAttention,thatfocusesonreducinginference
+time while comprehensively capturing long-context inputs. We keep the full KV cache through-
+out the inference (thus no gain in memory footprint), but perform attention over a dynamically
+constructed smaller KV cache, achieving inference speedups. Our method alternates between two
+modesofgeneration: generationthatinvolvesattendingoverthefullKVcacheandgenerationthat
+attends over a subset of tokens (see Figure 1). We choose this subset of tokens by taking top K
+attended tokens from the most recent generation step involving attention over the full KV cache
+(thus the term recycling attention). Our key intuition is that neighboring tokens during generation
+placehighattentionmassoverasimilarsubsetofpasttokens(Figure2). Weexploretwodifferent
+strategies for alternation; a fixed schedule strategy with full attention every S steps and Recycled
+AttentionforthenextS −1stepsinSection4, andthenasimpledynamicstrategy(fullattention
+when the query embedding diverges from the query embedding of the last full attention step) in
+Section5.1. Ourapproach(noKVeviction,dynamicallyconstructedsmallerKV,lowlatency)es-
+tablishesamiddlegroundbetweenfullattention(noKVeviction,highlatency,highperformance)
+andsparseattention(KVeviction,reducedlatency,lowperformance).
+Ourmethodcanbeappliedtoanyoff-the-shelfLLMs. Weexperimentontwolong-contextLLMs,
+LlaMa-3.1-8B(Meta,2024)andQWEN-2-7B(Yangetal.,2024a),withcontextlengths128K.We
+evaluate our approach on the language modeling task and the RULER (Hsieh et al., 2024) bench-
+mark, a suite of tasks designed to evaluate long-context models. Our results show that applying
+fixedstrideRecycledAttentionatinferencetimetothesetwooff-the-shelflong-contextLLMsim-
+provesupontheperformanceofbaselinemodels(e.g. StreamingLLM,H O)bymorethan2xwhile
+2
+achievingthesamespeedupsovervanillaattention. ForLlama-3.1-8B,RecycledAttentionreports
+63% accuracy compared to 22% for these baselines. In particular, our approach shows significant
+gains on the aggregation and retrieval oriented downstream tasks in this benchmark. Our analysis
+showsthattheseperformancegainsareattributedtoRecycledAttention’sabilitytoflexiblyattend
+overlocalandnon-localcontextsdependingontaskrequirements.
+Weexperimentwithtwostrategiestofurtherimproveperformance-efficiencytrade-off:(1)dynami-
+callydecidingwhentoperformfullattention(Section5.1)and(2)continuedpre-trainingthemodel
+withRecycledAttention(Section5.2).Ourresultsshowthatbothmethodsleadtofurtherperplexity
+improvementwiththesamedecodingtimeasfixedstrideversionofRecycledAttention.
+Wewillreleaseourcodeathttps://github.com/carriex/recycled-attention.
+22 RECYCLED ATTENTION FOR LONG-CONTEXT LLMS
+2.1 PROBLEMSETTING
+LetM bealanguagemodelandxbeaninputsequenceoftokens,x=x ,···x .Atinferencetime,
+1 L
+M generatesanoutputtokensequenceyˆ=y ,···y intwostages: (1)Pre-fillingstagewhereM
+1 N
+ingests the input and constructs the KV cache for all L tokens across all layers of the transformer
+model, and (2) Generation stage where it samples one token y at a time from the conditional
+i
+distributionP (y |x,y ···y ). Ateachstep,themodelattendstoalltokensintheKVcachefor
+M i 1 i−1
+alllayers,andupdatestheKVcachetoincludethecurrenttoken’skey-valuepairs.
+2.2 MOTIVATION
+Our goal is to reduce the inference latency during the second stage without severe degradation of
+modelperformance.Therearetwomainreasonsforlatencyincrease;first,theattentioncomputation
+increases quadratically with input length L. Second, a large L necessitates updating a large KV
+cacheofthepasttokenswithnewtoken,incurringlatencyduetothefullKVcachemovementfrom
+theGPUHBM.1
+Priorapproaches(Xiaoetal.,2023;Zhangetal.,2024)permanentlyevicttokensfromtheKVcache
+ateachinferencestep,whichmightprematurelyremovetokensthatareusefulforsubsequentgen-
+eration steps. Instead of permanently evicting tokens for all future steps, we ask: can we identify
+important tokens for attention computation for the next S time steps? Our hypothesis is that con-
+secutivetokensinasequencelikelyplacethemajorityoftheattentionweightsoverasimilarsubset
+of tokens in the context, and this can be leveraged to increase inference efficiency. We test this
+hypothesisforLlama-3.1-8Bbelow.
+Preliminary study: Attention mass overlap between
+neighboring tokens We randomly sample five exam-
+ples from the Arxiv split of the RedPajama dataset (To-
+gether,2023)andcomputetheattentionweightsoverpast
+tokens for all layers and all time steps. For time step
+t=8K,weidentifythetopK(=1024)pasttokensbased
+onattentionweightsindependentlyforeachlayer. Then,
+forsubsequentattentioncomputationsfortokensattime
+stepst=8K+i,wecomputethefractionoftheattention
+massplacedont=8K’stopKtokens.
+Time step i from full attention step
+Figure 2 shows this attention recovery rate for different Figure2: Fractionofthetotalattention
+stepsifromthefullattentionstep,averagedacrossalllay- mass recovered at time t = T + i by
+ers of the LM (shown in blue). The graph demonstrates the topK past tokens in the KV cache,
+that the topK past tokens at tth attention step cover, on where these topK tokens are selected
+average, more than 90% of the attention mass at subse- based on attention scores at t = T.
+quent times t+i. As a baseline, we also reports the Compared to StreamingLLM, topK to-
+fractionofthefullattentionweightplacedontokenscor- kensrecoveralargerfractionofthetotal
+responding to StreamingLLM’s cache of similar size K attentionmass.
+(showninorange),comprisingoftheinitial“sink”tokens
+andthelocaltokens(seeFigure1bforKVconstructionstrategy). Comparedtoourproposedstrat-
+egy, StreamingLLM reports a much lower attention mass recovery rate (∼ 0.65), thus worse at
+approximatingfullattention.
+2.3 METHODOLOGYANDIMPLEMENTATION
+WepresentthepseudocodeforgeneratingoutputtokensusingRecycledAttentioninFigure3. The
+algorithmtakesasinputalanguagemodelM andasequenceofinputtokensx ,...,x . Asafirst
+1 L
+step, we prefill M with the input sequence. Then, we alternate between the recycling step and
+fullattentionstepduringgeneration. OurapproachmaintainstwoseparateKVcachesC andC ,
+f r
+1Adnanetal.(2024)reportsupto40%oftheinferencelatencycanbeattributedtodatamovement.
+3
+ssaM
+noitnettA
+derevoceRAlgorithm 1: Generation using Recycled Attention KV cache changes at different steps
+Input: Language model M, input x 1,...,x
+L
+Prefilling Stage
+Hyperparameters: recycle cache size K, a scheduling strategy S Full KV Cache (C) Size = L tokens
+f
+Output: Sequence of generated tokens O
+1. Pref 1i .ll M Ini w tiait lh iz ex 1 f, u. l. l . K,x VL cache C
+f
+R toe kc ey nc sl e (ld o K caV l + C ta oc ph Ke ( tC okr) e nS siz fe r o= m K a L)
+2. a L ← attention scores for x Lover past tokens for all layers.
+2. O←3 4. . []I p n o i st i f a u ll /li /z ← Ie n r i1e tic aty o lic zkl ee e e eK p mV t pr tc a ya c c k oh uoe tf p C l uar ts ← st et qo r uke eev nne c r d es ee c(a or dg e dto wp- ik thx∈ CC ff a L) Recycle Steps Attention (evC icr t u ap nd da t ae d d)
+3. for i∈1,2,⋯,T do i=1
+4. if scheduler-S(i) == “recycling-step” then
+5. o←M(C r), O.append(o) // Generate using recycle cache i=2
+6. C r←[C r;KV(x L+i)] // Update recycle cache C r
+7. C r←C r[1:] // Evict token with lowest a from C r Full Attention Step
+8. else-if scheduler-S(i) == “full-attention-step” then
+C update (include new tokens from C)
+9. C f ←[C f;C r[−(i−pos full):]] // Update C f with new tokens in C r f + r
+10. o,a←M(C f),O.append(o) // Generate using full attention
+11. C f ←[C f;KV(x L+i)] // Update full cache C f F Au ttl el ntion
+12. C r ← reverse(arg top-k x∈Cfa) // Re-initialize C r with topK tokens
+13. pos full←i+1 // Set pos full Re-initialize Recycled
+14.return O KV Cache (C r)
+Figure3: PseudocodeforRecycledAttention. Themodelprefillsthepromptwithfullattentionand
+initialize Recycled Attention cache with attention scores of the last token. For each recycle step,
+wedecodewithRecycledAttentionandupdatetherecycleKVcache. Weevictthetokenwiththe
+lowest attention score to maintain a fixed-sized recycle cache. For the full attention step, we first
+updatethefullKVcachewiththenewtokensdecodedwithrecyclecache,thendecodewiththefull
+cacheandre-initializetherecyclecache.
+correspondingtoKVcacheusedinthefullandrecyclingattentionstepsrespectively. Thesethree
+componentsofthealgorithmaredescribedbelow:
+• Prefillingstage(lines1-2): Giveninputx ,...,x ,wefirstprefillM usingthevanillafullatten-
+1 L
+tioncomputationandinitializeourfullKVcacheC withthefirstLtokens. Wealsoobtainthe
+f
+attention scores a for the last token x , for all query heads across all layers of model M. We
+L L
+initializeourrecycleKVcacheC withthekey-valuepairsofthetopKtokensforeachKVhead
+r
+at each layer based on a . For models which employ Grouped Query Attention (Ainslie et al.,
+L
+2023),weuseasingleaggregatedattentionscoreforallqueryheads(maxoverallqueryheads)
+inthesamegrouptoidentifythetopKtokens.2
+• Decodingwithrecyclecache(lines5-7): Ateachrecyclestep,wegeneratethenexttokeny ∼
+t
+M(C )usingtherecycledKVcacheC tocomputeattentionandstoretheKVcacheoftheinput
+r r
+token. ThisleadstoareductioninboththeattentioncomputationFLOPsandthelatencydueto
+movementofKVcache(weonlyneedtomovethesmallerKVcacheC insteadofthelargerfull
+r
+KV cache C , where |C | << |C |). To maintain the size of C as we decode each additional
+f r f r
+tokenandupdatetheKVcachewiththisnewlygeneratedtoken,weremovetheKVcorresponding
+totherecycledtokenwiththelowestattentionscoreinthefullattentionstepfromC (line7).
+r
+• Decodingwithfullcache(lines9-13): Ateachfullattentionstep, weupdatethefullKVcache
+C withthekey-valuepairsofthetokensinferencedwiththerecyclesteps. Next,wegeneratethe
+f
+nexttokeny ∼ M(C )usingthefullKVcacheC . Finally, wefollowthesameprocedureas
+t f f
+abovetoresettherecyclecacheC withthetopKtokensofthecurrenttimestepforeachlayer.
+r
+2Ourablationsshowthattakingthemaxoutperformsotheraggregationmethodsuchasmean, orrelying
+solelyononeofthequeryheadinthegroup.WedetailthismoreinTable7intheAppendix.
+4
+gnilliferP
+gnidoceDTable 1: Comparing memory (KV cache size for L input tokens) and time (attention computation
+forgeneratingthenextT tokens)ofRecycledAttentionandbaselines. WeusethesameKVcache
+size(= K)fortherecyclecacheforourmethodandcompletecacheforeviction-basedbaselines,
+and S for stride. We also report NIAH performance of the Llama-3.1-8B model, with K = 4096
+andL=32,768.
+Vanilla Streaming H O RecycledAttention(Ours)
+2
+KVCacheSize(Linputtokens) L K K L+K
+DecodingTime(T generationtokens) T ×L T ×K T ×K (T/S×L)+(T ×K)
+NIAHAccuracy 100 7 8 98
+Schedulingstrategy Ourmethodrequiresastrategytodecidewhentoalternatebetweenperform-
+ingattentionoveralltokensandperformingattentionovertherecycledcache. Wefirstimplement
+a fixed schedule, i.e. performing full attention every S steps, which we found to be effective in
+ourexperimentsinSection3. Weexploreadynamicschedulingstrategywhichdecideswhetherto
+performthefullattentionforthecurrentdecodingstepbasedonthesimilarityofqueryembeddings
+withthequeryembeddingofthelastfullattentionstepinSection5.1.
+Memoryandtimerequirements Table1comparesthememoryandattentioncomputerequire-
+mentsofRecycledAttentionwithbaselines. WereportthememoryrequiredtostoretheKVcache
+fortheLinputtokens, andattentioncomputerequiredtogeneratethenextT tokens.3 Wesetour
+recyclecachetobethesamesizeasthecompletecacheofStreamingLLMandH O.Underthisset-
+2
+ting, Recycled Attention requires larger KV cache memory compared to eviction-based baselines,
+butsimilar tovanillaattention (L+K vs L, where K << L). However, our decodinglatencyis
+on par with both StreamingLLM and H O. Our efficiency depends on two hyperparameters – the
+2
+recyclecachesizeKandthestrideSatwhichfullattentionisperformed.BysettingK <<Landa
+largeS,wecanachievewallclocktimessimilartoKVeviction-basedbaselineswhilesignificantly
+closing the performance gap to full attention on tasks like NIAH. We discuss trade-offs between
+thesehyperparameterchoicesandefficiencyinSection4.3.
+CompatibilitywithFlashAttention FlashAttention(Dao,2024)substantiallyimprovestheeffi-
+ciencyofstandardattentioncomputationbyreducingdatamovementonGPUs. Itachievesthisby
+directly producing the output for the attention blocks without storing the O(L2) attention matrix.
+However,werelyontheseattentionscorestoselectthetopKtokensduringthefullattentionsteps
+andconstructourrecycleKVcacheC (lines9-10ofAlgorithm3). Tomakeourmethodcompat-
+r
+iblewithFlashAttention, weimplementanextrasteptore-computetheattentionscoreatthefull
+attention step. As we only perform full attention at stride of S, this does not introduce significant
+overhead.Additionally,notethatothermethodsthatuseattentionpatterns(e.g.H O)willalsoshow
+2
+similarreductioninspeedgainswhenusingFlashAttention.
+3 EXPERIMENT SETUP
+Models Weexperimentourmethodwithtwolong-contextlanguagemodelsLlama-3.1-8B (Meta,
+2024)andQwen2-7B (Yangetal.,2024a). Bothmodelscanprocessinputsofupto128Ktokens.4
+AsbothmodelsuseGroupedQueryAttention(Ainslieetal.,2023),wetakethemaximalattention
+scorefromthequeryheadsinthesamegrouptochoosethetopKtokensforthegroup.
+TaskSettings Weevaluateourapproachondownstreamtasksandintrinsiclanguagemodeling:
+1. RULER(Hsiehetal.,2024)isasuiteofproxytasksdesignedtoevaluatedownstreamcapabilities
+oflong-contextmodels. Ittestsforretrievalcapabilities(e.g. needle-in-a-haystack),aggregation
+3TheKVmemoryrequirementsalsoincreaseswithT.Wedonotaccountforthisinthetable.
+4Llama-3.1-8B is pre-trained with 8K tokens, followed by a continued pre-training stage to increase the
+contextwindowto128K.Qwen2-7B iscontinuedpre-trainedwithupto32ktokens,andadoptsYARN(Peng
+etal.,2024)andDualChunkAttention(Anetal.,2024)toenableprocessingofupto128ktokens.
+5Table 2: Performance on the RULER benchmark for LLama-3.1-8B and Qwen-2-7B. The results
+show that Recycled Attention achieves a comparable speedup to prior approaches, while substan-
+tiallyoutperformingthembasedonaccuracyacrossallsettings.
+LLama-3.1 QWEN-2
+32K 64K 32K 64K
+Method stride K Acc↑ time(s)↓ Acc↑ time(s)↓ Acc↑ time(s)↓ Acc↑ time(s)↓
+Vanilla - - 90 1.71 82 2.40 79 2.55 57 4.93
+H O - 4096 21 2.15 11 2.29 16 1.94 11 1.94
+2
+StreamingLLM - 4096 22 1.23 17 1.21 21 1.17 11 1.19
+StreamingLLM++ 50 4096 22 1.25 17 1.33 21 1.21 11 1.29
+Recycled 50 4096 63 1.27 50 1.38 32 1.21 20 1.29
+capabilities(e.g. frequentwordextraction),variabletrackingandquestionanswering. Wefollow
+theoriginalpaperandreportresultsacross13tasks. Wereportresultsoncontextlengthof32K
+and64K,with100examplesforeach{task, contextlength}pair. Weusegreedydecodingand
+generateupto50tokens.
+2. Language modeling performance, measured using perplexity. We report results on the Arxiv
+andBooksplitofRedPajama(Together,2023),andPG19(Raeetal.,2019)usingcontextsizes
+16k and 100k for the two respectively. We report results on 100 sequences for each domain.
+FollowingYenetal.(2024),wereporttheperplexityonthelast256tokensofeachsequence.
+Baselineapproaches Wecompareagainstthefollowingbaselines: (1)Vanillaattentionthatper-
+forms attention over the entire KV cache during generation. (2) StreamingLLM (Xiao et al.,
+2023) inferences by attending to a KV cache consisting of “sink tokens” and recent tokens. We
+follow the original paper and maintain a cache with 4 sink tokens and K - 4 recent tokens.
+(3) StreamingLLM++, our modified version of StreamingLLM that has similar computation and
+memoryrequirementsasRecycledAttention. InadditiontoitsregularattentionoverasmallerKV
+cache, StreamingLLM++performsfullattentionatastrideS, i.e. everyS steps. (4)H O(Zhang
+2
+et al., 2024) maintains a KV cache containing recent tokens and dynamically updated “heavy hit-
+ters”,definedbyhighcumulativeattentionscores. Wesettheheavyhittersizeandrecentcachesize
+tobeK/2eachfollowingZhangetal.(2024).
+Inference settings We prefill the model with the input and report wall clock times for the de-
+codingphrase. OurexperimentsarerunonasingleA10080GBGPUusingFlashAttention(Dao,
+2024). InSection4, wereportresultswithafixedschedule, i.e. performingfullattentioneveryS
+steps. For these, we use a fixed set of K and S and perform ablation study on varying these two
+hyperparametersinSection4.3. InSection5.1,weperformexperimentsusingdynamicstrides.
+4 INFERENCE USING RECYCLED ATTENTION W/ FIXED STRIDE
+4.1 RESULTSONDOWNSTREAMTASKS-RULER
+Our results are outlined in Table 2. We report aggregate accuracy results across all RULER tasks
+and the generation time per example. We run this experiment with K = 4096 and a fixed stride
+S =50forRecycledAttentionandallbaselinemethods,whereapplicable.
+RecycledAttentionoutperformsnon-vanillabaselinesonRULERtasksby2xintermsofaccu-
+racy. Forbothmodels,baselinemethodsthatachieveinferencespeedupbyevictingtokensfrom
+the KV cache permanently (e.g. StreamingLLM, H O shows substantial degradation in accuracy.
+2
+For example, forLlama-3.1-8B with 32K context, both H O or StreamingLLMreport < 25% ac-
+2
+curacycomparedto90%accuracyusingfullattention. RecycledAttentionclosesthisperformance
+gapsubstantially,reporting63%accuracyontheabovesetting.
+RecycledAttentionachievesasubstantiallybettertrade-offbetweenaccuracyandgeneration
+speeds compared to baselines. In terms of speed-up, our method achieves similar speedup to
+6Table3: Per-taskperformanceofLlama-3.1-8BonRULERsubtasks. Fornon-vanillamethods,we
+settheK =4096.
+Method niah single multi key multi query multi value fwe vt cwe qa
+Contextsize:32K
+Vanilla 100 98 99 99 93 99 65 61
+H O 7 7 6 6 78 38 39 34
+2
+Streaming 8 13 13 13 93 12 4 42
+StreamingLLM++ 8 14 13 13 93 18 8 50
+Recycled 98 35 59 37 90 99 20 59
+Contextsize:64K
+Vanilla 100 90 96 99 91 98 3 54
+H O 3 2 2 4 52 3 8 20
+2
+Streaming 8 7 7 8 90 5 0 33
+StreamingLLM++ 8 7 7 8 90 5 0 35
+Recycled 80 30 26 17 79 95 3 51
+StreamingLLM/StreamingLLM+whileimprovingtheaggregateaccuracies.Asinputcontextlength
+increases,theKVcachesizeforvanillamethodscaleslinearly,whiletheothermethods’inference
+timeremainatthesameballparkwithafixedK.Toidentifythe“heavyhitter”tokens,H Orequires
+2
+attentionscoresateachtimewhicharenotstoredbyFlashAttention. Thus,theinferencespeed-up
+isnotassignificantincertainsettings(with1/8KVcachesizefor32Kinput)whenusedwithFlash
+Attention. ForRecycledAttention,weonlyexplicitlyre-computetheattentionscoreeveryS steps
+andthisdoesnotintroduceasheavyanoverhead.
+Recycled Attention reports higher improvement on the aggregation and retrieval tasks in
+RULER. Wereportper-taskfine-grainedperformanceforLlama-3.1-8Bforall13RULERtasks
+inTable3(detailedtaskdescriptionsareincludedinAppendixA.2). WefindthatRecycledAtten-
+tionperformsthebestattasksthatrequireretrievingapieceofinformationinthecontext(including
+Needle-in-a-haystack (NIAH), Question Answering (QA) and Variable Tracking (VT)). H O and
+2
+StreamingLLMsufferatthesetasksastherequiredinformationmayhavebeenprematurelyevicted
+fromtheKVcache. WhileweobserveminimalperformancedegradationforRecycledAttentionon
+thesingleNIAHsettings(98%accuracyfor32Kcontextsize),performancedegradesmoreonthe
+multi-NIAHsettingsthatrequirereturningmultiplevalues,thoughstilloutperformingthebaselines.
+Weobservedifferenttrendsfortheaggregationtasks.Forfrequentwordextractions(fwe),thewords
+aresampledfromaZetadistribution,andthemodelistaskedwithoutputtingthethreemostfrequent
+words. WefindthatStreamingLLMisonparwithvanillaforthissetting,presumablybecausethe
+local context that it attends over has the same frequent words as the whole context. In contrast, it
+performs much worse on the common word extraction task (cwe; return ten common words that
+each appear 30 times in the context) as these common words may not appear in the local context.
+RecycledAttentionperforms5xbettercomparedtoStreamingLLM,withH Operformingthebest,
+2
+asitaggregatesattentionscoresthroughoutthewholecontext.
+4.2 RESULTSONINTRINSICTASK-LANGUAGEMODELING
+Table 4 outlines performance of the baselines and Recycled Attention for perplexity. For context
+size 16K, we fix K = 2048 and S = 10 both Llama-3.1-8B and Qwen2-7B. For context size
+100K,wereportresultsusingK =2048and32,768,andS =256.
+For LLaMA-3.1, Recycled Attention achieves better perplexity and comparable inference speeds
+compared to StreamingLLM when the KV cache size is 1/8 of a 16K context. This shows that
+the model benefits from attending to tokens outside of local context window. Our method also
+achievesbetterperformancethanH Owithamuchshorterinferencetimeperexample(10.77v.s.
+2
+6.05). Overall, Recycled Attention achieves a better trade-off between inference speeds and
+taskaccuracycomparedtonon-vanillaapproachesforbothLLaMA-3.1andQWEN-2models
+for the 16K context size setting. When we scale up the context length to 100K, we find differing
+trendsbetweentheLLaMA-3.1andQWEN-2models. ForLLaMA-3.1,weobservethatRecycled
+7Table 4: Perplexity results on language modeling task for LLama-3.1-8B and QWEN-2-7B. We
+reportperformancesforArxiv(thefirstnumber)andBook(thesecondnumber)andPG19.
+LLama-3.1-8B QWEN-2-7B
+Method K Stride
+time(s)↓ PPL↓ time(s)↓ PPL↓
+Contextsize:16K(ArxivandBook)
+Vanilla - - 7.63 2.22/7.07 8.85 2.33/8.26
+H O 2048 - 10.77 2.48/7.60 11.57 2.68/9.02
+2
+StreamingLLM 2048 - 6.92 2.62/7.94 5.71 2.75/9.10
+StreamingLLM++ 2048 10 7.21 2.59/7.88 6.08 2.71/9.05
+Recycled 2048 10 7.14 2.36/7.49 6.33 2.47/9.01
+Contextsize:100K(PG19)
+Vanilla - - 18.11 8.24 40.42 13.28
+H O 2048 - 10.56 17.04 9.96 13.39
+2
+StreamingLLM 2048 - 5.94 9.53 5.72 13.58
+StreamingLLM++ 2048 256 6.04 9.53 5.92 13.58
+Recycled 2048 256 6.10 9.31 5.90 14.90
+H O 32,768 - 26.89 8.63 23.55 13.36
+2
+StreamingLLM 32,768 - 13.38 8.55 15.81 12.31
+StreamingLLM++ 32,768 256 13.43 8.55 15.87 12.32
+Recycled 32,768LLaMLLA2a-5M36.1A-3.1 13.52 Q8.W4E6QNW-2EN-2 15.89 13.50
+ArXivArXiv
+LLaMA-3.1 QWEN-2
+LLAarMXAiV-3.1 BQoWoEkN-2 LLaMAArX-3iV.1 BQoWoEkN-2
+ArXiv BookBook ArXiv
+Time step i from full attention step Time step i from full atXte anxtiiso:nX t isamtxeeips s: tteimp ei fsrtoemp if ufrlol amtTt efiumnltl eiao tsntte esnptte iiop fnr osmte pfull attention step Time step i from full attention step
+BoFokigure4: RecoveryrateofStreamingLLM(oBraoonkge)andRecycledAttention(blue)onfivesamples
+eachfromtheArxivandBooksplitofRedPajama. Wecalculaterecoveryratewithaprefilllength
+of 8K, K of 1024, S = 50. Recycled Attention achieves better recovery rate for both domains
+comparedtoStreamingLLM.
+X axis: time step i from full attention step
+X axis: time step i from full attention step
+Attention reports better perplexity but worse inference speeds compared to non-vanilla baseline
+methods. However, Recycled Attention performs worse compared to baseline for the QWEN-2
+model. WeanalyzetheattentionpatterntoinvestigatethisinSection4.3. Interestingly,wealsosee
+thatwhensettingK=32,768,methodsthatconsiderlocalcontext(StreamingLLM)performseven
+betterthanthevanillamethod,hintingthatQWEN-2mightnotbeeffectivelyutilizingthefull100K
+contextasitisonlycontinuedpre-trainedtohandlecontextupto32K.
+4.3 ANALYSIS
+Recycled Attention recovers a large fraction of the attention mass of full attention. We use
+the same setting as Section 2.2 and analyze the recovery rate (fraction of attention mass at the
+(t+i)th stepplacedonthetopKtokensofthetth attentionstep). Figure4showstheaggregated
+attention recovery rate (across all layers and heads) for Recycled Attention and StreamingLLM
+for Llama-3.1-8B and Qwen2-7B. We include detailed per layer recovery rates for all settings in
+Figure 6 in Appendix A.1. We observe a consistent trend across the Arxiv and Book domains;
+Recycled Attention recovers substantially more attention mass (∼ 0.9 for all settings) compared
+to StreamingLLM. However, this gap between the two techniques is much smaller for Qwen2-7B
+comparedtoLlama-3.1-8B,explainingsmallergainsfromusingRecycledAttentionforQwen2-7B
+comparedtoLlama-3.1-8BinTables2and4.
+8
+ssaM
+noitnettA
+derevoceR
+ssaM
+noitnettA
+derevoceRVanilla StreamingLLM StreamingLLM++ Recycled
+2.7 95
+K=2048
+K=2048, S=16 K=8192, S=50
+2.55 K=2048, S=32 73.75
+K=4096 K=4096, S=16
+K=4096, S=10
+2.4 K=2048, S=32 K=4096, S=32 52.5 K=4096, S=50
+K=2048, S=16 K=4096, S=16
+K=4096, S=32
+2.25 31.25 K=4096, S=50
+K=8192
+K=4096 K=4096, S=10
+2.1 10
+6.5 6.725 6.95 7.175 7.4 1.15 1.313 1.475 1.638 1.8
+Decoding time (s/example)
+Figure5: RecycledAttentionandbaselineperformanceswhenvaryingK andSonArxivwith16K
+contextlength(left)andRULERtaskswith32Kcontextlength(right)forLlama-3.1-8B.Recycled
+Attentionachievesbetterperformancethanbaselines(StreamingLLM,StreamingLLM++)withthe
+sameorlessdecodingtimeforbothtask.
+Recycled Attention can flexibly attend to a mix of local and non-local tokens depending on
+task requirements. We conduct an analysis on two tasks — language modeling on ArXiv (16K
+tokens)andsinglekeyNIAH(32Ktokens). WeevaluateLlama-3.1-8BonbothtaskswithK equal
+to1/8ofthecontextlength. WecomparethepercentageoftopKtokensthatfallwithintherecent
+K contextwindowandoutsideofitforthelasttokenintheprefillingstage,averagedacrossallKV
+heads and layers. For the language modeling, the percentage of local and distant tokens are 40%,
+60%, while for the NIAH, the percentage is 30% v.s. 70%. This aligns with our expectation that
+RULERtasksneedmorenon-localtokenscomparedtonexttokenprediction.
+ForRecycledAttention,increasingtherecyclecachesizeKismoreeffectivethandecreasing
+the stride S. Our method’s efficiency depends on two hyperparameters, the size of the recycle
+cacheK andthestrideS whichgovernshowoftenweperformfullattentionandupdatetherecycle
+KVcache. WeanalyzetheimpactofvaryingthesetwovaluesforLlama-3.1-8B.Wereportresults
+fordifferenthyperparameterchoicesforArXiv(L=16,354)andRULER(L=32,768)inFigure
+5. We see that Recycled Attention outperforms baselines with similar inference time budget for
+both tasks. For example, Recycled Attention with K = 2048,S = 16 achieves better perplexity
+thanStreamingLLMwithK = 4096. Infact, RecycledAttentionwithK = 4096achievesbetter
+accuracythanStreamingLLMwithalargerK =8192forRULER.Overall,wefindthatincreasing
+K is more effective than decreasing the stride S. While decreasing stride S generally benefits
+RecycledAttention,ithasnegligibleeffectonStreamingLLM++. Thisshowsthattheimprovement
+doesnotmerelycomefromperformingfullattention,butalsofromrefreshingtherecyclecache.
+5 FURTHER IMPROVEMENTS
+5.1 INFERENCEUSINGRECYCLEDATTENTIONW/DYNAMICSTRIDES
+Our experiments in Section 3 employs a fixed schedule for all layers. In this subsection, we ex-
+ploreadynamicschedulertoalternatebetweenfullandrecyclingattentionsteps. Intuitively,ifthe
+queryvectorofaparticularlayerandheadforthecurrentstepissimilartothequeryvectorofthe
+most recent full attention step, the attention pattern should be similar. Based on this, for dynamic
+scheduling,weonlyperformthefullattentionstepwhenthissimilarityislowerthanathreshold.
+Approach AteverySthdecodestep,wefirstdeterminewhetherweneedtoperformfullattention
+instead of always performing full attention by default. We calculate the cosine similarity between
+queryvectorsoftheinputtokentaveragedacrossallqueryheadsinlayerl,withtheaveragedquery
+vectorofthemostrecentfullattentionstepforthatlayer. Ifthesimilarityishigherthanathreshold
+s, we decode with recycle cache, and otherwise use full attention for layer l. Our approach offers
+the flexibility of using different schedules for different layers, but uses the same schedule for all
+9
+↓
+ytixelpreP
+vixrA
+↑
+ycarucca
+RELURTable 5: Results comparing fixed stride and dynamic stride based on query similarity. We report
+perplexityresultsonLlama-3.1-8BforArxivandBookwith16Kcontextlength.
+Arxiv Book
+Method Schedule Time PPL Stride Time PPL Stride
+Vanilla - 7.63 2.22 - 7.63 7.07 -
+Recycled Fixed 7.17 2.36 10 7.17 7.49 10
+Recycled Dynamic(QC=5,s=0.8) 7.07 2.32 25 7.07 7.42 24
+Recycled Fixed 6.88 2.41 15 6.94 7.53 15
+Recycled Dynamic(QC=10,s=0.8) 6.86 2.36 32 6.83 7.54 31
+heads in the same layer. Since we perform this similarity check every S steps, setting threshold
+s=1isequivalenttodecodingwiththefixedstrideS. Performingthissimilaritycheckintroduces
+computationaloverhead,henceweperformthisonlyeveryS steps; wecallthisquerycomparison
+(QC)stride.
+Setup We run experiments with Llama-3.1-8B on the Arxiv and Books corpus. As before, we
+report perplexity and decoding time measured on one A100 with batch size of 1 for the last 256
+tokensofeachtestsequence.Werundynamicschedulerwithtwodifferentquerycomparisonstrides
+{5,10}andasimilaritythresholdof0.8. WecompareagainstRecycledAttentionwithfixedstrides
+10and15. Fordynamicschedules,wereporttheeffectivestrideacrosslayers,i.e. theaveragestride
+atwhichfullattentionisperformed.
+Dynamic stride strategy improves perplexity compared to fixed strategy when using similar
+decoding times. Table 5 reports our results. We observe that using dynamic strides improves
+the performance-efficiency trade-off across all settings. Compared to fixed stride of 10 (row 2),
+dynamicstridewithquerycomparisonstrideof5(row3)achieveslowerperplexitywithaslightly
+fasterdecodingtimeonbothdomains.Similarly,employingadynamicstridewithquerycomparison
+strideof10(lastrow)achievesbetteroron-parperformancewithlessdecodingtimecomparedto
+havingafixedstrideof15(row4).Thisbettertrade-offcanbeattributedtothelargereffectivestride
+size, i.e. less frequent full attention steps, that result from using dynamic schedules. Overall, our
+experimentdemonstratesthatdynamicallydecidingwhentorefreshtherecyclecachecanimprove
+performancewhenusingsimilardecodetimes.
+5.2 CONTINUEDPRE-TRAININGWITHRECYCLEDATTENTION
+AstheLLMswestudyaretrainedwithfullvanillaattention,usingRecycledAttentionatinference-
+time creates a discrepancy between training and inference. In particular, tokens during recycling
+stepsattendtoanon-contiguoussequenceoftokensintherecyclecache.Here,weexplorecontinued
+pre-trainingwithRecycledAttentiontoadaptmodelstothisattentionstrategy.
+Approach WeassumealengthL+Sforallsequences,whereListheprefilllength. Weemulate
+therecyclestepattentionpatternforthelastS tokensinthesequenceduringtraining. Concretely,
+weidentifythetopKtokensforeachlayerandheadforthexth,i.e. thelastprefilledtoken. Forthe
+L
+nextS tokens, weperformattentionoverthetopKtokensfromaboveaswellaslocaltokens(i.e.
+tokensL+1onwards). WeperformstandardattentionoverallpasttokensforthefirstLtokensand
+trainthemodelwithnexttokenpredictionlossforallthetokensinthesequence.
+Setup We set L = 8092, S = 50 and K = 2048 for this experiment. We randomly sample a
+subsetof200ksequencesfromtheArxivsplitofRedPajamadataset5 andfilteroutsequenceswith
+less than 8192 tokens. We split the data into 80%, 10% and 10% train/dev/test splits, resulting in
+120ktrainingdatasamples. WetrainLlama-3.1-8Bforoneepochwithaglobalbatchsizeof64and
+alearningrateof5e-6. Weuse20warm-upstepsandalinearschedulewith0weightdecay. Weuse
+5https://huggingface.co/datasets/togethercomputer/RedPajama-Data-1T
+10theAdamWOptimizer. WeuseFullyShardedDataParallel(Zhaoetal.,2023)and8-bitoptimizer
+(Dettmersetal.,2021)toimprovetrainingefficiency. Trainingisdoneon4H10080GBGPUs.
+Results We report the results of
+Table6:Resultsoncontinuedpre-trainingLLaMA-3.1.The
+continued pre-training in Table 6
+context size is 8k and we report perplexity on the last 50
+for Recycled Attention and other
+tokens.
+baselines (Vanilla, StreamingLLM,
+StreamingLLM++). For each
+method, we report the base per- Model Method Stride TestPPL
+formance from the pre-trained
+Base Vanilla - 2.68
+checkpoint (Base) and the perfor-
++CPT Vanilla - 2.68
+mance after continued fine-tuning Base StreamingLLM - 3.14
+(+CPT). We see that continued fine- +CPT StreamingLLM - 3.14
+tuningdoesnotimproveperformance Base StreamingLLM++ 50 3.13
+withvanillainferencemethod, likely +CPT StreamingLLM++ 50 3.13
+as the model is highly optimized Base Recycled 50 2.96
+in this setting and trained with this +CPT Recycled 50 2.87
+Base Recycled 25 2.90
+data. We also observe very little
++CPT Recycled 25 2.81
+performance gain through continued
+pre-training in other inference meth-
+ods (StreamingLLM, StreamingLLM++). Yet, with our inference method, we see a meaningful
+gain from continued pre-training in two stride setting (25, 50). Continued fine-tuning achieves a
+lowerperplexitywithhigherstride(50)comparedtobasemodelwithasmallerstride(25),leading
+toabetterperformance-efficiencytrade-off.
+6 RELATED WORK
+Efficient inference methods FlashAttention (Dao, 2024) achieves significant gain in inference
+speedbyoptimizingattentioncomputationsonGPUs. Alineofwork(Xiaoetal.,2022;Liuetal.,
+2024;Hooperetal.,2024)proposesmethodsforquantizingKVcachestoreducebothmemoryand
+computation cost. These are orthogonal to and can be combined with our approach. Speculative
+decoding (Leviathan et al., 2022) leverages a computationally efficient model (usually a smaller
+model) to provide draft for a more expensive model. Recent work (Sun et al., 2024) introduces a
+hierarchicalspeculativedecodingmethodforlong-contextmodelsthatusesacombinationofasmall
+modelwithshortcontextandthelong-contextmodelwithpartialKVcacheasthedraft.
+KVcacheeviction AsperformingattentionoverthefullKVcacheimposesahighmemoryand
+computationburden,KVcacheevictionmethodshavebeenextensivelystudied. Strategiesinclude
+keeping only “sink” and recent tokens in the KV cache (Xiao et al., 2023); or tokens with high
+accumulativeattentionscores(Zhangetal.,2024). TOVA(Orenetal.,2024)proposestoiteratively
+evicttokensthatreceivethelowestattentionscoresbasedonthecurrentdecodingstep. Otherworks
+designevictionstrategiesbasedonattentionpatternsofdifferentheads(Geetal.,2024;Xiaoetal.,
+2024b)ordifferentlayers(Yangetal.,2024b).ComparedtothislineofKVcacheevictionmethods,
+our approach does not permanently evict any token from the cache but computes attention over a
+subsetoftokensinthecache.
+Sparse attention Our method achieves efficiency by performing sparse attention. Earlier work
+(Zaheer et al., 2020; Beltagy et al., 2020) investigates training LLMs with a fixed sparse attention
+pattern(suchasaslidingwindow)toreducecomputationalcomplexity. Training-freemethodssuch
+asUnlimiformer(Bertschetal.,2023)andInfLLM(Xiaoetal.,2024a)performsattentionsonsubset
+oftokenswhichreceivedthehighestattentionscores,withthegoalofextendingthecontextwindow
+of a given language model. In contrast, we leverage previous tokens’ attention scores to select
+tokens to attend to for long-context models, which can already handle sequences with up to 128k
+tokens. MInference(Jiangetal.,2024)identifyhead-specificpatternstoperformsparseattention,
+focusing on accelerating the pre-filling stage. Similar to ours, SparQ (Ribar et al., 2024) achieves
+decodingtimespeed-upbyattendingtosubsetoftokens. Insteadofleveragingtheattentionpatterns
+of previous tokens, it uses a subset of query heads of the current token to select top-k tokens to
+attendtoforallqueryheads.
+117 CONCLUSION
+We propose Recycled Attention, an inference-time method which maintains a small, dynamic KV
+cachebasedonattentionpatternsofneighboringtokens.Comparedtopreviousworkwhichperform
+sparse attention on local tokens only, we leverage the attention pattern of nearby tokens to select
+subsetoftokenstoattendto,allowingmoreflexiblesparseattentionpatterns. Weapplyourmethod
+to two off-the-shelf long-context model and show that our method reduces inference wall-clock
+time while better preserving performance compared to prior methods which keep a KV cache of
+recenttokens. Finally,weshowthatcontinuedpre-trainingthemodelwithRecycledAttentionand
+employingadynamicstridecanfurtherimprovetheperformance-efficiencytrade-off.
+8 LIMITATIONS AND FUTURE WORK
+Proposedmethod Whilewefocusonacceleratinginferencespeed, ourmethoddoesnotreduce
+memoryrequirementforusinglong-contextLLMs,whichcanbeabottleneckforcertainusecases.
+Our method is focused on a setting where we generate long output given a long input. When the
+outputlengthisverysmall,theefficiencygainwillbeminimal.Inthisstudy,wefocusonemploying
+afixedstrideacrossalllayersandexploredynamicschedulingbasedonquery-similarity. Settinga
+customstrideperlayer,orexploringothermethodsfordecidingwhentorecyclethecachecouldbe
+futureavenuetoimproveperformance.
+Experimentalsettings Wehaveconductedexperimentwithtwoopen-sourcedlong-contextmod-
+els and two evaluation tasks setting. We did not test out more language models and other long-
+contextbenchmarks(Anetal.,2023;Karpinskaetal.,2024)givenourlimitedcomputeresources.
+Finally,ourmethodisnotlimitedtothelanguagedomain. FutureworkcanexploreapplyingRecy-
+cledAttentiontoothermodalities,forinstance,visiontransformers.
+ACKNOWLEDGMENTS
+WethankWentingZhaoandtheUTNLPgroupforhelpfulfeedback.Theworkispartiallysupported
+byagiftfromApple.
+REFERENCES
+Muhammad Adnan, Akhil Arunkumar, Gaurav Jain, Prashant Nair, Ilya Soloveychik, and Pu-
+rushotham Kamath. Keyformer: Kv cache reduction through key tokens selection for efficient
+generativeinference. ProceedingsofMachineLearningandSystems,6:114–127,2024.
+Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury Zemlyanskiy, Federico Lebr’on, and
+Sumit K. Sanghai. Gqa: Training generalized multi-query transformer models from multi-head
+checkpoints.ArXiv,abs/2305.13245,2023.URLhttps://api.semanticscholar.org/
+CorpusID:258833177.
+Chen An, Fei Huang, Jun Zhang, Shansan Gong, Xipeng Qiu, Chang Zhou, and Lingpeng Kong.
+Training-freelong-contextscalingoflargelanguagemodels. ArXiv,abs/2402.17463,2024. URL
+https://api.semanticscholar.org/CorpusID:268032518.
+Chenxin An, Shansan Gong, Ming Zhong, Xingjian Zhao, Mukai Li, Jun Zhang, Lingpeng Kong,
+and Xipeng Qiu. L-eval: Instituting standardized evaluation for long context language models,
+2023. URLhttps://arxiv.org/abs/2307.11088.
+Iz Beltagy, Matthew E. Peters, and Arman Cohan. Longformer: The long-document transformer.
+arXiv:2004.05150,2020.
+Amanda Bertsch, Uri Alon, Graham Neubig, and Matthew Gormley. Unlimiformer:
+Long-range transformers with unlimited length input. In A. Oh, T. Naumann,
+A. Globerson, K. Saenko, M. Hardt, and S. Levine (eds.), Advances in Neural In-
+formation Processing Systems, volume 36, pp. 35522–35543. Curran Associates, Inc.,
+2023. URL https://proceedings.neurips.cc/paper_files/paper/2023/
+file/6f9806a5adc72b5b834b27e4c7c0df9b-Paper-Conference.pdf.
+12RewonChild,ScottGray,AlecRadford,andIlyaSutskever. Generatinglongsequenceswithsparse
+transformers. ArXiv, abs/1904.10509, 2019. URL https://api.semanticscholar.
+org/CorpusID:129945531.
+TriDao. FlashAttention-2: Fasterattentionwithbetterparallelismandworkpartitioning. InInter-
+nationalConferenceonLearningRepresentations(ICLR),2024.
+Tim Dettmers, Mike Lewis, Sam Shleifer, and Luke Zettlemoyer. 8-bit optimizers via block-
+wisequantization. CoRR,abs/2110.02861,2021. URLhttps://arxiv.org/abs/2110.
+02861.
+Suyu Ge, Yunan Zhang, Liyuan Liu, Minjia Zhang, Jiawei Han, and Jianfeng Gao. Model tells
+you what to discard: Adaptive KV cache compression for LLMs. In The Twelfth International
+ConferenceonLearningRepresentations,2024.URLhttps://openreview.net/forum?
+id=uNrFpDPMyo.
+Gemini. Google. gemini 1.5: Unlocking multimodal understanding across millions of tokens of
+context. arXivpreprintarXiv:2403.05530,2024.
+ColemanHooper,SehoonKim,HivaMohammadzadeh,MichaelWMahoney,YakunSophiaShao,
+KurtKeutzer,andAmirGholami.Kvquant:Towards10millioncontextlengthllminferencewith
+kvcachequantization. arXivpreprintarXiv:2401.18079,2024.
+Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, Yang
+Zhang, and Boris Ginsburg. Ruler: What’s the real context size of your long-context language
+models? arXivpreprintarXiv:2404.06654,2024.
+Huiqiang Jiang, Yucheng Li, Chengruidong Zhang, Qianhui Wu, Xufang Luo, Surin Ahn, Zhen-
+huaHan, AmirHAbdi, DongshengLi, Chin-YewLin, YuqingYang, andLiliQiu. Minference
+1.0: Accelerating pre-filling for long-context llms via dynamic sparse attention. arXiv preprint
+arXiv:2407.02490,2024.
+MarzenaKarpinska,KatherineThai,KyleLo,TanyaGoyal,andMohitIyyer.Onethousandandone
+pairs: A”novel”challengeforlong-contextlanguagemodels, 2024. URLhttps://arxiv.
+org/abs/2406.16264.
+YanivLeviathan,MatanKalman,andYossiMatias.Fastinferencefromtransformersviaspeculative
+decoding. In International Conference on Machine Learning, 2022. URL https://api.
+semanticscholar.org/CorpusID:254096365.
+Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir Braverman,
+Beidi Chen, and Xia Hu. Kivi: A tuning-free asymmetric 2bit quantization for kv
+cache. ArXiv, abs/2402.02750, 2024. URL https://api.semanticscholar.org/
+CorpusID:267413049.
+Meta. The llama 3 herd of models. ArXiv, abs/2407.21783, 2024. URL https://api.
+semanticscholar.org/CorpusID:271571434.
+NLPTeamMosaicML. Introducingmpt-7b: Anewstandardforopen-source,commerciallyusable
+llms,2023. URLwww.mosaicml.com/blog/mpt-7b. Accessed: 2023-05-05.
+MatanelOren,MichaelHassid,NirYarden,YossiAdi,andRoySchwartz. Transformersaremulti-
+stateRNNs. InProc.ofEMNLP,2024. URLhttps://arxiv.org/abs/2401.06104.
+Bowen Peng, Jeffrey Quesnelle, Honglu Fan, and Enrico Shippole. YaRN: Efficient context win-
+dow extension of large language models. In The Twelfth International Conference on Learning
+Representations,2024. URLhttps://openreview.net/forum?id=wHBfxhZu1u.
+Jack W Rae, Anna Potapenko, Siddhant M Jayakumar, Chloe Hillier, and Timothy P Lillicrap.
+Compressive transformers for long-range sequence modelling. arXiv preprint, 2019. URL
+https://arxiv.org/abs/1911.05507.
+13Luka Ribar, Ivan Chelombiev, Luke Hudlass-Galley, Charlie Blake, Carlo Luschi, and Douglas
+Orr. SparQ attention: Bandwidth-efficient LLM inference. In Ruslan Salakhutdinov, Zico
+Kolter, KatherineHeller, AdrianWeller, NuriaOliver, JonathanScarlett, andFelixBerkenkamp
+(eds.), Proceedings of the 41st International Conference on Machine Learning, volume 235 of
+Proceedings of Machine Learning Research, pp. 42558–42583. PMLR, 21–27 Jul 2024. URL
+https://proceedings.mlr.press/v235/ribar24a.html.
+Hanshi Sun, Zhuoming Chen, Xinyu Yang, Yuandong Tian, and Beidi Chen. Triforce: Lossless
+accelerationoflongsequencegenerationwithhierarchicalspeculativedecoding. arXivpreprint
+arXiv:2404.11912,2024.
+Together. Redpajama: an open dataset for training large language models, 2023. URL https:
+//github.com/togethercomputer/RedPajama-Data.
+Chaojun Xiao, Pengle Zhang, Xu Han, Guangxuan Xiao, Yankai Lin, Zhengyan Zhang, Zhiyuan
+Liu, Song Han, and Maosong Sun. Infllm: Unveiling the intrinsic capacity of llms for under-
+standingextremelylongsequenceswithtraining-freememory. arXiv,2024a.
+GuangxuanXiao,JiLin,MickaelSeznec,JulienDemouth,andSongHan. Smoothquant: Accurate
+andefficientpost-trainingquantizationforlargelanguagemodels. ArXiv,abs/2211.10438,2022.
+URLhttps://api.semanticscholar.org/CorpusID:253708271.
+Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, and Mike Lewis. Efficient streaming
+language models with attention sinks. ArXiv, abs/2309.17453, 2023. URL https://api.
+semanticscholar.org/CorpusID:263310483.
+Guangxuan Xiao, Jiaming Tang, Jingwei Zuo, Junxian Guo, Shang Yang, Haotian Tang, Yao Fu,
+and Song Han. Duoattention: Efficient long-context llm inference with retrieval and streaming
+heads. arXiv,2024b.
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Zhou, Chengpeng Li,
+Chengyuan Li, Dayiheng Liu, Fei Huang, Guanting Dong, Haoran Wei, Huan Lin, Jialong
+Tang, Jialin Wang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Ma, Jin Xu, Jingren Zhou,
+Jinze Bai, Jinzheng He, Junyang Lin, Kai Dang, Keming Lu, Ke-Yang Chen, Kexin Yang,
+Mei Li, Min Xue, Na Ni, Pei Zhang, Peng Wang, Ru Peng, Rui Men, Ruize Gao, Runji Lin,
+Shijie Wang, Shuai Bai, Sinan Tan, Tianhang Zhu, Tianhao Li, Tianyu Liu, Wenbin Ge, Xi-
+aodong Deng, Xiaohuan Zhou, Xingzhang Ren, Xinyu Zhang, Xipin Wei, Xuancheng Ren,
+Yang Fan, Yang Yao, Yichang Zhang, Yunyang Wan, Yunfei Chu, Zeyu Cui, Zhenru Zhang,
+and Zhi-Wei Fan. Qwen2 technical report. ArXiv, abs/2407.10671, 2024a. URL https:
+//api.semanticscholar.org/CorpusID:271212307.
+Dongjie Yang, Xiaodong Han, Yan Gao, Yao Hu, Shilin Zhang, and Hai Zhao. PyramidInfer:
+Pyramid KV cache compression for high-throughput LLM inference. In Lun-Wei Ku, An-
+dre Martins, and Vivek Srikumar (eds.), Findings of the Association for Computational Lin-
+guistics ACL 2024, pp. 3258–3270, Bangkok, Thailand and virtual meeting, August 2024b.
+Association for Computational Linguistics. doi: 10.18653/v1/2024.findings-acl.195. URL
+https://aclanthology.org/2024.findings-acl.195.
+HowardYen,TianyuGao,andDanqiChen. Long-contextlanguagemodelingwithparallelcontext
+encoding. InAssociationforComputationalLinguistics(ACL),2024.
+Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti, Santi-
+ago Ontan˜o´n, Philip Pham, Anirudh Ravula, Qifan Wang, Li Yang, and Amr Ahmed. Big
+bird: Transformersforlongersequences. ArXiv,abs/2007.14062,2020. URLhttps://api.
+semanticscholar.org/CorpusID:220831004.
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song,
+YuandongTian,ChristopherRe´,ClarkBarrett,etal. H2o: Heavy-hitteroracleforefficientgen-
+erativeinferenceoflargelanguagemodels. AdvancesinNeuralInformationProcessingSystems,
+36,2024.
+14Yanli Zhao, Andrew Gu, Rohan Varma, Liangchen Luo, Chien chin Huang, Min Xu, Less
+Wright, Hamid Shojanazeri, Myle Ott, Sam Shleifer, Alban Desmaison, Can Balioglu, Bernard
+Nguyen, Geeta Chauhan, Yuchen Hao, and Shen Li. Pytorch fsdp: Experiences on scal-
+ing fully sharded data parallel. Proc. VLDB Endow., 16:3848–3860, 2023. URL https:
+//api.semanticscholar.org/CorpusID:258297871.
+A APPENDIX
+A.1 PER-LAYERRECOVERYRATE
+Wereportper-layerrecoveryrateinFigure6.
+A.2 RULERCONFIGURATION
+WefollowthesuiteofevaluationtasksintroducedinHsieh et al.(2024), which consists ofthe13
+tasks.6 Wegroupthembasedonthetypes:
+Single NIAH An NIAH-styled task with one key and one value to retrieve. We include three
+variationsofthetaskwithdifferenttypesofkey,valueandhaystack.
+Multi-keyNIAH AnNIAH-styledtaskwithdistractingkeys. Weincludethreevariationsofthe
+taskwithdifferenttypesofkey,valueandhaystack.
+Multi-valuesNIAH AnNIAH-styledtaskwithmultiplevaluescorrespondingtothekey.
+Multi-queriesNIAH AnNIAH-styledtaskwithmultiplequeries,eachcorrespondingtoadistinct
+key.
+VariableTracking ANIAH-styledtaskthatrequirestracingthroughmultiplehops.
+Commonwordextraction andFrequentwordextractionrequireextractingthewordsbasedon
+the pattern in a list of words. Common word extraction expects a list of 10 most common words
+whilefrequentwordextractionsexpectalistof3frequentwords.
+Question Answering A task that requires answering a question given a set of documents. We
+includetwovariationsofthetasks,correspondingtotwoquestionansweringdatasets.
+We refer the readers to Hsieh et al. (2024) for detailed description and examples of each task and
+AppendixBfortheexacttasksconfigurations.
+A.3 ATTENTIONSCOREAGGREGATIONFORMODELSWITHGQA
+Wereportlanguagemodelingresultswithdifferentaggregationmethodsacrossattentionscoresof
+queryheadsinthesamegroupformodelswithGroupedQueryAttentioninTable7.
+6https://github.com/hsiehjackson/RULER
+15recycled streaming
+Layer 0 Layer 1 Layer 2 Layer 3 Layer 4 Layer 5 Layer 6 Layer 7
+1.0
+0.5
+Layer 8 Layer 9 Layer 10 Layer 11 Layer 12 Layer 13 Layer 14 Layer 15
+1.0
+0.5
+Layer 16 Layer 17 Layer 18 Layer 19 Layer 20 Layer 21 Layer 22 Layer 23
+1.0
+0.5
+Layer 24 Layer 25 Layer 26 Layer 27 Layer 28 Layer 29 Layer 30 Layer 31
+1.0
+0.5
+0 200 0 200 0 200 0 200 0 200 0 200 0 200 0 200
+recycled streaming
+Layer 0 Layer 1 Layer 2 Layer 3 Layer 4 Layer 5 Layer 6
+1.0
+0.8
+0.6
+Layer 7 Layer 8 Layer 9 Layer 10 Layer 11 Layer 12 Layer 13
+1.0
+0.8
+0.6
+Layer 14 Layer 15 Layer 16 Layer 17 Layer 18 Layer 19 Layer 20
+1.0
+0.8
+0.6
+Layer 21 Layer 22 Layer 23 Layer 24 Layer 25 Layer 26 Layer 27
+1.0
+0.8
+0.6
+0 100 200 0 100 200 0 100 200 0 100 200 0 100 200 0 100 200 0 100 200
+Figure 6: Recovery rate of StreamingLLM and Recycled Attention on 5 samples from the Arxiv
+split of RedPajama (Left: LLaMA-3.1, Right: Qwen-2). We calculate recovery rate with a prefill
+lengthof8K,K of1024andS =256.
+16Table 7: Results comparing different methods to aggregate attention scores for GQA models. We
+evaluate perplexity on sequences of length 16K for Llama-3.1-8B, where 4 query heads share the
+sameKVhead. Weexperimentwithtakingtheattentionscoreofthefirstqueryhead, theaverage
+attention scores of the four query heads and the max of the four query heads to select top K KV
+cache.
+Method K Stride Agg ArxivPPL BookPPL
+Vanilla - - - 2.22 7.07
+StreamingLLM 2048 - - 2.62 7.94
+StreamingLLM++ 2048 10 - 2.57 7.85
+Retrieval 2048 10 First 2.43 7.62
+Retrieval 2048 10 Mean 2.39 7.51
+Retrieval 2048 10 Max 2.36 7.49
+17

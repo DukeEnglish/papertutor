@@ -1,0 +1,1779 @@
+Aioli: A unified optimization framework for language model data
+mixing
+MayeeF.Chen*1 MichaelY.Hu⋆2 NicholasLourie3 KyunghyunCho2,3,4
+ChristopherRé1
+1DepartmentofComputerScience,StanfordUniversity
+2CenterforDataScience,NewYorkUniversity
+3ComputerScienceDepartment,NewYorkUniversity
+4PrescientDesign,Genentech
+November11,2024
+Abstract
+Languagemodelperformancedependsonidentifyingtheoptimalmixtureofdatagroupstotrainon(e.g.,law,code,
+math).Priorworkhasproposedadiversesetofmethodstoefficientlylearnmixtureproportions,rangingfromfitting
+regressionmodelsovertrainingrunstodynamicallyupdatingproportionsthroughouttraining.Surprisingly,wefindthat
+noexistingmethodconsistentlyoutperformsasimplestratifiedsamplingbaselineintermsofaveragetestperplexityper
+group.Inthispaper,westudythecauseofthisinconsistencybyunifyingexistingmethodsintoastandardoptimization
+framework.Weshowthatallmethodssetproportionstominimizetotalloss,subjecttoamethod-specificmixinglaw—an
+assumptiononhowlossisafunctionofmixtureproportions.Wefindthatexistingparameterizationsofmixinglawscan
+expressthetrueloss-proportionrelationshipempirically,butthemethodsthemselvesoftensetthemixinglawparameters
+inaccurately,resultinginpoorandinconsistentperformance.Finally,weleveragetheinsightsfromourframeworktoderive
+anewonlinemethodnamedAIOLI,whichdirectlyestimatesthemixinglawparametersthroughouttrainingandusesthem
+todynamicallyadjustproportions.Empirically,AIOLIoutperformsstratifiedsamplingon6outof6datasetsbyanaverage
+of0.28testperplexitypoints,whereasexistingmethodsfailtoconsistentlybeatstratifiedsampling,doingupto6.9points
+worse.Moreover,inapracticalsettingwhereproportionsarelearnedonshorterrunsduetocomputationalconstraints,
+AIOLIcandynamicallyadjusttheseproportionsoverthefulltrainingrun,consistentlyimprovingperformanceoverexisting
+methodsbyupto12.01testperplexitypoints.
+1 Introduction
+Itiscriticaltodeterminewhatdatatotrainonforalanguagemodel(LM)toacquirearangeofcapabilities,fromgenerating
+codetounderstandingscientificliteratureandconversingwithusers[3,34,39].Toachievethis,practitionersmixdatafrom
+variousgroups(suchascodefiles,scientificpapers,andchatlogs)inspecificproportionstocomposeanoveralltraining
+dataset—aprocedureknownasdatamixing.IdentifyingtheoptimalmixtureproportionsiscriticaltoLLMperformance.
+However,abrute-forcetrial-and-errorsearchovertheproportionsiscomputationallyexpensive,requiringmanytraining
+runs.
+Recentworkintroducestwotypesofdatamixingalgorithmsthatlearnmixtureproportions:offlineandonlinemethods.
+Offlinemethodsconductmultipletrainingrunswithvaryingproportions,fitaregressionmodeltopredictperformance,and
+usethismodeltodeterminetheoptimalstaticmixture[37,72].Onlinemethodsadjustthemixtureproportionsdynamically
+throughouttrainingusinginformationfromthemodel,suchasitslossandgradients[2,13,21,70].Thesemixingmethods
+requireatleastonetrainingruntolearntheproportionsbutaremoreefficientthanabrute-forcesearch.
+Giventhewiderangeofmethodsavailable,itisimportanttodeterminewhichonesareeffective.However,whenwe
+evaluatedexistingmethods,wefoundthatnomethodconsistentlyoutperformedstratifiedsampling—asimplebaseline
+thatuniformlymixesgroupsandrequireszeroextratrainingruns—acrossallsetsofdatagroupsintermsofaveragetest
+perplexity(Table2).Thissurprisingoutcomesuggeststhatallexistingmethodssufferfromsomecommonweaknesses.To
+makeprogressindatamixing,weidentifythreeobjectivesforourwork:1)improveourunderstandingoftheunderlying
+assumptionsofexistingmethods,2)assessthefidelityoftheseassumptionsinpracticetobetterunderstandperformance,
+and3)applyourinsightstodevelopprinciplednewdatamixingmethods.
+*Equalcontribution.Contact:mfchen@stanford.edu,michael.hu@nyu.edu
+1
+4202
+voN
+8
+]GL.sc[
+1v53750.1142:viXraUnified Framework:
+1 2 Analyzing fidelity of existing methods 3 Our method: Aioli 🧄
+Linear Mixing Optimization
+m
+minimize p∈△T×m∑LiT+1(pT) A⋆(fitted) A(̂existing)
+i=1
+lin
+s.t. Lt+1(pt)=σ(Atpt) }
+EstimateAÂ ioli
++
+AD̂ oReMi AD̂ oGE ⋯ AŜ kill-it
+pêxisting
+pÂ ioli
+p*
+Proportion of ArXiv Proportion of StackExchange Training steps
+Data mixtures p for training language models
+Figure1:Left:existingmethodscanbeexpressedinaunifiedoptimizationframework,inwhichtheyimplicitlyassumea
+linearorlog-linearloss-proportionrelationship.Center:the(log)-linearparameterizationsarewell-specified,butexisting
+methods set their parameters incorrectly. Right: AIOLI, an online mixing method that more accurately estimates the
+parametersthatcapturethetrueloss-proportionrelationship.
+In this paper, we improve our understanding of data mixing methods by showing that many existing methods can
+beexpressedinaunifiedoptimizationframework,whichwecallLinearMixingOptimization(LMO)(Section3).These
+methods solve an optimization problem that sets proportions to minimize the average loss per data group, subject to a
+method-specificmixinglaw—aparticularassumptionrelatinglosspergroupandmixtureweights.Wefindthatallcurrent
+mixinglawssharethesameparameterization:fortrainingroundtfrom1toT,
+Lt+1(pt)=lin σ(Atpt),
+wherept ∈△m (thesimplex)aremixingproportionsovermgivendatagroupsattimet,Lt+1(pt):△m →(R+)m are
+thelossespergroupatthenexttimestep,At ∈ Rm×m isaparametermatrix,σ = Idorexp,and=lin meansequalupto
+linear transformation. Existing offline methods assume a static log-linear mixing law (T = 1, σ = exp), while online
+methods assume a linear dynamic mixing law (T > 1, σ = Id). All methods set the parameters of their mixing laws
+differently(Table1),andofflinemethodssolvetheoptimizationproblemdirectlywhileonlinemethodssolveitgreedily
+usingexponentiatedgradientdescent.Ourframeworkrevealstheunderlyingassumptionsofeachmethodintermsofthe
+mixinglaw’sparameterization,thevaluesoftheparameters,andhowtheoptimizationproblemissolved.
+ApplyingtheLMOframework,wetestthefidelityofexistingmethodsassumptions,examiningiftheyholdinpractice
+(Section4).Boththelog-linearstaticandlineardynamicparameterizationscapturethetrueloss-proportionrelationship
+acrosspretrainingdatasets,achievinganaverageof0.0005MSEand0.969R2.Wethenshowthatalthoughexistingmixing
+lawsarewell-specified,methodscansettheirparameters(At)inaccurately,causingpoorperformance.Wecompareeach
+method’s parameters to the optimal parameters, which we approximate by fitting the mixing laws to training runs. We
+findthatthemethod’sparameterscandiffersignificantlyfromtheoptimalparameters,andtheextentofthesedeviations
+iscorrelatedwithmethodperformancerelativetostratifiedsampling(Figure3),helpingexplainourinitialobservations.
+Finally,wevalidatetheassumptionsmadeinsolvingtheoptimizationproblem,findingthatthegreedyapproximationin
+onlinemethodsisareasonableproxyforthefullobjective.Ouranalysisshowsthatexistingmethods’parameterizationsand
+solvingstrategiesareofhighfidelity,buttheirparametersarenot.
+To validate these insights, we develop AIOLI, a simple new online data mixing method derived from the LMO
+framework(Section5).Similartoexistingonlinemethods, AIOLI usesexponentiatedgradientdescenttominimizethe
+averagelosspergroupateachtimestepsubjecttoalineardynamicmixinglaw,whichwehaveempiricallyshowntobe
+well-specified.Unlikeexistingonlinemethods,AIOLIdirectlyestimatestheparametersAtfromthecurrenttrainingrunby
+fittingthemixinglawonthehistoryoflossesanddynamicmixtureproportionssofar.AIOLIisthusabletodynamically
+adjustproportionswithoutrequiringanyextratrainingruns.
+WeevaluateAIOLIintwosettingsbytraining160Mparametermodelsonvariouscombinationsofdatasourcesfrom
+SlimPajama[53](Section6).First,wecompareAIOLItoexistingdatamixingmethodsandfindthatAIOLIconsistently
+outperformsstratifiedsamplingonall6datasets,byanaverageof0.280andupto0.439pointsintestperplexity.Onthe
+otherhand,existingdatamixingmethodsdoworsethanstratifiedonatleastonedatasetbyupto6.9perplexitypoints,
+despiteusingextratrainingruns.Asweexpect,theparametersofAIOLIarealsomoreconsistentlyclosetotheoptimal
+parameters(Figure2).Second,weconsiderascenariowithlimitedadditionalcomputationalresources,inwhichpractitioners
+cannotrunexperimentsforlearningmixtureproportionsforthefulltrainingduration.Inthissetting,mixtureproportions
+learnedonashorterrunmaynotperformwellonthelongerfinalrun.WefindthatusingAIOLItodynamicallyadjustthese
+learnedproportionsthroughoutthefinaltrainingruncanimproveperformancebyanaverageof1.202perplexitypointsin
+28outof30cases,comparedtousingthelearnedproportionsdirectly.
+2
+viXrA
+no
+ssoL
+egnahcxEkcatS
+no
+ssoL
+ssoL
+egarevA2 Problem Setup
+We formalize the data mixing problem and establish notation. In data mixing, we have m data groups of text, such as
+GitHub,BooksCorpus,andarXiv.Wearegiventrain,validation,andtestsetsforeachdatagroup,whichwedenoteas
+Di ,Di ,Di fortheithgroup.DefineD ={D1 ,...,Dm },andsimilarlydefineD andD .
+train val test train train train val test
+Data&Mixing. Duringtraining,weshowthemodelatotalofN examplesfromD overS trainingsteps.Toexpress
+train
+howdataproportionscanchangethroughouttraining,wedividetrainingintoT equalrounds.Eachroundtusesamixture
+proportion from the probability simplex: pt = [pt,...,pt ] ∈ △m. Static mixtures use only a single round (T = 1):
+1 m
+p=(cid:0) p1(cid:1)
+,whiledynamicmixturesuseseveral(T
+>1):p=(cid:0) p1,...,pT(cid:1)
+.
+Model&Loss. Letf(p,t)refertothelanguagemodel(LM),f,atthebeginningofroundtwherethemodelhasbeen
+trainedondatasampledusingmixtureproportionsp1,··· ,pt−1sofar.Givenamodelf,wecancomputeitslossoneach
+groupusingthetrainingdata,L (f)=(L (f),...,L (f)),andsimilarlyusingthevalidationdata,L (f),and
+train train,1 train,m val
+testdata,L (f).Inthisnotation,thelossattheendoftrainingcanbeexpressedasL (f(p,T +1)).Whenthef being
+test (·)
+referredtoisobvious,wesimplywriteLt (p),andforstaticmixtureswedropthesuperscript:L (p).
+(·) (·)
+DataMixingProblem. Givenasetofdatagroups,anLMf totrainforS stepswithN samples,andT roundsoftraining
+(i.e.,determiningwhetherweusestaticordynamicproportions),weaimtodeterminethepthatminimizesthetotaltestloss
+acrossgroups:minimize(cid:80)m LT+1(p).
+i=1 test,i
+p∈△T×m
+Thisobjectiveaimstoproduceatrainedmodelthatdoeswellonmanydatagroups,whichcanserveasaproxyfor
+downstreamperformance.However,withoutassumingadditionalstructureonLT+1(p),thisproblemcanonlybesolved
+test
+withabrute-forcesearchoverp,whichrequirestrainingmanydifferentmodels.Existingmethodsovercomethisbyimposing
+animplicitconstraintontheproblem,therebysettingpwithoutsearching.Inthenextsection,ourLMOframeworkunifies
+manyexistingmethodsusingasingleexplicitconstraint.
+3 A Unified Optimization Framework for Data Mixing
+WeintroducetheLMOframeworkbystatingthegeneraloptimizationproblem(Section3.1).Then,weexplainhowthis
+frameworkcanexpressseveralexistingmethods(Section3.2,3.3),withasummaryofourinsightsregardingthesemethods
+inSection3.3.3.
+3.1 LinearMixingOptimization(LMO)
+TheLMOframeworkconsistsofanoptimizationproblemthatisequivalenttothedatamixingproblem(Section2),subject
+toanadditionalconstraint:
+m
+(cid:88)
+minimize LT+1(p) (1)
+p∈△T×m val,i
+i=1
+m
+(cid:16)(cid:88) (cid:17)
+s.t.Lt+1(p)=ct+btσ −At pt ∀i∈[m],t∈[T], (2)
+val,i i i ij j
+j=1
+forsomeAt,bt,ct,andσ.At ∈Rm×misamatrixthatencodescross-groupinteractions,whereAt intuitivelydescribes
+ij
+howmuchtrainingongroupj attimpactsgroupi’sloss.bt,ct ∈Rmaregroup-specificparameters.σ :R→Riseither
+theidentityfunction(Id)ortheexponentialfunction(exp).Werefertotheconstraintin(2)asamixinglawthatspecifiesthe
+assumedrelationshipbetweenlossandproportions.
+There are three components of this optimization problem that need to be specified to yield a way to set p: a) the
+parameterizationofthemixinglaw,definedbyT andσ;b)thevaluesoftheparametersAt,bt,andct;andc)howtosolve
+theproblem.WeexpressexistingmethodsinLMObyspecifyingthesecomponents.
+3.2 PreliminariesforexpressingmethodsintheLMOframework
+We discuss preliminaries before presenting existing methods and explaining how they can be expressed in the LMO
+framework.First,weformallydefinewhatitmeansforamethodtobeexpressedintheLMOframework.Then,wepresent
+aresultthatallowsustoconvertbetweenlineardynamicmixinglaws(T >1,σ =Id)andawaytosetp,whichwewillto
+usetoexpressonlinemethodsinourframeworkinSection3.3.
+3Method 1)MixingLawParameterization 2)Parameters 3)Solver
+DML Lval,i(p)=ci+biexp(cid:0)(cid:80)m j=1−Aijpj(cid:1) Fitfrom≥m+1trainingruns Direct
+Skill-It Lt va+ l,1 i(p)=Lt val,i(p)−bt(cid:80)m j=1At ijpt
+j
+At
+ij
+=Lt val,i(p)(LT val+ ,i1(1j)−L1 val,i(1j))/L1 val,i(1j) EGD
+DoReMi Lt va+ l,1 i(p)=Lt val,i(p)−bt(cid:80)m j=1At ijpt
+j
+At ii=min{Lt train,i(p)−Ltrain,i(fref),0} EGD
+DoGE Lt+1(p)=Lt (p)−bt(cid:80)m At pt At =⟨▽Lt (p),▽Lt (p)⟩ EGD
+val,i val,i j=1 ij j ij val,i train,j
+AIOLI Lt va+ l,1 i(p)=Lt val,i(p)−(cid:80)m j=1At ijpt
+j
+FitfromhistoryofLvalandp EGD
+Table1:SummaryofhowexistingmethodsandAIOLIareexpressedintheLMOframework.
+Definition1. AdatamixingmethodcanbeexpressedintheLMOframeworkifthewayitsetsproportionspandtrains
+modelf intermsofpcanbeequivalentlyconstructedbyspecifyingamixinglawparameterization,parameters,andwayof
+solvingtheLMOoptimizationproblem.
+ThisdefinitionallowsustocastexistingmethodsasawayofsolvingtheLMOoptimizationproblembasedonhowthey
+setpandtrainaccordingtop,evenifthemethodsthemselvesarenotoriginallydesignedtominimizeaveragevalidation
+loss.
+Convertingmixinglawsintoupdaterules. WhenT >1,anaturalwaytosolvetheLMOoptimizationproblemisvia
+exponentiatedgradientdescent(EGD)[5,31],whichupdatesptgreedilywhileensuringthatitremainsontheprobability
+simplex.ThefollowinglemmapresentstheEGDupdaterulefortheLMOoptimizationproblemwhenσ =Id.
+Lemma1. TheEGDupdaterulefor(1)subjecttoLt+1(p)=ct−bt(cid:80)m At pt ∀i∈[m]is
+val,i i i j=1 ij j
+(cid:18) m (cid:19)
+1 (cid:88)
+pt+1 = ·ptexp η btAt ∀j ∈[m], (3)
+j Zt j i ij
+i=1
+whereη >0isthestepsizeandZtisanormalizingconstantsuchthatpt+1 ∈△m.
+j
+ThislemmashowshowtoadjustptdynamicallytosolvetheLMOoptimizationproblem.Notably,thisupdateruleis
+definedintermsofthemixinglawparameters,Atandbt.Thisgivesusawaytoconvertbetweenhowamethodsetspand
+theimplicitassumptionitmakesinitsmixinglaw.
+3.3 Existingmethods
+WediscussfourexistingdatamixingmethodsandexpressthemasspecificinstancesoftheLMOframework.Asummmary
+ofourinsightsisprovidedinSection3.3.3andTable1.InAppendixB.1,wecommentonhowseveralotheronlineand
+offlinedatamixingmethodsarerelatedtoourframework,andallproofsforthissectionareinAppendixB.2.
+3.3.1 Offlinemethods
+DataMixingLaws(DML). Yeetal.[72]proposeanofflinemethodusingastaticmixinglaw(T = 1):L (p) =
+val,i
+c +b
+exp((cid:80)m
+−A p )fori∈[m],withA,b,clearnedbysweepingtrainingrunsoverstaticproportions(atleastm+1
+i i j=1 ij j
+runstoavoidbeingunderdetermined).Theirmethodselectstheproportionthatminimizesthepredictedvalidationloss.This
+lawcanbederivedfrom(2)withσ =exp,showingthatLMOwitha)log-linearstaticmixinglaw,b)fittedparameters,and
+c)directcomputationofpcanexpressDML.
+3.3.2 OnlineMethods
+We provide a colloquial description and an algorithmic description of three online methods. Then, in Theorem 1, we
+demonstratehowtheyallareexpressedinLMOusingalineardynamicmixinglaw,theEGDupdaterule,andmethod-
+specificmixinglawparameters.
+Skill-It. Chenetal.[13]isanonlinemethodmotivatedbycurriculumlearningthatdynamicallyadjustsmixtureproportions.
+Datagroupinteractionsareexpressedina“skillsgraph,”whereeachedgedenoteshowmuchthelossononegroupchanges
+whentrainedonanother.Theskillsgraphislearnedinadvanceusingmadditionaltrainingrunsandisthenusedtoupdate
+proportionsptthroughouttraining.
+Concretely,theskillsgraphmatrixASG hasentriesASG = (LT+1(1 )−L1 (1 ))/L1 (1 )indicatingtherelative
+ij val,i j val,i j val,i j
+decrease in loss on group i when training a model on group j only. This is used in the Skill-It update rule, pt+1 ∝
+j
+4ptexp(η(cid:80)m ASGLt (p))forallj ∈ [m]andlearningrateη > 0.Thisruledeterminespt+1,whichisthenusedto
+j i=1 ij val,i
+sampleD fortrainingf inthenextround.
+train
+DoReMi. Xieetal.[70]isanonlinemethodthatappliesideasfromdistributionallyrobustoptimizationtodatamixing,
+wherethetrainingobjectiveminimizestheworst-groupexcesslossoveramodeltrainedwithstratifiedsampling.pt is
+updateddynamicallytominimizethisexcesslossandthenaveragedforthefinalrun.DoReMirequirestwoadditionalruns
+tolearnastaticp.
+Concretely,letf =f(Unif(m),T+1)denotea“referencemodel”thatisfirsttrainedusingstratifiedsampling.Then,a
+ref
+“proxymodel”usesdynamicproportionsaccordingtotheupdaterulept+1 ∝ptexp(ηmax{Lt (p)−L (f ),0})
+j j train,j train,j ref
+forallj ∈[m]andstepsizeη >0.Thispt+1isusedtoweightthetrainingobjective,suchthattheproxymodelisupdated
+tominimize(cid:80)m pt+1L (f)atthenexttimestep.Theaveragedstaticproportions 1 (cid:80)T ptarethenusedinthefinal
+i=1 i train,i T t=1
+run.
+DoGE. Fanetal.[21]isanonlinemethodthatsolvesabi-leveloptimizationprobleminwhichptisupdatedtominimize
+theaveragetraininglossateachstep.Byusingafirst-orderTaylorapproximationofthetrainingloss,ptisupdatedusingthe
+gradientdotproductsacrossdatagroups.Thedynamicproportionsarethenaveragedforthefinalrun.DoGErequiresone
+additionalruntolearnastaticp.
+Concretely, a proxy model is trained using pt+1 ∝ ptexp(η⟨▽L (ft),(cid:80)m ▽L (ft)⟩), and f is updated to
+j j train,j i=1 val,i
+minimizethetraininglossweightedbypt,similartoDoReMi.Theaveragedstaticproportions 1 (cid:80)T ptareusedinthe
+T t=1
+finalrun.
+Frameworkexpression. Allthreeonlinemethodsuseanupdaterulept+1 ∝ ptexp(·),whichissimilarto(3).This
+j j
+providesintuitionforourmaintheorem,whichexpressesthesemethodsinLMO.
+Theorem1. Definethefollowingparametersforeachmethod:
+• At,Skill-It ∈Rm×m,whereAt,Skill-It=Lt (p)(LT+1(1 )−L1 (1 ))/L1 (1 )foralli,j ∈[m],
+ij val,i val,i j val,i j val,i j
+• At,DRM ∈Rm×m,whereAt,DRM =min{Lt (p)−L (f ),0}andAt,DRM =0fori̸=j,
+ii train,i train,i ref ij
+• At,DoGE ∈Rm×m,whereAt,DoGE =⟨▽Lt (p),▽Lt (p)⟩foralli,j ∈[m].
+ij val,i train,j
+Instantiating the LMO framework (1) with a) a linear dynamic mixing law Lt+1(p) = Lt (p)−bt(cid:80)m At pt, b)
+val,i val,i j=1 ij j
+parameters At = At,Skill-It/DRM/DoGE, and c) EGD to solve for p allows for us to express Skill-It, DoReMi, and DoGE,
+respectively.
+3.3.3 SummaryofLMOFrameworkInsights
+Table1summarizeshowexistingmethodsareexpressedintheLMOframework.LMOrevealstheassumptionseachmethod
+makesthroughhowthecomponentsoftheframeworkarespecified.First,allmixinglawsareeitherlinearorlog-linear.
+Second,themixinglawsdifferinthevaluesoftheparametersused.Forexample,Skill-It’sAtisthecurrentlosstimesa
+matrixlearnedfromtrainingonstaticproportions,whileDoReMi’sAtisdiagonal.Third,offlinemixingmethodssolvefor
+pdirectlywhileonlinemixingmethodsuseEGD,whichusesagreedyapproximation.Inthenextsection,westudyifeach
+oftheseassumptionsholdswellinpractice.
+4 Analyzing Fidelity of Existing Methods with the LMO Framework
+We examine the fidelity of the assumptions made by existing methods in terms of the three components of the LMO
+framework:a)themixinglawparameterization,b)valuesofthemixinglawparameters,andc)howtosolvetheoptimization
+problemforp.Afterprovidingexperimentdetails(Section4.1),wediscussthesethreecomponentsinorder(Section4.2-4.4).
+4.1 ExperimentDetails
+Datasettings. WeuseasampledversionofSlimPajama[53,73],apre-processedversionoftheRedPajamapretraining
+dataset [62], which has been used to train open-source LMs [24, 59]. SlimPajama consists of 7 data groups: ArXiv,
+Books, CommonCrawl, C4 [50], Github, StackExchange, and Wikipedia. To develop a fine-grained understanding of
+data mixing, we create 6 settings by extracting combinations of these groups. We study three settings with m = 2:
+Arxiv/StackExchange,Github/C4,andBook/StackExchange.Westudytwosettingswithm=3:Arxiv/Book/StackExchange
+andCommonCrawl/Github/Wikipedia.Finally,westudymixingoverthefullSlimPajamadatasetwithm=7.
+5Log-linear static mixing law on Arxiv/StackExchange Linear dynamic mixing law on Arxiv/StackExchange
+100 3.3
+4.0
+3.2
+3.1 3.8 101
+3.0 3.6
+101 2.9
+3.4
+2.8
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Proportion of arxiv Proportion of stackexchange Proportion of arxiv Proportion of stackexchange
+Figure 2: Left: p vs log(L (p)−c ) with fitted static log-linear mixing law. Right: pt vs L (p) with fitted linear
+i val,i i i val,i
+dynamicmixinglaw.Colorsrepresentrandomseeds(left)andinitialp0 ∈P (right,blueis0.7,0.3).Bothlawsfitthetrue
+loss-proportionrelationshipwell.
+Models. Wetrain160MparameterGPT-styledecoder-onlyLMswithbatchsize8andcontextlength2048.Form=2,3,
+wetrainfor5Ksteps,andform=7,wetrainfor40Ksteps.
+Trainingsweeps. Toassessthetrueloss-proportionrelationshipandcompareittotheassumptionsmadebyexisting
+methods, we conduct training sweeps over a set of various mixture proportions, denoted as P. For m = 2, we set
+P ={[0.1,0.9],[0.2,0.8],...,[0.9,0.1]}.Form=3and7,wesetP equalto10p’sdrawnfromtheDirichletdistribution
+withα=1.0and1.5,respectively.
+4.2 Mixinglawparameterization
+Weexaminewhetherexistingmethods’mixinglawparameterizations—log-linearstaticandlineardynamic—capturethe
+trueloss-proportionrelationship.Byempiricallyfittingthemtoloss-proportionpairs,wefindthatbothparameterizations
+areindeedwell-specified.FullresultsforbothmixinglawsareinTable5inAppendixC.1.Wealsodiscussthegenerality
+of these parameterizations across training scales and other SlimPajama subsets in Appendix C.1.1, and study if these
+parameterizationsholdovermixturesofinstruction-tuningtasksinAppendixC.1.2.
+Setup. For the log-linear static mixing law, we study if there exists A,b,c such that L (p) can be expressed as
+val,i
+c +b
+exp((cid:80)m
+−A p )foralli ∈ [m].WefittheparametersusingfulltrainingrunsonP.Forthelineardynamic
+i i j=1 ij j
+mixinglaw,westudyifthereexistsAtsuchthatLt+1(p)canbeexpressedasLt (p)−(cid:80)m At pt,foralli∈[m](btis
+val,i val,i j=1 ij j
+absorbedintoAt).TofitAt,weselectatimesteptandtrainonastaticproportionp0 ∈P untilroundt,andatt+1we
+sweepthevaluesofpt+1 ∈P.
+Results. Onaverageacrossour6datasettings,themeansquarederror(MSE)ofthefittedlog-linearstaticmixinglawis
+8.9×10−4,andtheR2coefficientofdeterminationis0.991.TheaverageMSEofthefittedlineardynamicmixinglawis
+1.0×10−4andtheR2is0.947.SeeFigure2forexamples.SincebothparameterizationshavehighR2andlowMSE,we
+concludethattheycapturethetrueloss-proportionrelationshipwellandareofhighfidelity.
+4.3 Valuesofmixinglawparameters
+As shown in Table 1, each method sets the parameters of its mixing law differently. We study how close the method-
+specific parameters are to the optimal parameters that are obtained when fitting the method’s mixing law to the true
+loss-proportionrelationship,andiftheseparameterdisparitiesarereflectedinmethodperformance.Wefindthatexisting
+methods’differencesinparametersarelargelyresponsiblefortheirperformance.WeomitstudyingDMLsinceitsparameters
+arefittedfromfulltrainingrunsandhencedifferfromtheoptimalparametersinestimationerroronly.
+Setup. Foreachonlinemethod—Skill-It,DoReMi,andDoGE—weselectasteptandobtainthemethod-specificAt.
+WethensweepP forthenextroundt+1.ThissweepisusedtofitanapproximatelyoptimalAt⋆ thatcapturesthetrue
+loss-mixturerelationship,Lt+1(p)=Lt (p)−At⋆pt,aswellasfitabt ∈RusedforscalingAt(detailsinAppendixC.2).
+val val
+WestudytherelationshipbetweenA˜t :=btAtandAt⋆,andhowthisrelationshipisconnectedtotheperformanceofthe
+method.
+ToexpresssimilaritybetweenA˜tandAt⋆inawaythatisreflectedinperformance,weobservethatfromLemma1,ptis
+updatedusingthecolumnsumofA˜t,1⊤A˜t.Moreover,themagnitudeofA˜tisnotcriticaltoperformancesincethestepsizeη
+6
+vixra
+no
+)c -
+ssoL(
+goL
+egnahcxekcats
+no
+)c
+- ssoL(
+goL
+vixra
+no
+ssoL
+pets-txeN
+egnahcxekcats
+no
+ssoL
+pets-txeN0.00
+0.05
+Skill-It
+0.10 DoReMi
+DoGE
+Aioli (ours)
+0.15
+0.0 0.2 0.4 0.6 0.8 1.0
+sim(At,At )
+Figure3:ImprovementoverstratifiedsamplingversusoptimalityofAt.Eachdotrepresentsamethodappliedtoadataset.
+Theredregionshowsthatexistingmethodsareworsethanstratifiedonatleast1dataset.Theverticaldashedlineservesasa
+visualaid.
+canalwaysbetunedtocontrolthis.Therefore,wecomparethevectorsa˜t =1⊤A˜t/∥1⊤A˜t∥ andat⋆ =1⊤At⋆/∥1⊤At⋆∥ .
+2 2
+Finally, we note that the order of the elements of a˜t determines the update direction from pt to pt+1 in Lemma 1.
+Therefore, we propose a similarity score that is an average of cosine similarity and the Spearman rank correlation,
+sim(A˜t,At⋆)=0.5cossim(a˜t,at⋆)+0.5Spearman(a˜t,at⋆).Thismetricisboundedbetween−1and1,where1indicates
+a˜t =at⋆and−1indicatesa˜t =−at⋆.
+Results. InFigure3,weploteachmethod’ssim(A˜t,At⋆)versuseachmethod’simprovementoverthestratifiedsampling
+baseline,whichsetsp =1/mforalli∈[m],foreachdatasetinthem=2,3datasettings.Wefindthatnoexistingonline
+i
+methodworkswellacrossalldatasets(alsoseeTable2),andthatourmetricandlossimprovementhaveamoderatepositive
+correlation(R2 =0.491).ThissuggeststhatAt’sfidelitytoAt⋆clearlyinfluencestheperformanceofonlinemethods,and
+thatexistingmethods’parametersarenotconsistentlyaccurateacrossthedatasets.InAppendixC.2.1,wegivemoredetails
+onthepropertiesofAt⋆,suchashowAt⋆varieswithtandthesignificanceofitsoff-diagonalentries.Wefindthatrestricting
+Attobestaticordiagonal—assomeexistingmethods’parametersarestructured—canresultinlowersim(A˜t,At⋆).
+4.4 Solvingstrategy
+WestudytheassumptionsmadeinhowexistingmethodssolvetheLMOoptimizationproblem.Wefindthatthegreedy
+approximationusedbyEGD,minimize (cid:80)m Lt+1(p),doesnotsignificantlycompromiseperformancecomparedtofull
+pt i=1 val,i
+optimizationofdynamicproportions,whichhasanexponentiallylargesolutionspace.Inparticular,westudyifgreedily
+selectingptfromP ateachtyieldstheoptimaldynamicproportionsin(P)T,andwefindthatthisholdsin2outof3data
+settings(Table10).Thissuggeststhatthegreedyapproximationcansimplifyoptimizationwithoutsubstantialperformance
+loss.WealsocommentonotherpossiblesolvingstrategiesinAppendixC.3.
+5 AIOLI: a Method for Improved Data Mixing
+TovalidateourinsightsfromSection4,wedevelopAIOLI,anonlinemethodderivedfromtheLMOframework.Wehave
+threetakeawaysfromsection4:
+a) Alineardynamicmixinglaw,Lt+1(p) = Lt (p)−(cid:80)m At pt foralli ∈ [m],cancapturetheloss-proportion
+val,i val,i j=1 ij j
+relationshipwithhighfidelity(Section4.2).
+b) ExistingonlinemethodsoftensettheparametersAttobeverydifferentfromtrueAt⋆(Section4.3).
+c) Exponentiatedgradientdescentcanrecovernear-optimalperformancewhilesimplifyingtheoptimizationproblem,
+avoidinganexponentialsolutionspace(Section4.4).
+WethusdirectlyspecifythelineardynamicmixinglawparameterizationandEGDastwooutofthreeLMOcomponents
+ofAIOLIsincewefoundthattheirassumptionsgenerallyholdinpractice.AccordingtoLemma1,theupdaterulegiven
+thesetwocomponentsispt+1 ∝ptexp(η(cid:80)m At )(btisabsorbedintoAt).Thus,ourprimarymandateincreatingAIOLI
+j j i=1 ij
+7
+ssol
+dohtem
+-
+ssol
+deifitartSistoconstructandutilizeanAtthatisanaccurateestimateofthetrueAt⋆inthelineardynamicmixinglaw,whichexisting
+onlinemethodsfailtoachieve.
+EstimatingAt⋆ Tobuildintuition,notethatforeachgroupi ∈ [m],themvariablesAt ,...,At canbelearnedby
+i1 im
+solvingasystemofmequations,eachoftheform(cid:80)m At pt =Lt (p)−Lt+1(p)andwithdifferentp.Thatis,we
+j=1 ij j val,i val,i
+coulddoatrainingsweepofmdifferentproportionspt,1,pt,2,...,pt,m ∈△mandobservehowLt+1 changestoobtain
+val,i
+At ,...,At .AIOLIusesthisintuitionwhileavoidingtrainingsweeps.InLEARNPARAMS(Algorithm2)atroundt,we
+i1 im
+definept,i = (1−ε)1 +εUnif(m)foralli ∈ [m]tobeaone-hotvectorwithprobabilitymassεdistributeduniformly
+i
+across all groups. We allocate an initial δ ∈ [0,1] fraction of each round for estimating At (i.e., δS/T steps), and we
+determinearandomlyinterleavedorderfortrainingonpt,1,...,pt,moverthisduration.Eachtimeafterwetrainaccording
+tosomept,i,werecordtheresultingchangesinlosspergroup.Wethenaveragethelosschangesperpt,iacrosstheδS/T
+steps,effectivelysimulatingatrainingsweepateachroundwithoutneedingmtimesthecomputeandhavingtorollback
+trainingtothebeginningoftheround.Finally,wesolvethelinearsystemofequationstoobtainAt.
+AIOLI. Ineachroundoftraining,weestimateAtusingLEARNPARAMSandthennormalizetheentriesofAt,producing
+A¯t.Otherwise,Atdecreasesalongwithlossovertime,resultinginthefirstfewptupdatesbeingmuchlargerinmagnitude
+thanothers.Weupdatetheproportionsusingpt ∝pt−1exp(η(cid:80)m A¯t ),andtrainfortheremainderofthatroundusing
+j j i=1 ij
+pt.
+j
+Finally,wedesignAIOLIsothatitcanbeusedtoimproveotherdatamixingmethods,whichwestudyinSection6.2.
+MixtureproportionscanbeupdatedusingAIOLIeitherfromthestartoftrainingorfromthemiddleofarun.Inthelatter
+case, we denote an initial static mixture pinit ∈ △m and initial number of steps S init. If S
+init
+is nonzero, AIOLI trains
+accordingtop initforthefirstS initstepsbeforebeginningtoupdatethemixtureproportions.AIOLIispresentedinAlgorithm
+1.
+Algorithm1AIOLI
+1: Input:dataD train,D val,modelf1.InitialstepsS init,initialproportionspinit ∈△m.T roundsoverS−S initremaining
+steps,δfractionperroundforlearningparameters,learningrateη,one-hotsmoothingfactorε.
+2: IfS init ̸=0,trainf1onpinitforS initsteps.
+3: Setp0 =Unif(m).
+4: fort=1,...,T do
+5: SetAt,ft+δ ←LEARNPARAMS(D train,D val,δ,ft,ε)(Alg.2),andnormalizeAttogetA¯t.
+6: pt ∝pt−1exp(η(cid:80)m A¯t )forallj ∈[m].
+j j i=1 ij
+7: Trainmodelft+δ with TS(1−δ)stepsfrommixtureptoverD train.Obtainupdatedft+1.
+Algorithm2LEARNPARAMS
+1: Input:D train,D val,δ,modelft,numberofsweepsk,one-hotsmoothingfactorε.
+2: SplitthefractionofatrainingroundδintoK timesegments,whereK =mk.
+3: Setβ =0 m,m.
+4: Definept,i =(1−ε)1 i+εUnif(m)fori∈[m],anddefineP =[pt,1,...,pt,m]∈△m×m
+5: Randomlyshufflekinstancesofeachi∈[m]tocreateanorderI ∈[m]K overindicesofdatagroups.
+6: fork =1,...,K do
+7: Letj =I k.Trainmodelonmixturept,j ofD trainforonetimesegment,obtainft+kδ/K.
+8: fori∈[m]do
+9: Updateβ ij ←β ij +L val,i(ft+(k−1)δ/K)−L val,i(ft+kδ/K)withlossdifferenceonD vi al.
+10: Updateβ ← β.
+k
+11: SetAt
+i
+=P−1β iforeachi∈[m].
+12: ReturnAt ∈Rm×m,ft+δ
+6 Experimental Results
+We evaluate all methods in the LMO framework, including AIOLI, in two settings. First, we consider an unrestricted
+additionaltrainingbudgetsettingtoassesshowAIOLIcomparestoothermethodsintheiroriginalform,sinceeachmethod
+usesadifferentnumberofextratrainingrunstolearnproportions(Section6.1).Second,weconsiderarestrictedtraining
+8Table2:Differenceinaveragetestperplexitycomparedtostratifiedsamplingintheunrestrictedsetting,whereallmeth-
+ods can use ≤ 10 extra runs to learn p. Negative values (green) = improvement. A=Arxiv, B=Books, GH=GitHub,
+SE=StackExchange,W=Wikipedia.
+Method A/SE GH/C4 B/SE A/B/SE CC/GH/W SlimPajama #<stratified #extraruns
+Stratified 16.532 35.991 47.192 35.114 41.583 26.426 - 0
+GS −0.399 −0.407 −0.645 −0.247 0.298 0.176 4 10
+DML −0.241 −0.110 −0.644 −0.599 0.242 0.175 4 10
+Skill-It −0.326 0.551 −0.728 −0.568 −0.195 −0.184 5 m
+DoReMi −0.307 5.303 −0.217 −0.393 6.898 0.123 3 2
+DoGE 0.419 0.184 −0.678 1.843 0.604 0.809 1 1
+AIOLI −0.205 −0.340 −0.439 −0.096 −0.196 −0.240 6 0
+budgetsettingtoassessifAIOLIcanenhanceexistingmethodsinpractical,budget-constrainedconditions,whereexisting
+methodshavelessthanafulltrainingruntolearnmixingproportions(Section6.2).Hyperparametersandexperimental
+detailsareavailableinAppendixD,andablationsanddownstreamevaluationareinAppendixE.
+Datasettingsandmodels. WeusethesamedatasettingsandmodelsasinSection4.1,wherewetrainforS =5Ksteps
+form=2,3-groupsettingsandS =40KstepsforthefullSlimPajama.
+Baselinesandevaluation. Weconsiderthreeonlinemethods(Skill-It,DoGE,DoReMi)andoneofflinemethod(DML).
+Wealsoconsidergridsearch(GS),whichsweepstrainingrunsandselectspwiththelowestaveragevalidationloss,and
+stratifiedsampling,whichsetsp = 1 foralli∈[m].Foreachmethod,wereporttheaveragetestperplexitypergroupof
+i m
+thetrainedmodel.Thismetricisconsideredaproxyfordownstreamperformance[21]andalsorepresentstheobjectivein
+thedatamixingproblempresentedinSection2.
+6.1 UnrestrictedSetting
+Setup. Weallowmethodsupto10Sadditionaltrainingstepstolearnthemixtureproportions.Approacheslikegridsearch
+andDMLcanusetheentirebudget(searchingandfittingover10fullruns),whileSkill-It,DoReMi,andDoGEusemS,2S,
+andS extratrainingsteps,respectively(seeSection3.3).StratifiedsamplingandAIOLIusenoextratrainingsteps.We
+evaluateAIOLIwithS
+init
+=0.
+Results. InTable2,wefindthatAIOLIrobustlyoutperformsstratifiedsamplinginall6datasettingsbyanaverageof
+0.280perplexitypoints,whileallothermethodsdoworsethanstratifiedsamplingonatleast1setofdatagroupsbyup
+to6.9points.TheperformanceofAIOLIandotheronlinemethodsisadditionallyreflectedinFigure3,inwhichwefind
+thatAIOLI’sAtsimilaritywithAt⋆iscorrelatedwithperformance.WhileAIOLI’sparametersimilarityisnotalwaysthe
+highest,wenotethatitslowestsimilarityscoreismuchhigherthanthatofothermethods,providingevidencethatAIOLI’s
+parameterestimationprocedureismoreconsistentlyaccuratethanthatofothermethods.Lastly,regardingofflinemethods,
+wehypothesizethattheirpoorperformanceonsettingswithlargermisduetothetrainingbudgetbeinglimitedto10S,and
+thatincreasingthisbudgetwouldeventuallyallowthemtoperformwell.
+6.2 RestrictedSetting
+Motivation. Weintroducetherestrictedsettingbecausepractitionersmaynothavetheresourcesordesiretocomplete
+multiplefulltrainingrunstolearnproportions,especiallyasrecentLLMsaretrainedforlongerandonmoredata[44].As
+aresult,practitionersmayonlyusedatamixingmethodsonshortenedruns,producinglearnedproportionsthatmaybe
+suboptimalonthefullrun.WestudyifAIOLIisabletoimproveperformancebydynamicallyadjustingpreviouslylearned
+proportionsthroughoutthefulltrainingrun.
+Setup. Weallowallexistingmethodsonly0.5S additionaltrainingstepstolearnthemixtureproportions.Thisrequires
+methodstolearnpmethod overshorterrunsofS stepseach.Forinstance,gridsearchwillconduct10runsoflength
+method
+S/20(seeTable11).Weevaluateeachmethodbyusingpmethodlearnedfromshorterrunstotrainthemodelonthefullrun
+ofS steps.WeuseAIOLItodynamicallyadjusteachpmethodthroughoutthefullrun.Thatis,foreachexistingmethod,we
+runAIOLIwithpinit =pmethodandS
+init
+=S method,referringtothisasAIOLI+method.
+Results. InTable3,wefindthataddingAIOLItoanyexistingmethodthatlearnsproportionsovershorterrunsimproves
+average test perplexity per group in 28 out of 30 settings, by an average of 1.202 and a maximum of 12.012 points.
+9Table3:Averagetestperplexityintherestrictedsetting,whereeachmethodlearnsponshortenedruns,andAIOLI+method
+dynamicallyadjustspthroughouttraining.green=AIOLI+methodoutperformsmethod.
+Method Arxiv/SE GH/C4 Books/SE Arxiv/Books/SE CC/GH/Wiki SlimPajama
+GS 16.573 36.345 47.063 35.174 42.767 27.741
+AIOLI+GS 16.388 35.925 46.667 34.705 41.378 25.654
+DML 16.659 36.658 46.846 34.585 42.731 37.696
+AIOLI+DML 16.277 35.856 46.710 34.529 41.595 25.654
+Skill-it 16.246 37.255 46.667 34.539 42.069 26.734
+AIOLI+Skill-it 16.261 36.153 46.586 34.565 41.732 26.073
+DoReMi 16.522 37.812 46.489 34.934 42.738 28.762
+AIOLI+DoReMi 16.347 35.626 46.163 34.770 41.800 26.587
+DoGE 16.853 35.795 46.743 35.775 41.790 32.301
+AIOLI+DoGE 16.473 35.632 46.145 34.771 41.378 26.073
+Furthermore, AIOLI can help methods that initially underperform stratified sampling surpass it, such as DoGE across
+allsettings.Insomesettings,suchasBooks/StackExchange,AIOLIimprovesmethodsthatalreadyoutperformstratified
+sampling.ThisshowsthatAIOLIcanenhanceawidevarietyofmixtureproportions,regardlessoftheirinitialperformance.
+ForthetwocaseswhereAIOLIunderperformsthebasemethod,thebasemethodalreadyoutperformsstratified,andadding
+AIOLImaintainsthistrend,worseningperplexitybyatmost0.025points.
+7 Related Work
+Datamixing. Beyondthedatamixingmethodsexploredinourframework,Albalaketal.[2]framesonlinedatamixing
+asamulti-armedbanditproblemwithlossastherewardfunction.Inconcurrentwork,Jiangetal.[28]alsosetdatamixtures
+online and adaptively by using a credit assignment score that predicts how data from each domain affects loss on that
+domain.Inourlanguage,Jiangetal.[28]useadiagonalAtmatrix,andthevaluesonthediagonalaredefinedbytheircredit
+assignmentfunctionandtheper-grouplosses.Recentworkshavealsostudiedhowtomixdataonsmallermodelsanduse
+theselearnedproportionsonlargermodels[23,30,37].Inasimilarvein,Naetal.[45]showthatonecansimulateamodel
+trainedonaparticulardatamixturebyaveragingtogethermodelstrainedondifferent(possiblydisjoint)partitionsofdata
+groups.Thrushetal.[60]mixesdatatooptimizeperformanceondownstreamtasks,constructinganAt-likeinteraction
+matrixbyusingpretrainedmodelperplexities.
+CurriculumLearning. Bengioetal.[6]initiallyintroducedcurriculumlearningastrainingmodelsoversamplesfrom
+easiesttohardest.Whileearlyworkfocusedonmanuallydesignedcurricula,laterworkemphasizesmodel-drivenones
+[20, 26, 41, 65]. Curricula can encourage skills-based generalization [27], or emphasize high quality data to improve
+downstreamtaskperformance[10].Onlinemixingmethodscanbealsoviewedascurriculumlearningoverdatagroups.
+DataSelection. Acommonwaytocuratedatasetsbesidesmixingistoselectdataattheper-samplelevel[3].Techniques
+herecanbebroadlyclassifiedasdatafiltering,datamatching,anddatacondensation.Indatafiltering,low-qualitysamples
+areremovedusingsimpleheuristics,suchasGitHubfilelengths[62,64],orviadeduplication[1,32,61].Indatamatching,
+samplesthataremostsimilartoareferencedatasetareselected.Similaritycanbedefinedintermsofembeddings[71],
+gradients[19,69],ordirectlyusingmachinelearningmodelstoscoresamples[11,25,43].Lastly,datacondensationaimsto
+identifyasubsetofsamplesthatcapturesthefulltrainingdataset’sproperties.Selectionmechanismsincludeusinggradients,
+modelpredictions,andembeddingdistances[49,55,63].
+HyperparameterOptimizationandTruncationBias. Manydatamixingmethodsutilizeextratrainingrunstolearnthe
+staticmixtureproportionsbeforethefinaltrainingrun.Thisallowsustoviewdatamixingasahyperparameteroptimization
+probleminp.[72]and[37]mitigatetheinefficiencyofgridsearchinhigherdimensionsbycombiningitwithdatamixing
+lawstoimposeadditionalstructure.However,bothgridsearchandtheseofflinemethodscanhavepoorperformancewhenp
+issearchedfororfittedonshorterruns,asintherestrictedsetting.Tounderstandtheseresults,wenotethatmanypopular
+hyperparameteroptimizationmethodscarefullycontroltruncation,andsomerunsareallowedtocontinuelongerthanothers
+[18,35,56].Thus,generichyperparameteroptimizationmethodsmayeventuallyproveeffectivefortuningdatamixes.
+108 Discussion
+Weproposeanoptimizationframework,LMO,thatcanexpressseveralexistingdatamixingmethodsusingtheirimplicit
+mixinglaw.UsingLMO,weshowthatlineardynamicmixinglawsarewell-specifiedincapturingthetrueloss-proportion
+relationshipacrossdatasets,butexistingonlinemethodsstillperformpoorlyonsomedatasetsbecausetheirparametersare
+inaccurate.ThisinsightinspiresAIOLI,whoseperformancegainsarerootedinitsabilitytoestimateparametersAtofthe
+lineardynamicmixinglawthroughouttraining.
+LimitationsandFutureWork. AIOLI introducesextrainferencecostduringtrainingviatherepeatedevaluationsin
+LEARNPARAMS(Alg.2).Thisoverheadcanbereducedorcompletelymitigatedbyusingthetraininglossasaproxyforthe
+validationloss,computingL overasubsetofD ,orbyusingeachAtforlonger(equivalently,decreasingT).
+val val
+TheLMOframeworkitselfisaninvitationforfuturework.WehopethatLMOidentifiesclearaxesofimprovementfor
+datamixing(theparameterizationofthemixinglaw,parameterestimation,andhowtosolveforp)andinspiresthenext
+generationofprincipleddatamixingmethods.Anotherdirectionforfutureworkisunderstandinghowtodefinedatagroups
+andhowdatagrouppartitionsimpactdatamixing.Forexample,C4isasubsetofCommonCrawl,sorepartitioningthese
+datasetsintomoredisjointgroupscouldresultinbetterdatamixingperformance.Furthermore,itisuncleariflinearmixing
+lawsresultsfromsomespecificpropertyofthedatagroupswestudied.Itwouldbeinterestingtoconsiderinfuturework
+howoftenlinearmixinglawshold,andhowtoexploitpotentialnon-linearitiesindatamixing.
+8.1 ReproducibilityStatement
+See Appendix B.2 for the full proofs on how to express Skill-it, DoReMi, and DoGE using the LMO framework. See
+AppendixCfordetailsonhowtoreproduceouranalysesofmixinglawparametrizationvalidity,At parameterfit,and
+assessingwhethergreedyoptimizationissufficientfordatamixing.Finally,toreproducetheexperimentalresults,pleasesee
+AppendixD.
+Coderelease. Codeforreproducingourresultsisavailableathttps://github.com/HazyResearch/aioli.
+8.2 EthicsStatement
+Ourworkfocusesonimprovingtheefficiencyandperformanceoflanguagemodeltraining.Whileourresearchdoesnot
+directlyaddressethicalconcerns,itcancontributetomoreresponsibleAIdevelopmentbyoptimizingtraining,whichcan
+reducecomputationalcostsandenergyconsumption.
+9 Acknowledgments
+WethankSabriEyuboglu,NeelGuha,BenViggiano,DanBiderman,DanFu,MichaelWornow,JonSaad-Falcon,Alyssa
+Unell,OwenDugan,JerryLiu,andGautamMachirajufortheirfeedback.WethankNYUHPCandStanfordNLPfor
+providingcomputeandresearchsupport.ThisresearchprojecthasbenefitedfromtheMicrosoftAccelerateFoundation
+ModelsResearch(AFMR)grantprogram.
+WegratefullyacknowledgethesupportofNIHunderNo.U54EB020405(Mobilize),NSFunderNos.CCF2247015
+(Hardware-Aware),CCF1763315(BeyondSparsity),CCF1563078(VolumetoVelocity),1937301(RTML),and1922658
+(NRT-HDR:FUTURE);USDEVCOMARLunderNos.W911NF-23-2-0184(Long-context)andW911NF-21-2-0251
+(InteractiveHuman-AITeaming);ONRunderNos.N000142312633(DeepSignalProcessing);StanfordHAIunderNo.
+247183;NXP,Xilinx,LETI-CEA,Intel,IBM,Microsoft,NEC,Toshiba,TSMC,ARM,Hitachi,BASF,Accenture,Ericsson,
+Qualcomm,AnalogDevices,GoogleCloud,Salesforce,Total,theHAI-GCPCloudCreditsforResearchprogram,the
+StanfordDataScienceInitiative(SDSI),theSamsungAdvancedInstituteofTechnology(undertheprojectNextGeneration
+DeepLearning:FromPatternRecognitiontoAI),theNSFGraduateResearchFellowship(MYH),andmembersofthe
+StanfordDAWNproject:Meta,Google,andVMWare.TheU.S.Governmentisauthorizedtoreproduceanddistribute
+reprintsforGovernmentalpurposesnotwithstandinganycopyrightnotationthereon.Anyopinions,findings,andconclusions
+orrecommendationsexpressedinthismaterialarethoseoftheauthorsanddonotnecessarilyreflecttheviews,policies,or
+endorsements,eitherexpressedorimplied,ofNIH,ONR,ortheU.S.Government.
+11References
+[1] AmroAbbas,KushalTirumala,DánielSimig,SuryaGanguli,andAriSMorcos. Semdedup:Data-efficientlearningat
+web-scalethroughsemanticdeduplication. arXivpreprintarXiv:2303.09540,2023.
+[2] AlonAlbalak,LiangmingPan,ColinRaffel,andWilliamYangWang. Efficientonlinedatamixingforlanguagemodel
+pre-training,2023. URLhttps://arxiv.org/abs/2312.02406.
+[3] AlonAlbalak,YanaiElazar,SangMichaelXie,ShayneLongpre,NathanLambert,XinyiWang,NiklasMuennighoff,
+BairuHou,LiangmingPan,HaewonJeong,ColinRaffel,ShiyuChang,TatsunoriHashimoto,andWilliamYangWang.
+Asurveyondataselectionforlanguagemodels. arXivpreprintarXiv:2402.16827,2024. https://arxiv.org/
+abs/2402.16827.
+[4] AidaAmini,SaadiaGabriel,ShanchuanLin,RikKoncel-Kedziorski,YejinChoi,andHannanehHajishirzi. Mathqa:
+Towards interpretable math word problem solving with operation-based formalisms. In Proceedings of the 2019
+Conference of the North, page 2357–2367. Association for Computational Linguistics, 2019. doi: 10.18653/v1/
+n19-1245. URLhttp://dx.doi.org/10.18653/v1/N19-1245.
+[5] Sanjeev Arora, Elad Hazan, and Satyen Kale. The multiplicative weights update method: a meta-algorithm and
+applications. Theoryofcomputing,8(1):121–164,2012.
+[6] YoshuaBengio,JérômeLouradour,RonanCollobert,andJasonWeston. Curriculumlearning. InProceedingsofthe
+26thAnnualInternationalConferenceonMachineLearning,ICML’09,page41–48,NewYork,NY,USA,2009.
+Association for Computing Machinery. ISBN 9781605585161. doi: 10.1145/1553374.1553380. URL https:
+//doi.org/10.1145/1553374.1553380.
+[7] ChandraBhagavatula,RonanLeBras,ChaitanyaMalaviya,KeisukeSakaguchi,AriHoltzman,HannahRashkin,Doug
+Downey,ScottWentauYih,andYejinChoi. Abductivecommonsensereasoning,2019.
+[8] Stella Biderman, Hailey Schoelkopf, Quentin Gregory Anthony, Herbie Bradley, Kyle O’Brien, Eric Hallahan,
+MohammadAflahKhan,ShivanshuPurohit,USVSNSaiPrashanth,EdwardRaff,etal. Pythia:Asuiteforanalyzing
+largelanguagemodelsacrosstrainingandscaling.InInternationalConferenceonMachineLearning,pages2397–2430.
+PMLR,2023.
+[9] Yonatan Bisk, Rowan Zellers, Ronan Le Bras, Jianfeng Gao, and Yejin Choi. Piqa: Reasoning about physical
+commonsense in natural language. In AAAI Conference on Artificial Intelligence, 2019. URL https://api.
+semanticscholar.org/CorpusID:208290939.
+[10] Cody Blakeney, Mansheej Paul, Brett W. Larsen, Sean Owen, and Jonathan Frankle. Does your data spark joy?
+performancegainsfromdomainupsamplingattheendoftraining. InFirstConferenceonLanguageModeling,2024.
+URLhttps://openreview.net/forum?id=vwIIAot0ff.
+[11] TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,ArvindNeelakantan,
+PranavShyam,GirishSastry,AmandaAskell,SandhiniAgarwal,ArielHerbert-Voss,GretchenKrueger,TomHenighan,
+RewonChild,AdityaRamesh,DanielM.Ziegler,JeffreyWu,ClemensWinter,ChristopherHesse,MarkChen,Eric
+Sigler,MateuszLitwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,SamMcCandlish,AlecRadford,
+IlyaSutskever,andDarioAmodei. Languagemodelsarefew-shotlearners,2020. URLhttps://arxiv.org/
+abs/2005.14165.
+[12] AngelicaChen,SadhikaMalladi,LilyH.Zhang,XinyiChen,QiuyiZhang,RajeshRanganath,andKyunghyunCho.
+Preferencelearningalgorithmsdonotlearnpreferencerankings,2024. URLhttps://arxiv.org/abs/2405.
+19534.
+[13] MayeeChen,NicholasRoberts,KushBhatia,JueWANG,CeZhang,FredericSala,andChristopherRé. Skill-it!a
+data-drivenskillsframeworkforunderstandingandtraininglanguagemodels. InA.Oh,T.Naumann,A.Globerson,
+K.Saenko,M.Hardt,andS.Levine,editors,AdvancesinNeuralInformationProcessingSystems,volume36,pages
+36000–36040.CurranAssociates,Inc.,2023. URLhttps://proceedings.neurips.cc/paper_files/
+paper/2023/file/70b8505ac79e3e131756f793cd80eb8d-Paper-Conference.pdf.
+[14] Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin Zheng, Siyuan Zhuang,
+YonghaoZhuang,JosephE.Gonzalez,IonStoica,andEricP.Xing. Vicuna:Anopen-sourcechatbotimpressinggpt-4
+with90%*chatgptquality,March2023. URLhttps://lmsys.org/blog/2023-03-30-vicuna/.
+12[15] ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,andKristinaToutanova. BoolQ:
+Exploringthesurprisingdifficultyofnaturalyes/noquestions. InJillBurstein,ChristyDoran,andThamarSolorio,
+editors,Proceedingsofthe2019ConferenceoftheNorthAmericanChapteroftheAssociationforComputational
+Linguistics: Human Language Technologies, Volume 1 (Long and Short Papers), pages 2924–2936, Minneapolis,
+Minnesota, June 2019. Association for Computational Linguistics. doi: 10.18653/v1/N19-1300. URL https:
+//aclanthology.org/N19-1300.
+[16] PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,andOyvindTafjord.
+Thinkyouhavesolvedquestionanswering?tryarc,theAI2reasoningchallenge. CoRR,abs/1803.05457,2018. URL
+http://arxiv.org/abs/1803.05457.
+[17] TriDao,DanFu,StefanoErmon,AtriRudra,andChristopherRé. Flashattention:Fastandmemory-efficientexact
+attentionwithio-awareness. AdvancesinNeuralInformationProcessingSystems,35:16344–16359,2022.
+[18] TobiasDomhan,JostTobiasSpringenberg,andFrankHutter. Speedingupautomatichyperparameteroptimizationof
+deepneuralnetworksbyextrapolationoflearningcurves. InTwenty-fourthinternationaljointconferenceonartificial
+intelligence,2015.
+[19] LoganEngstrom,AxelFeldmann,andAleksanderMadry. Dsdm:Model-awaredatasetselectionwithdatamodels. In
+Forty-firstInternationalConferenceonMachineLearning,2024. URLhttps://openreview.net/forum?
+id=GC8HkKeH8s.
+[20] SiminFanandMartinJaggi. Irreduciblecurriculumforlanguagemodelpretraining. arXivpreprintarXiv:2310.15389,
+2023.
+[21] SiminFan,MatteoPagliardini,andMartinJaggi. Doge:Domainreweightingwithgeneralizationestimation,2024.
+URLhttps://arxiv.org/abs/2310.15393.
+[22] Leo Gao, Jonathan Tow, Baber Abbasi, Stella Biderman, Sid Black, Anthony DiPofi, Charles Foster, Laurence
+Golding, Jeffrey Hsu, Alain Le Noac’h, Haonan Li, Kyle McDonell, Niklas Muennighoff, Chris Ociepa, Jason
+Phang,LariaReynolds,HaileySchoelkopf,AviyaSkowron,LintangSutawika,EricTang,AnishThite,BenWang,
+Kevin Wang, and Andy Zou. A framework for few-shot language model evaluation, 07 2024. URL https:
+//zenodo.org/records/12608602.
+[23] CeGe,ZhijianMa,DaoyuanChen,YaliangLi,andBolinDing. Datamixingmadeefficient:Abivariatescalinglaw
+forlanguagemodelpretraining,2024. URLhttps://arxiv.org/abs/2405.14908.
+[24] Xinyang Geng and Hao Liu. Openllama: An open reproduction of llama, May 2023. URL https://github.
+com/openlm-research/open_llama.
+[25] EdouardGrave,PiotrBojanowski,PrakharGupta,ArmandJoulin,andTomasMikolov. Learningwordvectorsfor157
+languages. InNicolettaCalzolari,KhalidChoukri,ChristopherCieri,ThierryDeclerck,SaraGoggi,KoitiHasida,
+Hitoshi Isahara, Bente Maegaard, Joseph Mariani, Hélène Mazo, Asuncion Moreno, Jan Odijk, Stelios Piperidis,
+andTakenobuTokunaga,editors,ProceedingsoftheEleventhInternationalConferenceonLanguageResourcesand
+Evaluation(LREC2018),Miyazaki,Japan,May2018.EuropeanLanguageResourcesAssociation(ELRA). URL
+https://aclanthology.org/L18-1550.
+[26] GuyHacohenandDaphnaWeinshall. Onthepowerofcurriculumlearningintrainingdeepnetworks. InInterna-
+tional Conference on Machine Learning, 2019. URL https://api.semanticscholar.org/CorpusID:
+102350936.
+[27] YunchengHuang,QianyuHe,YipeiXu,JiaqingLiang,andYanghuaXiao. Layingthefoundationfirst?investigating
+thegeneralizationfromatomicskillstocomplexreasoningtasks,2024. URLhttps://arxiv.org/abs/2403.
+09479.
+[28] YidingJiang,AllanZhou,ZhiliFeng,SadhikaMalladi,andJ.ZicoKolter. Adaptivedataoptimization:Dynamic
+sampleselectionwithscalinglaws,2024. URLhttps://arxiv.org/abs/2410.11820.
+[29] ShamKakade. Lecture22:Exponentiatedgradientdescent. https://homes.cs.washington.edu/~sham/
+courses/stat928/lectures/lecture22.pdf,n.d. Accessed:September29,2024.
+[30] FeiyangKang,YifanSun,BingbingWen,SiChen,DawnSong,RafidMahmood,andRuoxiJia. Autoscale:Automatic
+predictionofcompute-optimaldatacompositionfortrainingllms,2024. URLhttps://arxiv.org/abs/2407.
+20177.
+13[31] Jyrki Kivinen and Manfred K. Warmuth. Exponentiated gradient versus gradient descent for linear predictors.
+InformationandComputation,132(1):1–63,1997. ISSN0890-5401. doi:https://doi.org/10.1006/inco.1996.2612.
+URLhttps://www.sciencedirect.com/science/article/pii/S0890540196926127.
+[32] KatherineLee,DaphneIppolito,AndrewNystrom,ChiyuanZhang,DouglasEck,ChrisCallison-Burch,andNicholas
+Carlini. Deduplicating training data makes language models better, 2022. URL https://arxiv.org/abs/
+2107.06499.
+[33] MoshLevy,AlonJacoby,andYoavGoldberg. Sametask,moretokens:theimpactofinputlengthonthereasoning
+performanceoflargelanguagemodels.InLun-WeiKu,AndreMartins,andVivekSrikumar,editors,Proceedingsofthe
+62ndAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1:LongPapers),pages15339–15353,
+Bangkok,Thailand,August2024.AssociationforComputationalLinguistics. doi:10.18653/v1/2024.acl-long.818.
+URLhttps://aclanthology.org/2024.acl-long.818.
+[34] JeffreyLi,AlexFang,GeorgiosSmyrnis,MaorIvgi,MattJordan,SamirGadre,HritikBansal,EtashGuha,Sedrick
+Keh, Kushal Arora, Saurabh Garg, Rui Xin, Niklas Muennighoff, Reinhard Heckel, Jean Mercat, Mayee Chen,
+SuchinGururangan,MitchellWortsman,AlonAlbalak,YonatanBitton,MariannaNezhurina,AmroAbbas,Cheng-
+Yu Hsieh, Dhruba Ghosh, Josh Gardner, Maciej Kilian, Hanlin Zhang, Rulin Shao, Sarah Pratt, Sunny Sanyal,
+GabrielIlharco,GiannisDaras,KalyaniMarathe,AaronGokaslan,JieyuZhang,KhyathiChandu,ThaoNguyen,
+IgorVasiljevic,ShamKakade,ShuranSong,SujaySanghavi,FartashFaghri,SewoongOh,LukeZettlemoyer,Kyle
+Lo, Alaaeldin El-Nouby, Hadi Pouransari, Alexander Toshev, Stephanie Wang, Dirk Groeneveld, Luca Soldaini,
+PangWeiKoh,JeniaJitsev,ThomasKollar,AlexandrosG.Dimakis,YairCarmon,AchalDave,LudwigSchmidt,and
+VaishaalShankar. Datacomp-lm:Insearchofthenextgenerationoftrainingsetsforlanguagemodels,2024. URL
+https://arxiv.org/abs/2406.11794.
+[35] Lisha Li, Kevin Jamieson, Giulia DeSalvo, Afshin Rostamizadeh, and Ameet Talwalkar. Hyperband: A novel
+bandit-basedapproachtohyperparameteroptimization. JournalofMachineLearningResearch,18(185):1–52,2018.
+[36] HongLiu,SangMichaelXie,ZhiyuanLi,andTengyuMa. Samepre-trainingloss,betterdownstream:Implicitbias
+matters for language models. In Andreas Krause, Emma Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan
+Sabato, and Jonathan Scarlett, editors, Proceedings of the 40th International Conference on Machine Learning,
+volume 202 of Proceedings of Machine Learning Research, pages 22188–22214. PMLR, 23–29 Jul 2023. URL
+https://proceedings.mlr.press/v202/liu23ao.html.
+[37] QianLiu,XiaosenZheng,NiklasMuennighoff,GuangtaoZeng,LongxuDou,TianyuPang,JingJiang,andMinLin.
+Regmix:Datamixtureasregressionforlanguagemodelpre-training,2024. URLhttps://arxiv.org/abs/
+2407.01492.
+[38] ShayneLongpre,LeHou,TuVu,AlbertWebson,HyungWonChung,YiTay,DennyZhou,QuocV.Le,BarretZoph,
+JasonWei,andAdamRoberts. Theflancollection:Designingdataandmethodsforeffectiveinstructiontuning,2023.
+[39] ShayneLongpre,GregoryYauney,EmilyReif,KatherineLee,AdamRoberts,BarretZoph,DennyZhou,JasonWei,
+KevinRobinson,DavidMimno,andDaphneIppolito. Apretrainer’sguidetotrainingdata:Measuringtheeffectsof
+dataage,domaincoverage,quality,&toxicity. InKevinDuh,HelenaGomez,andStevenBethard,editors,Proceedings
+ofthe2024ConferenceoftheNorthAmericanChapteroftheAssociationforComputationalLinguistics:Human
+LanguageTechnologies(Volume1:LongPapers),pages3245–3276,MexicoCity,Mexico,June2024.Associationfor
+ComputationalLinguistics. doi:10.18653/v1/2024.naacl-long.179. URLhttps://aclanthology.org/2024.
+naacl-long.179.
+[40] TodorMihaylov,PeterClark,TusharKhot,andAshishSabharwal. Canasuitofarmorconductelectricity?anew
+datasetforopenbookquestionanswering. InEllenRiloff,DavidChiang,JuliaHockenmaier,andJun’ichiTsujii,
+editors,Proceedingsofthe2018ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pages2381–2391,
+Brussels,Belgium,October-November2018.AssociationforComputationalLinguistics. doi:10.18653/v1/D18-1260.
+URLhttps://aclanthology.org/D18-1260.
+[41] SörenMindermann,JanMBrauner,MuhammedTRazzak,MrinankSharma,AndreasKirsch,WinnieXu,Benedikt
+Höltgen,AidanNGomez,AdrienMorisot,SebastianFarquhar,etal. Prioritizedtrainingonpointsthatarelearnable,
+worthlearning,andnotyetlearnt. InInternationalConferenceonMachineLearning,pages15630–15649.PMLR,
+2022.
+[42] Swaroop Mishra, Daniel Khashabi, Chitta Baral, and Hannaneh Hajishirzi. Cross-task generalization via natural
+languagecrowdsourcinginstructions. InACL,2022.
+14[43] RobertC.MooreandWilliamLewis. Intelligentselectionoflanguagemodeltrainingdata. InJanHajicˇ,Sandra
+Carberry,StephenClark,andJoakimNivre,editors,ProceedingsoftheACL2010ConferenceShortPapers,pages220–
+224,Uppsala,Sweden,July2010.AssociationforComputationalLinguistics. URLhttps://aclanthology.
+org/P10-2041.
+[44] NiklasMuennighoff,AlexanderMRush,BoazBarak,TevenLeScao,NouamaneTazi,AleksandraPiktus,Sampo
+Pyysalo,ThomasWolf,andColinRaffel. Scalingdata-constrainedlanguagemodels. InThirty-seventhConferenceon
+NeuralInformationProcessingSystems,2023. URLhttps://openreview.net/forum?id=j5BuTrEj35.
+[45] ClaraNa,IanMagnusson,AnanyaHarshJha,TomSherborne,EmmaStrubell,JesseDodge,andPradeepDasigi.
+Scalable data ablation approximations for language models through modular training and merging, 2024. URL
+https://arxiv.org/abs/2410.15661.
+[46] AvanikaNarayan,MayeeF.Chen,KushBhatia,andChristopherRé. Cookbook:Aframeworkforimprovingllm
+generativeabilitiesviaprogrammaticdatageneratingtemplates,2024.
+[47] Shashi Narayan, Shay B. Cohen, and Mirella Lapata. Don’t give me the details, just the summary! Topic-aware
+convolutional neural networks for extreme summarization. In Proceedings of the 2018 Conference on Empirical
+MethodsinNaturalLanguageProcessing,Brussels,Belgium,2018.
+[48] DenisPaperno,GermánKruszewski,AngelikiLazaridou,QuanNgocPham,RaffaellaBernardi,SandroPezzelle,
+MarcoBaroni,GemmaBoleda,andRaquelFernández. TheLAMBADAdataset:Wordpredictionrequiringabroad
+discoursecontext. CoRR,abs/1606.06031,2016. URLhttp://arxiv.org/abs/1606.06031.
+[49] Mansheej Paul, Surya Ganguli, and Gintare Karolina Dziugaite. Deep learning on a data diet: Finding im-
+portant examples early in training. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman
+Vaughan, editors, Advances in Neural Information Processing Systems, volume 34, pages 20596–20607. Curran
+Associates,Inc.,2021. URLhttps://proceedings.neurips.cc/paper_files/paper/2021/file/
+ac56f8fe9eea3e4a365f29f0f1957c55-Paper.pdf.
+[50] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,YanqiZhou,WeiLi,and
+PeterJ.Liu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-texttransformer. arXive-prints,2019.
+[51] Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang. SQuAD: 100,000+ questions for machine
+comprehensionoftext. InJianSu,KevinDuh,andXavierCarreras,editors,Proceedingsofthe2016Conferenceon
+EmpiricalMethodsinNaturalLanguageProcessing,pages2383–2392,Austin,Texas,November2016.Association
+forComputationalLinguistics. doi:10.18653/v1/D16-1264. URLhttps://aclanthology.org/D16-1264.
+[52] KeisukeSakaguchi,RonanLeBras,ChandraBhagavatula,andYejinChoi. Winogrande:Anadversarialwinograd
+schemachallengeatscale.ProceedingsoftheAAAIConferenceonArtificialIntelligence,34(05):8732–8740,Apr.2020.
+doi:10.1609/aaai.v34i05.6399. URLhttps://ojs.aaai.org/index.php/AAAI/article/view/6399.
+[53] Daria Soboleva, Faisal Al-Khateeb, Robert Myers, Jacob R Steeves, Joel Hestness, and Nolan Dey. SlimPa-
+jama:A627BtokencleanedanddeduplicatedversionofRedPajama. https://www.cerebras.net/blog/
+slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama,June2023.
+URLhttps://huggingface.co/datasets/cerebras/SlimPajama-627B.
+[54] RichardSocher,AlexPerelygin,JeanWu,JasonChuang,ChristopherD.Manning,AndrewNg,andChristopherPotts.
+Recursivedeepmodelsforsemanticcompositionalityoverasentimenttreebank. InDavidYarowsky,TimothyBaldwin,
+Anna Korhonen, Karen Livescu, and Steven Bethard, editors, Proceedings of the 2013 Conference on Empirical
+MethodsinNaturalLanguageProcessing,pages1631–1642,Seattle,Washington,USA,October2013.Association
+forComputationalLinguistics. URLhttps://aclanthology.org/D13-1170.
+[55] BenSorscher,RobertGeirhos,ShashankShekhar,SuryaGanguli,andAriS.Morcos. Beyondneuralscalinglaws:
+beatingpowerlawscalingviadatapruning,2023. URLhttps://arxiv.org/abs/2206.14486.
+[56] Kevin Swersky, Jasper Snoek, and Ryan Prescott Adams. Freeze-thaw bayesian optimization. arXiv preprint
+arXiv:1406.3896,2014.
+[57] RohanTaori,IshaanGulrajani,TianyiZhang,YannDubois,XuechenLi,CarlosGuestrin,PercyLiang,andTatsunoriB.
+Hashimoto. Stanford alpaca: An instruction-following llama model. https://github.com/tatsu-lab/
+stanford_alpaca,2023.
+15[58] YiTay,MostafaDehghani,SamiraAbnar,HyungChung,WilliamFedus,JinfengRao,SharanNarang,VinhTran,
+DaniYogatama,andDonaldMetzler. Scalinglawsvsmodelarchitectures:Howdoesinductivebiasinfluencescaling?
+InHoudaBouamor,JuanPino,andKalikaBali,editors,FindingsoftheAssociationforComputationalLinguistics:
+EMNLP2023,pages12342–12364,Singapore,December2023.AssociationforComputationalLinguistics. doi:10.
+18653/v1/2023.findings-emnlp.825. URLhttps://aclanthology.org/2023.findings-emnlp.825.
+[59] MosaicMLNLPTeam. Introducingmpt-7b:Anewstandardforopen-source,commerciallyusablellms,2023. URL
+www.mosaicml.com/blog/mpt-7b. Accessed:2023-05-05.
+[60] TristanThrush,ChristopherPotts,andTatsunoriHashimoto. Improvingpretrainingdatausingperplexitycorrelations,
+2024. URLhttps://arxiv.org/abs/2409.05816.
+[61] Kushal Tirumala, Daniel Simig, Armen Aghajanyan, and Ari Morcos. D4: Improving llm pretraining via doc-
+ument de-duplication and diversification. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and
+S. Levine, editors, Advances in Neural Information Processing Systems, volume 36, pages 53983–53995. Curran
+Associates,Inc.,2023. URLhttps://proceedings.neurips.cc/paper_files/paper/2023/file/
+a8f8cbd7f7a5fb2c837e578c75e5b615-Paper-Datasets_and_Benchmarks.pdf.
+[62] Together.ai. Redpajama:anopendatasetfortraininglargelanguagemodels,October2023. URLhttps://github.
+com/togethercomputer/RedPajama-Data.
+[63] Mariya Toneva, Alessandro Sordoni, Remi Tachet des Combes, Adam Trischler, Yoshua Bengio, and Geoffrey J.
+Gordon. Anempiricalstudyofexampleforgettingduringdeepneuralnetworklearning. InInternationalConference
+onLearningRepresentations,2019. URLhttps://openreview.net/forum?id=BJlxm30cKm.
+[64] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,TimothéeLacroix,Baptiste
+Rozière,NamanGoyal,EricHambro,FaisalAzhar,AurelienRodriguez,ArmandJoulin,EdouardGrave,andGuillaume
+Lample. Llama:Openandefficientfoundationlanguagemodels,2023. URLhttps://arxiv.org/abs/2302.
+13971.
+[65] NeerajVarshney,SwaroopMishra,andChittaBaral. Letthemodeldecideitscurriculumformultitasklearning. In
+ColinCherry,AngelaFan,GeorgeFoster,Gholamreza(Reza)Haffari,ShahramKhadivi,Nanyun(Violet)Peng,Xiang
+Ren,EhsanShareghi,andSwabhaSwayamdipta,editors,ProceedingsoftheThirdWorkshoponDeepLearningfor
+Low-Resource Natural Language Processing, pages 117–125, Hybrid, July 2022. Association for Computational
+Linguistics. doi:10.18653/v1/2022.deeplo-1.13. URLhttps://aclanthology.org/2022.deeplo-1.13.
+[66] Cunxiang Wang, Shuailong Liang, Yili Jin, Yilong Wang, Xiaodan Zhu, and Yue Zhang. Semeval-2020 task 4:
+Commonsense validation and explanation. In Proceedings of the Fourteenth Workshop on Semantic Evaluation.
+InternationalCommitteeforComputationalLinguistics,2020. doi:10.18653/v1/2020.semeval-1.39. URLhttp:
+//dx.doi.org/10.18653/v1/2020.semeval-1.39.
+[67] YizhongWang,SwaroopMishra,PegahAlipoormolabashi,YeganehKordi,AmirrezaMirzaei,AnjanaArunkumar,
+ArjunAshok,ArutSelvanDhanasekaran,AtharvaNaik,DavidStap,etal. Super-naturalinstructions:generalizationvia
+declarativeinstructionson1600+tasks. InEMNLP,2022.
+[68] MengzhouXia,MikelArtetxe,ChuntingZhou,XiVictoriaLin,RamakanthPasunuru,DanqiChen,LukeZettlemoyer,
+andVeselinStoyanov. Trainingtrajectoriesoflanguagemodelsacrossscales. InAnnaRogers,JordanBoyd-Graber,
+andNaoakiOkazaki,editors,Proceedingsofthe61stAnnualMeetingoftheAssociationforComputationalLinguistics
+(Volume1:LongPapers),pages13711–13738,Toronto,Canada,July2023.AssociationforComputationalLinguistics.
+doi:10.18653/v1/2023.acl-long.767. URLhttps://aclanthology.org/2023.acl-long.767.
+[69] MengzhouXia,SadhikaMalladi,SuchinGururangan,SanjeevArora,andDanqiChen. Less:Selectinginfluentialdata
+fortargetedinstructiontuning. arXivpreprintarXiv:2402.04333,2024.
+[70] SangMichaelXie,HieuPham,XuanyiDong,NanDu,HanxiaoLiu,YifengLu,PercyLiang,QuocVLe,Tengyu
+Ma,andAdamsWeiYu. Doremi:Optimizingdatamixturesspeedsuplanguagemodelpretraining. InThirty-seventh
+ConferenceonNeuralInformationProcessingSystems,2023. URLhttps://openreview.net/forum?id=
+lXuByUeHhd.
+[71] SangMichaelXie,ShibaniSanturkar,TengyuMa,andPercyLiang. Dataselectionforlanguagemodelsviaimportance
+resampling,2023. URLhttps://arxiv.org/abs/2302.03169.
+[72] JiashengYe,PeijuLiu,TianxiangSun,YunhuaZhou,JunZhan,andXipengQiu. Datamixinglaws:Optimizingdata
+mixturesbypredictinglanguagemodelingperformance,2024. URLhttps://arxiv.org/abs/2403.16952.
+16[73] Dongkeun Yoon. Slimpajama-6b. https://huggingface.co/datasets/DKYoon/SlimPajama-6B,
+2023. Accessed:September24,2024.
+[74] RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. HellaSwag:Canamachinereallyfinishyour
+sentence? InAnnaKorhonen,DavidTraum,andLluísMàrquez,editors,Proceedingsofthe57thAnnualMeetingofthe
+AssociationforComputationalLinguistics,pages4791–4800,Florence,Italy,July2019.AssociationforComputational
+Linguistics. doi:10.18653/v1/P19-1472. URLhttps://aclanthology.org/P19-1472.
+[75] ChuntingZhou,PengfeiLiu,PuxinXu,SriniIyer,JiaoSun,YuningMao,XuezheMa,AviaEfrat,PingYu,LiliYu,
+SusanZhang,GargiGhosh,MikeLewis,LukeZettlemoyer,andOmerLevy. Lima:Lessismoreforalignment,2023.
+17Appendix
+InAppendixA,weprovideaglossaryofnotationusedinthepaper.InAppendixB,wediscusshowadditionaldatamixing
+methodsarerelatedtotheLMOframeworkandprovideproofsthatexistingmethodscanbeexpressedinourframework.In
+AppendixC,weprovideadditionalresultsonouranalysisofexistingdatamixingmethods.InAppendixDweprovide
+additional details for our results in Section 6, and in Appendix E we provide additional results, including downstream
+evaluationandablations.
+A Notation
+TheglossaryisgiveninTable4below.
+Symbol Usedfor
+m Thenumberofdatagroups.Examplesofdatagroupsincludeapre-trainingdomainoraninstruction-tuningtask.
+D Training,validation,andtestdatasetscomprisedofmgroups,whereDi isgroupi’straining/validation/testdata.
+train/val/test (·)
+N TotalnumberofsamplesfromD totrainon.
+train
+S Numberofstepstotrainfor(i.e.,S =N ×batchsize).
+T Numberofroundstodividetraininginto,whereeachroundis S steps.
+T
+p Mixtureproportionsarep=(p1)forT =1(static)andp=(p1,...,pT)forT >1(dynamic),
+wherept =[pt,...,pt ]∈△misaprobabilitydistribution.
+1 m
+f Alanguagemodel(canbeeitherpre-trainedorinitializedfromscratch).
+f(p,t) Themodelf atthebeginningofroundtafterbeingtrainedonp1,...,pt−1sofar.
+L (f) L (f)=(L (f),...,L (f))isthevectoroff’straininglossesovereachdatagroup;
+train/val/test train train,1 train,m
+similarlydefinedforvalidationandtestlosses.
+Lt (p) ShorthandforL (f(p,t)).Whendealingwithstaticmixtures,wealsouseL (p).
+(·) (·) (·)
+At ParametermatrixAt ∈Rm×musedinmixinglaws(2),capturingcross-groupinteractions.
+SeeTable1forinstantiations.
+bt,ct Group-specificparametersbt,ct ∈Rmusedinmixinglaws2.Notethatthevalueofctdoesnotimpactthe
+LMOframework,andneitherdoesbtwhenallbtareequal.
+i
+σ Eitherσ:R→R=Idorexp.
+Zt Usedfornormalizationinproportionupdaterule.
+η Stepsizeη>0usedinproportionupdaterule.
+P Thesetofmixtureproportionsthatcomprisesatrainingsweep.
+At⋆ ApproximatelyoptimalAtforthelineardynamicmixinglaw,obtainedbyfitting
+Lvalt+1(p)=Lvalt(p)−At⋆povertrainingsweeps.
+A˜t Method-specificA˜t =btAt,whereAtisobtaineddirectlyfromthemethodand
+bt ∈Rislearnedfromtrainingsweeps.
+sim(A˜t,At⋆) Similaritybetweenmethod-specificandoptimalAt,definedasanaverageofcosinesimilarityand
+SpearmanrankcorrelationoverAt’snormalizedcolumnsums.
+ε one-hotsmoothingfactorusedtodefinept,i =(1−ε)1 +εUnif(m),smoothedone-hotdistributions
+i
+weusetolearnAtinAIOLI.
+δ ThefractionperrounddedicatedtolearningAtinAIOLI.
+k NumberofsweepspergrouptoaverageAtestimatesoverinAIOLI.
+pinit Initialmixturepinit ∈△mthatAIOLIcandynamicallyadjust.
+S Numberofstepstotrainaccordingtopinit.
+init
+Table4:Glossaryofvariablesandsymbolsusedinthispaper.
+B LMO framework details
+B.1 Additionalexistingmethods
+Wecommentontwootherpopulardatamixingmethods,OnlineDataMixing(ODM)[2]andRegMix[37].
+InODM[2],datamixingisframedasamulti-armedbanditproblem,whereeacharmisadatagroupthatabatchis
+trainedon,andtherewardfunctionisdefinedintermsofthetraininglossofeachgroup.ODMusestheEXP3algorithmto
+exploretrainingondifferentdatagroups.pt,whichisusedtodeterminewhichgrouptheentiretrainingbatchiscomprised
+of,isupdatedaccordingtopt+1 =(1−mε ) exp(εt−1R jt) +ε .ε isanexplorationrate,andtherewardfunctionis
+j t (cid:80)m i=1exp(εt−1R it) t t
+18Rt =αRt−1+(1−α)Lt train,j(p) ifthejthgroupisselectedattimet;otherwise,Rt =Rt−1.Whiletheexplorationand
+j j pt j j
+j
+thesmoothingofptandRtmakethismethodnotdirectlyexpressibleinourframework,wenotethattheupdaterulecan
+belooselyinterpretedasallocatinglargerproportionstogroupsthathavehighloss.Thisupdateruledoesnotconsider
+cross-groupinteractionsandisthussimilartoDoReMi’supdaterule,whichutilizesadiagonalAtdefinedintermsofcurrent
+loss.
+RegMix[37]conductsmanytrainingrunsonsmallermodelsatshorterscales.SimilartoDML[72],aregressionmodel
+isfittotheserunsandusedtopredictmixtureproportionsforalongerrunonalargermodel.Theyconsiderusingalinear
+regressionmodel,i.e.,themixinglawL (p)=c −(cid:80)m A pt,butfindthattheR2isrelativelylow(0.87).Instead,
+val,i i j=1 ij j
+theirmainapproachusesLightGBM,atree-basedgradientboostingapproach,i.e.,usinganensembleofnon-lineardecision
+treesasamixinglaw.Wenotethat AIOLI couldbeusedinconjunctionwithRegMixtofacilitatebettertransferacross
+modelsizeandtrainingdurationintheirsettings,anexcitingdirectionforfuturework.
+B.2 Proofsforsection3.3
+B.2.1 BackgroundonExponentiatedGradientDescent
+Weprovidebackgroundonexponentiatedgradientdescent(EGD)takenfromKakade[29].InEGD,wehaveasequenceof
+decisionsw1,...,wT,wherewt =[wt,...,wt ]∈△m.Wealsohaveasequenceofcostfunctionsc1,...,cT :△m →R.
+1 m
+To minimize the total cost (cid:80)T ct(wt), the EGD update rule sets w0 = Unif(m), and updates according to wt+1 =
+t=1 j
+w jtexp(−η▽ jct(wt)) .Z ensuresthatwt+1 ∈ △m,η isastepsize,and▽ ct(wt)denotes ∂ct(wt).EGDisknowntohave
+Zt t j ∂w jt
+certainregretguaranteesonthevalueofcostsincurredbyplayingw1,...,wT versusalwaysplayingthebestfixedpointin
+hindsight,i.e.,thequantity(cid:80)T ct(wt)−inf (cid:80)T ct(w).WenowarereadytoproveLemma1.
+t=1 w∈△m t=1
+Lemma1. TheEGDupdaterulefor(1)subjecttoLt+1(p)=ct−bt(cid:80)m At pt ∀i∈[m]is
+val,i i i j=1 ij j
+(cid:18) m (cid:19)
+1 (cid:88)
+pt+1 = ·ptexp η btAt ∀j ∈[m], (3)
+j Zt j i ij
+i=1
+whereη >0isthestepsizeandZtisanormalizingconstantsuchthatpt+1 ∈△m.
+j
+Proof. Thecostfunctionateachtimestepinoursettingis(cid:80)m Lt+1(p),andthedecisionwemakeispt.Themixinglaw
+i=1 val,i
+constraintin(2)withσ =IdisLt+1(p)=ct−bt(cid:80)m At pt foralli∈[m],soourobjectivefunction(1)canbewritten
+val,i i i j=1 ij j
+as
+m (cid:18) m (cid:19)
+(cid:88) (cid:88)
+ct−bt At pt . (4)
+i i ij j
+i=1 j=1
+Thegradientofthisexpressionwithrespecttopt forj ∈[m]is−(cid:80)m btAt .PluggingthisintotheEGDupdaterule,
+j i=1 i ij
+weobtaintheupdatept+1 = 1 ptexp(η(cid:80)m btAt ).
+j Zt j i=1 i ij
+B.2.2 ProofofTheorem1
+ToproveTheorem1,wewriteoutindividualpropositions1,2,3forexpressingeachonlinemethodintheLMOframework.
+ByourdefinitionofwhatitmeanstoexpressamethodinLMO,wemustconsiderhoweachmethod1)trainsf and2)
+setspt.WemustseeifthisprocedurecanbereplicatedbysolvingsomespecificationoftheLMOoptimizationproblemin
+ourdatamixingsetup.
+Critically,notethatthisdefinitionof“expression”doesnotclaimthattheoptimizationproblemsproposedinexisting
+methodsareexactlythesameastheLMOoptimizationproblem.Instead,wearestatingthatthetrainingproceduresusedin
+theirmethodscanbeequivalentlyviewedasawayofsolvingtheLMOoptimizationproblemsubjecttocertainassumptions
+ontheloss-proportionrelationship.
+Proposition1(Skill-ItDerivation). Usinga)alineardynamicparameterizationLt+1(p)=Lt (p)−bt(cid:80)m At pt,b)
+val,i val,i j=1 ij j
+parametersAt =Lt (p)·(LT+1(1 )−L1 (1 ))/L1 (1 ),andc)exponentiatedgradientdescent(EGD)tosolve
+ij val,i val,i j val,i j val,i j
+forp,theLMOframework(1)canexpressSkill-It.
+19Proof. TheSkill-ItalgorithmsetsptineachroundandthensamplesfromD accordingtopttotrainf foraround.This
+train
+trainingprocedureisdirectlyspecifiedinourdatamixingproblemsetup(Section2).Therefore,wesimplyneedtoshow
+thattheSkill-Itupdaterulecanbeconvertedintoalineardynamicmixinglaw.BycomparingLemma1andtheSkill-It
+updaterulept+1 = 1 ·ptexp(cid:0) η(cid:80)m ASGLt (p)(cid:1) ,wecanmatchAt inthelemmawithASG inSkill-It,andwecan
+matchbtinthj elemmZ at witj hLt (p).i= T1 heri ej forv ea ,l, Li emma1tellsusthatui sj ingLt+1(p)=ct−btij (cid:80)m Lt (p)ASGpt in
+i val,i val,i i j=1 val,i ij j
+theLMOframeworkwithexponentiatedgradientdescentrecoversSkill-It(sincethebtandctcanbedroppedandareonly
+i
+usedforscalingAt).
+UsingthedefinitionofASG,wecanrewritethemixinglawasLt+1(p)=ct−bt(cid:80)m At,Skill-Itpt whereAt,Skill-It =
+ij val,i i j=1 ij j ij
+Lt (p)(LT+1(1 )−L1 (1 ))/L1 (1 ).Lastly,notethatwecanreplacectwithanyothervalue,includingLt (p),
+val,i val,i j val,i j val,i j i val,i
+duetothefactthatpthasm−1degreesoffreedom(seeLemma2).
+Wenotethat[13]explicitlyspecifiestheirmixinglawinequation2oftheirpaper,alongwiththesameobjectivefunction
+asoursintheLMOframework.
+Proposition2(DoReMiDerivation). Usinga)alineardynamicparameterizationLt+1(p)=Lt (p)−bt(cid:80)m At pt,
+val,i val,i j=1 ij j
+b)parametersAt =min{Lt (p)−L (f ),0}fori=j andA =0otherwise,andc)EGDtosolveforp,the
+ij train,i train,i ref ij
+LMOframework(1)canexpressDoReMi’sproxymodel.
+Proof. WhentrainingtheproxymodelforDoReMi,ptissetineachround,andthenfisupdatedtominimize(cid:80)m ptL (f).
+i=1 i train,i
+UsingLemma3,weestablishthatDoReMi’sweightedtrainingobjectiveateachtimestepisequalinexpectationtotheob-
+jectiveoftrainingondatasampledfrompt,whichiswhatourproblemsetupfocuseson.Havingestablishedthatthetraining
+procedureisthesameinexpectation,wenowneedtoshowthattheDoReMiptupdaterulecanbeconvertedintoalineardy-
+namicmixinglaw.BycomparingLemma1andtheDoReMiupdaterulept+1 ∝ptexp(ηmax{Lt (p)−L (f ),0}),
+j j train,j train,j ref
+wecanmatchAt inthelemmawith0fori̸=j,andAt withmax{Lt (p)−L (f ),0}.Therefore,Lemma1tells
+ij ii train,j train,j ref
+usthatusingLt+1 = ct−bt(cid:80)m At pt withAt = max{Lt (p)−L (f ),0}canexpresstheDoReMiproxy
+val,i i j=1 ij j ii train,j train,j ref
+modeltraining.WeincludebttoallowforscalingAt,butsincethisdoesnotimpacttheoptimalp,itisnotintheupdate
+rule.Lastly,applyingLemma2letsuswritethemixinglawasLt+1 =Lt (p)−bt(cid:80)m At pt.
+val,i val,i j=1 ij j
+WecommentonthefactthatDoReMi’sproxymodelistrainedwithaDRO(distributionallyrobustoptimization)min-max
+objective,namely,minimize maximize (cid:80)m p LT+1(f).Thisobjective,whichdiffersfromourdatamixingobjective,
+f p i=1 i train,i
+yieldsptgradientascentandftgradientdescentupdates.However,wearestillabletoexpressthistrainingprocedurein
+theLMOframework,sinceourclaimis:ifweassumethattheLt+1 =Lt (p)−bt(cid:80)m At,DRMpt mixinglawcaptures
+val,i val,i j=1 ij j
+therelationshipbetweenLt andpt,thentrainingaccordingtotheDoReMiproxyrunshouldnotonlyguidef andpto
+val
+optimizetheDROobjective,butalsotooptimizetheaveragevalidationlosspergroup.
+Proposition3(DoGEDerivation). Usinga)alineardynamicparameterizationLt+1(p) = Lt (p)−bt(cid:80)m At pt,
+val,i val,i j=1 ij j
+b)parametersAt =⟨▽Lt (p),▽Lt (p)⟩foralli,j ∈[m],andc)EGDtosolveforp,theLMOframework(1)can
+ij val,i train,j
+expressDoGE’sproxymodel.
+Proof. WhentrainingtheproxymodelforDoGE,ptissetineachround,andthenfisupdatedtominimize(cid:80)m ptL (f).
+i=1 i train,i
+Using Lemma 3, we establish that DoGE’s weighted training objective at each timestep is equal in expectation to the
+objectiveoftrainingondatasampledfrompt.Next,weshowthattheDoGEupdaterulecanbeconvertedintoalineardy-
+namicmixinglaw.BycomparingLemma1andtheDoGEupdaterulept+1 ∝ptexp(η⟨▽L (ft),(cid:80)m ▽L (ft)⟩),
+j j train,j i=1 val,i
+we can see that At in the Lemma can be matched with ⟨▽L (ft),▽L (ft)⟩. Therefore, using the mixing law
+ij train,j val,i
+Lt+1 =ct−bt(cid:80)m At pt withAt =⟨▽L (ft),▽L (ft)⟩allowsLMOtoexpressDoGEproxymodeltraining.
+val,i i j=1 ij j ij train,j val,i
+Again, bt is included for scaling but does not impact optimization, and by applying Lemma 2, we can replace ct with
+i
+Lt (p).
+val,i
+Lemma 2. Let Lt+1(p) = ct − (cid:80)m At pt for some ct and At. Then, there exists an Bt such that Lt+1(p) =
+i i j=1 ij j ij i
+Lt(p)−(cid:80)m Bt pt.
+i j=1 ij j
+20Proof. Sincept ∈△m,wecanwritetheprobabilitypt as1−(cid:80)m−1pt.Then,thefirstequationcanbewrittenas
+m j=1 j
+m−1 (cid:18) m−1 (cid:19)
+(cid:88) (cid:88)
+Lt+1(p)=ct− At pt −At 1− pt (5)
+i i ij j im j
+j=1 j=1
+m−1
+(cid:88)
+=ct− (At −At )pt −At
+i ij im j im
+j=1
+m−1
+(cid:88)
+=Lt(p)− (At −At )pt −(At −ct+Lt(p))
+i ij im j im i i
+j=1
+m−1 m−1
+(cid:88) (cid:88)
+=Lt(p)− (At −At +At −ct+Lt(p))pt −(At −ct+Lt(p))(1− pt)
+i ij im im i i j im i i j
+j=1 j=1
+m−1 m−1
+(cid:88) (cid:88)
+=Lt(p)− (At −ct+Lt(p))pt −(At −ct+Lt(p))(1− pt).
+i ij i i j im i i j
+j=1 j=1
+LetBt =At −ct+Lt(p)forallj ∈[m].Then,thisequationbecomes
+ij ij i i
+m−1 m−1
+(cid:88) (cid:88)
+Lt+1(p)=Lt(p)− Bt pt −Bt (1− pt) (6)
+i i ij j im j
+j=1 j=1
+m
+(cid:88)
+=Lt(p)− Bt pt.
+i ij j
+j=1
+Lemma3. LetLt (f,p)bethetotaltraininglossoff onabatchofsizeB sampledfromD accordingtop ∈ △m,
+B train
+andletLt (f,p)bethetotaltraininglossonsamplesfromgroupiinthatbatch.Then,theaveragelossoverauniformly
+B,i
+sampledbatchweightedbyptisequalinexpectationtotheaveragelosspergroupoverabatchsampledaccordingtopt:
+(cid:34) (cid:88)m (cid:35) (cid:20) Lt (f,pt)(cid:21)
+E ptLt (f,Unif(m)) =E B (7)
+i B,i m
+i=1
+Proof. LeteachgroupiconsistofsamplesxfromthedistributionD ,whereD ∼D andletL˜ (f)=E [ℓ(f,x)]
+i train i train,i x∼Di
+bethepopulation-levellossongroupi,whereℓ(f,x)isf’slossonsamplex.
+Ifabatchisuniformlysampled,eachgrouphasB/msamples.WecanthenwriteLt (f,Unif(m))=(cid:80)B/mℓ(f,xi),
+B,i k=1 k
+wherexi isthekthsampleofgroupiinthebatch.Then,
+k
+E(cid:34) (cid:88)m
+pt iLt
+B,i(f,Unif(m))(cid:35) =E (cid:88)m
+pt
+iB (cid:88)/m
+ℓ(f,xi
+k) =(cid:88)m p mt iB
+L˜ train,i(f). (8)
+i=1 i=1 k=1 i=1
+Next,ifabatchissampledaccordingtopt,thengroupihasBptsamplesinthebatch.WecanthenwriteLt (f,pt)=
+i B
+(cid:80)m (cid:80)pt iB ℓ(f,xi).Then,
+i=1 k=1 k
+ 
+E(cid:20) Lt B( mf,pt)(cid:21)
+=E
+(cid:88)m (cid:88)pt iB ℓ(f m,xi k) =(cid:88)m p mt iB
+L˜ train,i(f). (9)
+i=1k=1 i=1
+Thishenceestablishestheequivalenceinexpectationbetweenaweightedtrainingobjectiveandtrainingondatasampled
+accordingtop.
+21Table5:Comparisonoflog-linearstaticandlineardynamicmixinglawparameterizationsacrossdifferentdatasettingswith
+MSEandR2metrics.Bothlog-linearandlineardynamicmixinglawsfittherelationshipbetweenmixingproportionsand
+losseswell.
+Arxiv/SE GH/C4 Books/SE
+Parameterization
+MSE R2 MSE R2 MSE R2
+Log-linearstatic 2e-4 0.990 5e-4 0.989 6e-4 0.987
+Lineardynamic 2e-4 0.936 1e-4 0.948 4e-5 0.926
+Arxiv/Books/SE CC/GH/Wiki SlimPajama
+MSE R2 MSE R2 MSE R2
+Log-linearstatic 6e-4 0.991 0.001 0.989 0.002 0.997
+Lineardynamic 6e-5 0.957 1e-4 0.975 5e-6 0.938
+C Analysis Details and Additional Results
+C.1 MixingLawParameterization
+Wedescribehowweperformedthelinearandlog-linearparameterizationexperiments.Forthelog-linearstaticparame-
+terizations,wetrainourmodelonp ∈ P sweepsandfittheparametersusingcodeprovidedinYeetal.[72](i.e.,using
+PyTorchandL-BFGStominimizetheHuberlossofthemixinglaw).Wedothisover5randomseedsfork =2,3andover
+3seedsforthefullSlimPajama.
+Forthelineardynamicparameterizations,fork = 2,3wetrainthemodelfor2000stepsaccordingtosomep0 ∈ P,
+andthensweepoverP forthenext100steps.Wedothisforonerandomseed,performing|P|2 totalruns.Forthefull
+SlimPajamasetting,wetrainthemodelfor10000stepsusingstratifiedsampling,andthensweepoverP forthenext5000
+steps.WefittheparametersusingPytorchandL-BFGS.
+C.1.1 Additionalparameterizationexperiments
+Parameterizationacrosscheckpoints.Weinvestigatewhetherthelog-linearstaticandlineardynamicmixinglawsremain
+well-specifiedinlaterstagesoftrainingandonotherdatasets.Todoso,wetakevariousPythia160Mcheckpoints [8],
+sweepmixingproportions,andfitthelineardynamicandlog-linearstaticmixinglaws.Wetrainfor2000stepsaccording
+tothelearningratesandlearningrateschedulerreportedin[8].Wefitthestaticmixinglawonfullrunsof2000steps,
+andthelineardynamicmixinglawatt = 500,afterwhichwedoatrainingsweepoverthenext500steps.InTables6
+and7,wefindthatthestrongfitforlog-linearstaticmixinglawscontinuestoholdduringpre-trainingatcheckpoint72K
+(roughlyhalfwaythroughtrainingPythia-160M)andafterpre-training,withanaverageR2of0.982and0.991,respectively.
+However,thelineardynamicmixinglaw’sR2 coefficientislower,averaging0.815atcheckpoint72Kand0.830atthe
+endofpre-training.Itmaybeinterestingtofurtherstudyifthedynamicsoftheloss-proportionrelationshipevolveina
+structuredwaythroughouttraining,oriftheseresultsareduetomorenoiseinhowmodelslearnatlaterstagesoftraining.
+Parameterizationacrossothersetsofdatagroups.InFigure4,weidentifyanexamplesetofdatagroupsthatexhibits
+anon-linearrelationshipbetweenlossandproportion:Books/C4fromSlimPajama.Forthesetwodatagroups,weseethat
+astheproportionofBooksincreaseswhileC4decreases,thelossonBooksstartsincreasingpastacertainp,suggesting
+quitecounterintuitivelythatperformanceonBooksisoptimizedbyallocatingsomeproportiontoC4.Inthiscase,neither
+log-linearstaticorlineardynamicmixinglawshavegoodfittotheproportion-lossrelationship,asneithercanrepresentthe
+non-linearity.Inparticular,theaverageMSEandR2forthelog-linearstaticmixinglawis0.003and0.558,respectively,
+andtheaverageMSEandR2forthelineardynamicmixinglawis0.0002and0.721.
+Fortunately,becausethesenonlinearitiesexistontheboundaryofthesimplexandtendtoincurhighloss,theytendto
+havelittleimpactontheoptimizationofp,whichstrivestominimizetheaveragelossforthestandarddatamixingproblem.
+Forinstance,wefoundthattheoptimalproportionaccordingtoYeetal.[72]’slog-linearstaticmixinglawononerandom
+seedwas[0.176,0.824],andthetrueoptimalfromgridsearchwas[0.2,0.8].However,itisimportanttofurtherinvestigate
+thisnon-linearphenomenononadditionaldatagroupsandtrainingregimes,whichwedefertofuturework.
+C.1.2 Parameterizationoninstruction-tuningmixtures
+Previously,westudiediftrainingonSlimPajama(fromscratch,atapre-trainingcheckpoint,andattheendofpre-training)
+exhibitedlineardynamicorlog-linearstaticmixing.Wenowstudyifsupervisedfine-tuningonamixtureoftasktypes
+22Table6:Comparisonoflog-linearstaticandlineardynamicmixinglawparameterizationswhentrainingfromthe72K
+Pythia-160Mcheckpoint.
+Arxiv/SE GH/C4 Books/SE
+Parameterization
+MSE R2 MSE R2 MSE R2
+Log-linearstatic 2e-4 0.975 7e-5 0.992 2e-4 0.981
+Lineardynamic 4e-4 0.834 7e-4 0.815 6e-4 0.796
+Table7:Comparisonoflog-linearstaticandlineardynamicmixinglawparameterizationswhentrainingfromthepre-trained
+Pythia-160M.
+Arxiv/SE GH/C4 Books/SE
+Parameterization
+MSE R2 MSE R2 MSE R2
+Log-linearstatic 3e-6 0.994 4e-6 0.992 6e-6 0.986
+Lineardynamic 5e-5 0.896 8e-5 0.824 1e-4 0.769
+exhibitssimilarmixinglaws.Thedatamixinggroupsweconsiderareinstruction-followingtasks.Itisimportanttoknow
+howtooptimallymixthesegroupssothatthemodelcanfollowavarietyofinstructions,asshownbyhowexistingdatasets
+consistofadiversesetofcommands[14,38,46,57,67,75].
+Weselectm=9tasksfromNaturalInstructions[42,67]:AbductiveNLI,BoolQ,HellaSwag,MathQA,PIQA,SemEval,
+SQuAD1.1,SST2,andXSum.Weselectedtaskswithmanysamples,prioritizingdiversityofcapabilitiesandformats.We
+constructvalidationandtestsplitsthatare100samplespergroup.MoreinformationisprovidedinTable8.
+Table8:OverviewofInstructionTasks
+Task TasknumberinNaturalInstructions #Samples OutputFormat
+AbductiveNLI[7] task067 6499 Open-ended
+BoolQ[15] task380 6500 Yes/No
+HellaSwag[74] task1389 6494 Multiplechoice
+MathQA[4] task1420 6452 Multiplechoice
+PIQA[9] task080 6500 Open-ended
+SemEval[66] task295 5996 Multiplechoice
+SQuAD1.1[51] task075 6498 Open-ended
+SST2[54] task363 6495 Pos/Neg
+XSum[47] task1290 6493 Open-ended
+Toconductthesweeps,wesetP tobe50mixingproportionsdrawnfromtheDirichletdistributionwithα=1.5.Forthe
+staticparameterization,weconduct50trainingrunsoverP,for1000stepseach,andwedothisover5randomseeds.For
+thedynamicparameterization,wetrainon10proportionsfromP for500stepsandthensweepovertheentireP forthe
+next100steps.Wedothisover1randomseed.Weensuretherearenorepeatedsamplesintraining.Weuseapre-trained
+Pythia-160Mmodel[8],consistentwiththerestofourexperiments,andusealinearschedulerwithlearningrate1e-5and
+100warmupsteps.
+Our results are in Table 9. In addition to displaying the averaged MSE and R2 across all 9 groups, we also display
+per-groupresults.Wefindthatthelog-linearstaticmixinglawattainsanaverageR2of0.888overtheseinstructiontasks.
+However,thelineardynamicmixinglawonlyattainsanaverageR2of0.419.Interestingly,weobservethatthe4instruction
+tasksthatinvolveopen-endedgenerationhavehigherR2(averageof0.73)whilethebinaryandmultiplechoicetaskshave
+a lower R2 (average of 0.17) for the linear dynamic law. We hypothesize that this is because tasks that do not require
+open-endedgenerationareeasiertolearnandmoresusceptibletooverfitting.Weobservedthattheirvalidationlossesoften
+plateaubefore500steps,andincreasingtheproportionsafterthispointdoesnotconsistentlydecreaseloss.Finally,wealso
+includealog-lineardynamicmixinglaw—thatis,log(Lt (p))=log(Lt−1(p))−(cid:80)m At pt.Thiscanbethoughtofas
+val,i val,i j=1 ij j
+apiecewiseversionofthelog-linearstaticmixinglaw,andwefindthatthisslightlyimprovesMSEandR2comparedtothe
+lineardynamicmixinglaw.
+23100
+101
+102
+103
+104
+101
+105
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Proportion of book Proportion of c4
+4.50 5.5
+4.45 5.4
+4.40 5.3
+4.35 5.2
+4.30 5.1
+4.25 5.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Proportion of book Proportion of c4
+0.4 prior 0.3 prior 0.6 prior 0.8 prior
+0.1 prior 0.5 prior 0.7 prior 0.9 prior
+0.2 prior
+Figure4:Top:Log-linearstaticmixinglawfitonBooks/C4across5randomseeds(validationloss).Bottom:Lineardynamic
+mixinglawfitonBooks/C4on1randomseed.Eachcolorisadifferentinitialmixturep0 ∈P trainedfor2000steps,and
+thefittingsweepsaredoneover100additionalsteps.
+C.2 Valuesofmixinglawparameters
+Weexplainhowtocomparemethod-specificAt’stoanapproximationofthetrueAt⋆.First,afterperformingmethod-specific
+initialization,suchastrainingreferencemodels,weruneachonlinemethod(Skill-It,DoReMi’sproxymodelDoGE’sproxy
+model,Skill-it,andAIOLI)fortsteps.ForSkill-It,DoReMi,andDoGE,weusetheunrestrictedsettingconfigurationof
+hyperparameterspresentedinSectionD.ForAIOLI,weanalyzetheparametersofAIOLI+GSfromtherestrictedsetting,
+sincewefoundthatthishadlessnoisyfluctuationintheweightsthanintheunrestrictedsetting.Form=2,wesett=1000
+forSkill-Itandt=500forDoGE,DoReMi,andAIOLIsinceSkill-Itisupdatedlessfrequently.Form=3,wesett=1000
+forDoGE,DoReMiandSkill-It,andt=1500forAIOLI.Wethencheckpointthelanguagemodelandthemethod’sAt.For
+DoGEandDoReMi,wecomputeasmoothedAt = 1 (cid:80)100 At−100+i becauseeachAt iscomputedatthebatchlevel,
+100 i=1
+andcanthusbenoisy.ForAIOLI,wealsosmooththeAtbyaveragingtheprevioustimestepparameters.
+ToapproximateAt⋆,werunatrainingsweepoverP forthenext100stepsafterthecheckpoint.Weusethistraining
+sweeptofitAt⋆fromthedynamicmixinglawLt+1(p)=Lt (p)−(cid:80)m At⋆pt.
+val,i val,i j=1 ij j
+Before we compare parameters, we must scale At by some bt where Lt+1(p) = Lt (p)−bt(cid:80)m At pt for all
+val,i val,i j=1 ij j
+i ∈ [m]. This is allowed since bt does not influence the optimal p and does not need to be in the update rule. We
+fit a single bt across all groups’ mixing laws and set A˜t = btAt. We can then compare At and At⋆ using the metric
+sim(A˜t,At⋆)=0.5cossim(a˜t,at⋆)+0.5Spearman(a˜t,at⋆),whichweproposedinSection4.3.
+C.2.1 PropertiesofAt⋆
+WediscusssomepropertiesofAt⋆,findingthat1)At⋆canvarysignificantlyacrosstime,and2)At⋆needstobemodeledas
+afullmatrix.InAppendixE.2,wealsopresentablationsonAIOLIthattesthowcapturingthesetwopropertiesinAIOLIare
+importanttoperformance.
+Foreachinitialmixturep0 ∈P,wetrainfort=2000stepsandthensweepoverP forthenext100steps.Werepeatthis
+setupfort=4000toobtainA2000⋆andA4000⋆.WedothisexperimentforArxiv/StackexchangeandGithub/C4.
+ExtentoftimevariationofAt.WefindthatthecolumnsumsofAtcanchangeorderovertime,meaningthatthept
+“changesdirection”intermsofwhichgrouphasthelargestproportion.Inparticular,forp0 =[0.5,0.5]andGithub/C4,we
+havethat
+(cid:20) (cid:21) (cid:20) (cid:21)
+0.148 0.011 0.015 0.001
+A2000⋆ = A4000⋆ = (10)
+−0.013 0.087 0.001 0.015
+24
+koob
+no
+)c
+-
+ssoL(
+goL
+koob
+no
+ssoL
+pets-txeN
+4c
+no
+)c
+-
+ssoL(
+goL
+4c
+no
+ssoL
+pets-txeNTable 9: Comparison of log-linear static, linear dynamic, and log-linear dynamic mixing law parameterizations over
+instruction-tuningtasksintermsofMSEandR2.
+Log-linearstatic Lineardynamic Log-lineardynamic
+Task
+MSE R2 MSE R2 MSE R2
+AbductiveNLI 3e-4 0.939 4e-4 0.586 4e-5 0.599
+BoolQ 1e-3 0.941 8e-2 0.215 2e-2 0.276
+HellaSwag 6e-4 0.848 6e-3 0.225 2e-3 0.256
+MathQA 8e-4 0.787 6e-3 0.090 2e-3 0.115
+PIQA 5e-4 0.916 3e-4 0.754 2e-5 0.761
+SemEval 9e-4 0.974 4e-3 0.239 3e-3 0.254
+SQuAD1.1 8e-3 0.947 4e-3 0.742 9e-4 0.766
+SST2 3e-3 0.662 2e-2 0.082 4e-2 0.118
+XSum 1e-4 0.977 1e-4 0.838 1e-5 0.841
+Average 2e-3 0.888 1e-2 0.419 8e-3 0.443
+The column sums are 1⊤A2000⋆ = [0.135,0.098] and 1⊤A4000⋆ = [0.016,0.017], showing that the ordering of
+proportionsofthegroupschanges.Thissuggeststhattheoptimalptcanchangesignificantlyacrosstime,prioritizingGithub
+initiallyandlaterC4,whichisalsoreflectedforGithub/C4inthegreedyrowofTable10.
+However,forArxiv/Stackexchange,wefoundthatthecolumnsumsofA2000⋆andA4000⋆neverchangeintermsofthe
+orderingofproportionsofthedatagroups,acrossallp0 ∈ P.Asaresult,theoptimalpt neverchangesdirection.This
+suggeststhathowmuchAtvariesinorderingovertimedependsonthedatagroups.Asaresult,methodslikeSkill-It,which
+useatime-invariantASGmultipliedbyvalidationloss,maynotbeabletomatchthetrueAt⋆ifthegroups’validationlosses
+changeinrankingacrosstime,whichweobserveinGithub/C4.
+ModelingAt⋆asafullvsdiagonalmatrix.Wefindthatmodelingtheoff-diagonalentriesofAt⋆isimportant.Foreach
+sweep,wefitbothAt⋆asdescribedaboveandadiagonalmatrixAt⋆.WecompareifthecolumnsumsofAt⋆andAt⋆differ
+d d
+intheorderofelements.
+WefindthatforArxiv/StackExchange,p0 =0.4,andbotht=2000andt=4000,settingpt basedonthefullmatrix
+wouldputalargerproportiononStackExchange,whilesettingptbasedonthediagonalmatrixwouldputalargerweighton
+ArXiv.Inparticular,thefullanddiagonalmatricesfort=2000are
+(cid:20) (cid:21) (cid:20) (cid:21)
+0.249 0.058 0.284 0
+A2000⋆ = A2000⋆ = (11)
+0.025 0.224 d 0 0.238
+ThesecondcolumnsumislargerforA2000⋆ andsmallerforA2000⋆.WealsohavesimilarfindingsonGithub/C4;for
+d
+p0 =0.6andt=2000,wehave
+(cid:20) (cid:21) (cid:20) (cid:21)
+0.119 0.027 0.135 0
+A2000⋆ = A2000⋆ = (12)
+−0.010 0.104 d 0 0.098
+UsingthediagonalmatrixforGithub/C4wouldresultinprioritizingtrainingonGithub,eventhoughthefullmatrix
+suggeststhatC4shouldbeprioritized.Therefore,itisimportanttomodelAt⋆asafullmatrix.MethodslikeDoReMi,which
+useadiagonalAt,canperformsuboptimally.
+C.3 Solvingstrategy
+WepresentourresultsonexaminingtheassumptionsmadeinhowexistingmethodssolvetheLMOoptimizationproblem.
+Allonlinemethodsuseexponentiatedgradientdescent,whichupdatesptusingthegradientatthecurrenttimestep.This
+involvesagreedyapproximationoftheobjectivefunction.Westudyifthegreedyapproximationyieldsapisclosetothe
+trueoptimalp.
+Form=2datasettings,wetakeourS =5000stepsandsplititintoT =2rounds.Weperformabrute-forcesweepat
+eachroundoverP,whichsweepsp =0.1,0.2,...,0.9.Intotaloveronerandomseed,weconduct81trainingrunsfor
+1
+eachofArxiv/Stackexchange,Github/C4,andBooks/Stackexchange.
+253.4
+4.2
+3.3
+4.0 3.2
+3.1 3.8
+3.0
+3.6
+2.9
+3.4
+2.8
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Proportion of arxiv Proportion of stackexchange
+0.7 prior 0.3 prior 0.5 prior 0.8 prior
+0.1 prior 0.4 prior 0.6 prior 0.9 prior
+0.2 prior
+Figure5:ThelineardynamicparameterizationresultsfromFigure2,withpt =[0,1]and[1,0]alsoplotted.Weseethatthe
+lineardynamicsaremisspecifiedatpt =0forbothi.
+i
+Wedeterminethegreedy-approximatepbyselectingthebestp1.Then,conditioningonthisp1,weselectthebestp2.We
+reportwhatthegreedypanditsperformanceisinthefirstrowofTable10,andwereporttheoptimalpanditsperformance
+inthesecondrow.Notethatthisprotocoldoesnotdependonthemixinglaworamethodforsettingp.
+WefindthatforArxiv/StackExchangeandBooks/StackExchange,thegreedyproportionsandtheoptimalproportionsare
+identical.However,forGithub/C4,thegreedyapproximationfailstorecovertheoptimalproportions.Therefore,thegreedy
+approximationrecoverstheoptimaldynamicproportionsin2outof3cases.
+Table10:Comparisonofthegreedilyselectedp1, p2versustheoptimalp1, p2foraT =2roundsdatamixingproblem.
+On2outof3datasets,thegreedilyselectedproportionsmatchtheoptimalproportions.
+Arxiv/SE GH/C4 Books/SE
+Solving
+p1,p2 AvgtestPPL p1,p2 AvgtestPPL p1,p2 AvgtestPPL
+1 1 1 1 1 1
+Greedy 0.4,0.4 16.039 0.6,0.4 36.525 0.3,0.6 45.513
+Optimal 0.4,0.4 16.039 0.3,0.6 34.709 0.3,0.6 45.513
+Beyondexponentiatedgradientdescent,onemaywonderifexactlysolvingthegreedyobjectivecouldsuffice.Forthe
+lineardynamicmixinglawLt+1(p)=Lt(p)−Atpt,theoptimalptis1 ,wherej =argmax(cid:80)m At .However,wefind
+j i=1 ij
+inFigure5thattheloss-proportionrelationshipcanbenonlinearattheedgeofthesimplexwherept =1 .Exponentiated
+j
+gradientdescent,whichusesentropyregularization,ishenceabletoimplicitlyavoidextremepwherethelinearmixinglaw
+ismisspecifiedandthusisapracticaltechniqueforLMO.
+D Experimental Details
+Trainingdetails. ToobtaintheSlimPajamatestsets,weshuffleandsplitthevalidationsetfromSlimPajama-6B[53,73]
+inhalf.Next,wediscussthetrainingsetupsfortherestrictedandunrestrictedsettings.Forthem=2,3settings,wetrain
+a160MmodelusingPythia-160M’sconfigurationforS =5000stepsandresultsareaveragedover5randomseeds.For
+m=7,wetraina160MmodelusingPythia-160M’sconfigurationforS =40000stepsresultsareaveragedover3random
+seeds.AllsettingsuseFlashAttention[17],batchsizeof8,contextsizeof2048,andcosinelearningratedecayfroma
+startinglearningrateof5e-5to1e-5with500stepsoflearningratewarmup.
+Forthem=2,3settings,experimentswererunonaNVIDIARTX6000AdaGenerationGPU.Forthem=7setting,
+experimentswererunonaNVIDIAA10080GBGPU.
+Restrictedversusunrestricted. Boththerestrictedandunrestrictedsettingssharethesamelengthofthefinaltraining
+runs(5000and40000steps,asabove).Theunrestrictedsettinggivesallmethodsupto10trainingrunstoinitializemixing
+algorithmparameters,or10S steps,whiletherestrictedsettinggive0.5S steps.SeeTable11fortrainingbudgetallocations
+ineachsetting.AIOLIandstratifiedsamplingdonotuseextratrainingruns.
+Mixingalgorithmdetails. SeeTable12foraglossaryofhyperparameters.m=2:restrictedTable13,unrestrictedTable
+14;m=3:restrictedTable15,unrestrictedTable16;m=7:restrictedTable17,unrestrictedTable18.
+26
+vixra
+no
+ssoL
+pets-txeN
+egnahcxekcats
+no
+ssoL
+pets-txeNTable11:Trainingbudgetallocationsforrestrictedandunrestrictedsettings.
+Setting m Method Runswithintrainingbudget
+Unrestricted 2 DML 10runs,5000steps
+Skill-it 2runs,5000steps
+DoReMi 2runs,5000steps
+DoGE 1run,5000steps
+3 DML 10runs,5000steps
+Skill-it 3runs,5000steps
+DoReMi 2runs,5000steps
+DoGE 1run,5000steps
+7 DML 10runs,40000steps
+Skill-it 7runs,40000steps
+DoReMi 2runs,40000steps
+DoGE 1run,40000steps
+Restricted 2 DML 10runs,250steps
+Skill-it 2runs,1250steps
+DoReMi 2runs,1250steps
+DoGE 1run,2500steps
+3 DML 10runs,250steps
+Skill-it 3runs,833steps
+DoReMi 2runs,1250steps
+DoGE 1run,2500steps
+7 DML 10runs,2000steps
+Skill-it 7runs,2814steps
+DoReMi 2runs,10000steps
+DoGE 1run,20000steps
+InTable19,weprovidethemixtureproportionsforeachmethod(averagedacrosstrainingsteps)foreachdatasetonone
+randomseed.InFigure6,weprovideallofAIOLI’sproportiontrajectoriesthroughouttraininginboththeunrestrictedand
+restrictedsettingsononerandomseedforthem=2settings.
+Toperformtrainingsweepsandemulategridsearchesinstaticsettingsform=3,7,weoversampledfromtheDirichlet
+withα=1by4xthenumberofpointsandthenhierarchicallymergedclosestpointsintoacentroiduntilweobtainedx
+points.Forexample,toobtain10pointsinthe7-dimensionalsimplexforSlimPajama,wewouldsample40pointsinthe
+simplexandhierarchicallymergeclosestpointsuntil10pointsremain.Thisistoensurethatnear-duplicatep’sarenot
+includedinthesweep.ThisprocedureisusedinGridSearch(GS)andDMLinSection6andinouranalysisinSection4
+AIOLI-specifichyperparameters Intheunrestrictedsetting,wefounditsometimeshelpfultouseanexponentialmoving
+average with proportion γ over At for AIOLI. Formally, the standard pt update rule in Algorithm 1 can be unrolled as
+pt+1 ∝p0exp(η(cid:80)t (cid:80)m A¯τ ),whichplacesequalweightoneveryA¯τ .ToincorporatetheEMA,wedefineA1 =A¯1
+j j τ=1 i=1 ij ij ema
+and At = (1−γ)A¯t +γAt−1. We then use the update rule pt+1 ∝ p0exp(ηAt ). This allows AIOLI to decay the
+ema ema j j ema
+contributionsofAt,suchthatthevalueofptislessdependentonearlierproportionsinthetraining.
+27Table12:Hyperparametersineachoftheonlinemixingmethods.HyperparametersforgridsearchandDMLarethenumber
+ofrunsandnumberofstepsperrun,whicharedescribedabove.
+Method Hyperparameter Type
+AIOLI ·numberofroundsT int
+·sweepsk int
+·proportionofroundδdedicatedtoLEARNPARAMS float
+·EGDlearningrateη float
+·εone-hotsmoothingfactor float
+·EMAparameterγ floatorNone
+Skill-it ·numberofroundsT int
+·EGDlearningrateη float
+·multiplicativeweightswindow int
+DoReMi ·EGDlearningrateη float
+DoGE ·EGDlearningrateη float
+·proportionoftrainingbatchthatconsistsofvalidation float
+set.DoGEcomputesgradientsonthevalidationset
+28Table13:Restrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=2(correspondingto
+Table3results).
+Datagroups Method Hyperparameter Value
+arXiv/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.25
+GitHub/C4 AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.1
+·proportionofbatchforvalidationset 0.25
+Books/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.25
+29Table14:Unrestrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=2(corresponding
+toTable2results).
+Datagroups Method Hyperparameter Value
+arXiv/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ 0.1
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.25
+GitHub/C4 AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.3
+·EMAparameterγ 0.5
+Skill-it ·numberofroundsT 5
+·EGDlearningrateη 0.1
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.1
+·proportionofbatchforvalidationset 0.25
+Books/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.128
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.1
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.8
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.25
+30Table15:Restrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=3(correspondingto
+Table3results).
+Datagroups Method Hyperparameter Value
+arXiv/Books/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.288
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.5
+CommonCrawl/GitHub/Wiki AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.288
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ None
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.5
+31Table16:Unrestrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=3(corresponding
+toTable2results).
+Datagroups Method Hyperparameter Value
+arXiv/Books/SE AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.288
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.1
+·EMAparameterγ 0.5
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.5
+CommonCrawl/GitHub/Wiki AIOLI ·numberofroundsT 20
+·sweepsk 4
+·proportionofroundδ 0.288
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.3
+·EMAparameterγ 0.5
+Skill-it ·numberofroundsT 10
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.01
+·proportionofbatchforvalidationset 0.5
+Table17:Restrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=7(correspondingto
+Table3results).
+Datagroups Method Hyperparameter Value
+SlimPajama,full AIOLI ·numberofroundsT 20
+·sweepsk 2
+·proportionofroundδ 0.07
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.2
+·EMAparameterγ 0.1
+Skill-it ·numberofroundsT 20
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.03
+·proportionofbatchforvalidationset 0.5
+32Table18:Unrestrictedhyperparametervaluesforeachdatamixingalgorithmforexperimentswherem=7(corresponding
+toTable2results).
+Datagroups Method Hyperparameter Value
+SlimPajama,full AIOLI ·numberofroundsT 20
+·sweepsk 2
+·proportionofroundδ 0.07
+·εone-hotsmoothingfactor 0.75
+·EGDlearningrateη 0.3
+·EMAparameterγ 0.1
+Skill-it ·numberofroundsT 20
+·EGDlearningrateη 0.2
+·Multiplicativeweightswindow. 3
+DoReMi ·EGDlearningrateη 0.01
+DoGE ·EGDlearningrateη 0.1
+·proportionofbatchforvalidationset 0.5
+33Table19:Averageproportionsovertheentiretrainingtrajectoryfortheunrestrictedsetting,ononerandomseed.
+Datagroups Method AverageProportions
+arXiv/SE Gridsearch [0.4,0.6]
+DML [0.404,0.596]
+Skill-it [0.437,0.563]
+DoReMi [0.37,0.63]
+DoGE [0.624,0.376]
+AIOLI [0.507,0.493]
+GitHub/C4 Gridsearch [0.3,0.7]
+DML [0.46,0.54]
+Skill-it [0.583,0.417]
+DoReMi [0.858,0.142]
+DoGE [0.352,0.648]
+AIOLI [0.505,0.495]
+Books/SE Gridsearch [0.3,0.7]
+DML [0.381,0.619]
+Skill-it [0.316,0.684]
+DoReMi [0.286,0.714]
+DoGE [0.325,0.675]
+AIOLI [0.456,0.544]
+arXiv/Books/SE Gridsearch [0.291,0.306,0.403]
+DML [0.245,0.277,0.477]
+Skill-it [0.292,0.238,0.469]
+DoReMi [0.318,0.180,0.502]]
+DoGE [0.592,0.132,0.276]
+AIOLI [0.331,0.336,0.333]
+CC/GitHub/Wiki Gridsearch [0.291,0.306,0.403]
+DML [0.157,0.472,0.371]
+Skill-it [0.275,0.3,0.425]
+DoReMi [0.101,0.714,0.185]]
+DoGE [0.536,0.220,0.244]
+AIOLI [0.3320.3340.333]
+SlimPajama,full Gridsearch [0.202,0.022,0.28,0.038,0.018,0.376,0.064]
+(A/B/C4/CC/G/SE/W) DML [0.042,0,0,0.579,0,0.249,0.013]
+Skill-it [0.098,0.111,0.204,0.103,0.138,0.266,0.076]
+DoReMi [0.08,0.047,0.057,0.11,0.467,0.078,0.157]
+DoGE [0.056,0.162,0.343,0.28,0.038,0.067,0.051]
+AIOLI [0.138,0.138,0.149,0.162,0.138,0.137,0.138]
+34Arxiv/Stackexchange Github/C4 Book/Stackexchange
+0.55
+0.55 0.70
+0.50
+0.65
+0.50
+0.60 0.45
+0.45
+Aioli Unrestricted 0.55 0.40
+0.40 Aioli+GS
+Aioli+DML 0.50
+0.35
+0.35 A Ai io ol li i+ +S Dk oi Rll e-i Mt i 0.45
+Aioli+DoGE 0.30
+0.30 0.40
+0 1000 2000 3000 4000 5000 0 1000 2000 3000 4000 5000 0 1000 2000 3000 4000 5000
+checkpoint checkpoint checkpoint
+Figure6: AIOLI’sproportionsthroughouttrainingforbothunrestrictedandrestrictedsettingsonArxiv/Stackexchange,
+Github/C4,andBook/Stackexchange.ThesetrajectoriesshowthatAIOLImeaningfullyaltersthemixtureproportionsover
+time.
+E Additional Experiments
+E.1 DownstreamTasks
+Wefindthatlowerperplexityispositivelycorrelatedwithworseperformanceondownstreamtasks.Weevaluatedallmodels
+trainedonSlimPajamaonARC-Challenge,ARC-Easy[16],BoolQ[15],HellaSwag[74],LAMBADA[48],OpenBookQA
+[40], PiQA [9], and WinoGrande [52] using the Language Model Evaluation Harness [22] (Table 20). The correlation
+betweenperplexityandthemacroaverageofourdownstreamtasksis0.529,indicatingthatlowerperplexityispredictiveof
+worsedownstreamperformance.Infact,DMLobtainsthebestoverallperformance,eventhoughitomitsthreeoutofseven
+datasetsinSlimPajama(seetheaverageproportionsinTable19).
+Table20:DownstreamevaluationmetricsforvariousdatamixingmethodsaftertrainingonSlimPajamaacrossthreerandom
+seedsintheunrestrictedsetting.
+Method Average ARC-C ARC-E BoolQ HellaSwag LAMBADA OpenBookQA PiQA WinoGrande
+Stratified 0.305 0.176 0.314 0.394 0.261 0.116 0.117 0.563 0.499
+AIOLI 0.311 0.172 0.315 0.447 0.264 0.114 0.111 0.559 0.504
+GS 0.322 0.176 0.329 0.502 0.262 0.117 0.124 0.568 0.500
+DML 0.333 0.181 0.330 0.608 0.261 0.109 0.128 0.554 0.490
+Skill-it 0.316 0.182 0.322 0.462 0.261 0.124 0.122 0.559 0.492
+DoReMi 0.324 0.177 0.323 0.507 0.264 0.127 0.122 0.574 0.499
+DoGE 0.314 0.173 0.313 0.471 0.262 0.116 0.115 0.557 0.504
+Onepotentialreasonforthisdisparityisthedistributionshiftbetweenpre-trainingdataanddownstreamevaluationdata;
+forexample,theDMLresultssuggestthattrainingonBooks,C4,andGithubisnotneededtodowellontheaboveselection
+ofdownstreamtasks.Manyrecentworkshavealsonotedthatperplexityanddownstreamperformanceareuncorrelated
+[36,58,68].Furthermore,Levyetal.[33]proposesaquestionansweringdatasetwheretheperplexityofthepretrained
+model is positively correlated with performance, similar to our results. This mismatch between training objective and
+downstreamevaluationsalsoextendstopost-training,wherebetterlearningofhumanpreferencesdoesnottranslatetobetter
+win-rateagainstotherpost-trainedmodels[12].
+Resolvingthedisconnectbetweentrainingobjectiveanddownstreamevaluationsisanareaofactiveresearch.Inthecase
+ofdatamixing,AIOLIremainstheonlyalgorithminourteststhatrobustlyminimizesaveragetestperplexity–essentially,
+AIOLIachieveswhatitsetsouttoachieveintheLMOframeworkin(1).Conversely,otherdatamixingalgorithmsmight
+beimplicitlydoingsomethingelsewithrespecttominimizingdownstreamevaluations.Consideringhowtoincorporate
+downstreamevaluationsintodatamixingisafruitfulareaforfuturework.
+E.2 Ablations
+WeablateAIOLIbystudyingperformancewhentwokeypropertiesofAt(AppendixC.2.1)arechanged:whenT =1(i.e.,
+At isonlylearnedonceatthebeginningoftrainingandusedthroughout),andwhenAt isassumedtobediagonal.We
+evaluatethesetwoablationsintheunrestrictedsettingpresentedinSection6.1andTable2:
+35
+)viXrA(
+noitroporp
+)buhtiG(
+noitroporp
+)kooB(
+noitroporp• AIOLI-STATIC:WesetT =1inAlgorithm1.Thatis,welearnA1atthebeginningoftraining.WeusethisA1toset
+p1,andusethisp1 fortheremainderofthetrainingrun.ThisapproachtestsifAt needstobeadjustedthroughout
+training.
+• AIOLI-DIAGONAL: We assume that each At is diagonal in this ablation. In particular, in LEARNPARAMS we do
+At =β /pt,iratherthanAt =P−1β foreachi∈[m]inline11.Thisapproachtestsifitissufficienttonotmodel
+ii ii i i
+cross-groupinteractionsandinsteadonlycapturehowmuchgroupi’sperformanceimproveswhentrainedongroupi
+itself.
+For both AIOLI-STATIC and AIOLI-DIAGONAL, we use the same set of hyperparameters as AIOLI as described in
+Appendix D. For AIOLI-STATIC, we additionally sweep over EGD learning rates {η,2η,3η,4η} where η is the EGD
+learningrateusedbyAIOLI.
+OurresultsareinTable21.WefindthatAIOLIoutperformsbothablationsin3outof6settings,andobtainsthelowest
+testperplexityonaverageoverthesesettings.ThissuggeststhatbothT >1andmodelingoff-diagonalentriesareimportant
+toAIOLI’sconsistentperformanceacrossdatasets.
+Table21:AblationsonAIOLI.Thetablereportsthedifferenceinaveragetestperplexitycomparedtostratifiedsampling.
+Negativevalues(green)=improvement,andbolded=bestperformingmethodforgivendatasetting.A=Arxiv,B=Books,
+GH=GitHub,SE=StackExchange,W=Wikipedia.AIOLIoutperformsablationsin3outof6settingsandattainsthelowest
+testperplexityonaverage.
+Method A/SE GH/C4 B/SE A/B/SE CC/GH/W SlimPajama Average
+Stratified 16.532 35.991 47.192 35.114 41.583 26.426 33.806
+AIOLI −0.205 −0.340 −0.439 −0.096 −0.196 −0.240 −0.253
+AIOLI-STATIC −0.065 −0.333 −0.226 −0.213 0.092 −0.330 −0.179
+AIOLI-DIAGONAL −0.182 −0.178 −0.354 −0.163 −0.215 −0.202 −0.216
+F Why the method is called AIOLI
+Anaioliisanemulsion,whereindividualcomponentsremainchemicallyseparatefromeachother,despitebeingcombined
+intoonemixture.Similarly,ourAtmatrixisformedfromseparatetestruns(thept,1,...,pt,minSection5),despitebeing
+combinedintooneupdateforpt.
+36
