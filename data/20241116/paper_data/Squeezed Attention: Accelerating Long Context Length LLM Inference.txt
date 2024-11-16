@@ -1,0 +1,941 @@
+SQUEEZED ATTENTION:
+Accelerating Long Context Length LLM Inference
+ColemanHooper∗1 SehoonKim∗1 HivaMohammadzadeh1 MonishwaranMaheswaran1
+JunePaik2 MichaelW.Mahoney1,3,4 KurtKeutzer1 AmirGholami1,3
+1 UCBerkeley 2 FuriosaAI 3 ICSI 4 LBNL
+Abstract
+Emerging Large Language Model (LLM) applications require long input prompt in order to perform complex
+downstreamtaskslikedocumentanalysisandcodegeneration.Fortheselongcontextlengthapplications,thelength
+oftheinputpromptposesasignificantchallengeintermsofinferenceefficiencysincetheinferencecostsincrease
+linearlywithsequencelength. However,formanyoftheseapplications,muchofthecontextinthepromptisfixed
+acrossdifferentuserinputs,therebyprovidingtheopportunitytoperformofflineoptimizationstoprocessuserinputs
+quickly,astheyarereceived. Inthiswork,weproposeSQUEEZEDATTENTIONasamechanismtoaccelerateLLM
+applications where a large portion of the input prompt is fixed. To accomplish this, we first leverage K-means
+clustering offline to group the keys for the fixed context based on semantic similarity and represent each cluster
+withasinglecentroidvalue. Duringinference,wecomparequerytokensfromtheuserinputwiththecentroidsto
+predictwhichofthekeysfromthefixedcontextaresemanticallyrelevantandneedtobeloadedduringinference.We
+thencomputeexactattentionusingonlytheseimportantkeysfromthefixedcontext. Thismethodmaintainsmodel
+accuracywhilesignificantlyreducingbandwidthandcomputationalcosts,asexactattentioniscomputedwithonly
+a subset of the fixed context tokens. We also extend our method to use a hierarchical centroid lookup to identify
+important keys, which can reduce the complexity of attention from linear to logarithmic with respect to the fixed
+context length. To realize our method’s efficiency benefits, we implement optimized Triton kernels for centroid
+comparisonandsparseFlashAttentionwithimportantkeys,achievingmorethan4×speedupsduringboththeprefill
+andgenerationphasesforlong-contextinference.Furthermore,wehaveextensivelyevaluatedourmethodonvarious
+long-context benchmarks including LongBench, where it achieves a 3.1× reduction in KV cache budget without
+accuracyloss. Forapplicationswheresmallaccuracydegradationisallowed,wecanachieveuptoan8×reduction
+withlessthan0.5pointaccuracygapfortheLLaMA-2-7B-32K,LWM-Text-Chat-1M,andLongchat-7B-v1.5-32K
+models.Ourcodeisavailableathttps://github.com/SqueezeAILab/SqueezedAttention.
+1 Introduction
+Large Language Models (LLMs) have seen rapid advancements in recent years, enabling a range of downstream
+applications including document Question Answering (QA) and complex analysis over structured and unstructured
+documents. Performance on these document processing and analysis tasks has benefited from the increased context
+lengthsofneweropen-source[26,40]andclosed-source[3,4,15]models,asthesetasksbenefitfromincorporating
+alargeamountofinputcontextinordertoconditionthemodeltogenerateparticularoutputs. However,deployment
+of LLMs for downstream applications is constrained by inference costs, with LLM inference requiring significant
+computational resources as well as memory capacity and bandwidth. In particular, long context-length applications
+havelargememorycapacityandmemorybandwidthrequirementsduetothesizeoftheKVcache, whichincreases
+linearlywithrespecttosequencelength[39,17,24].
+Formanyapplicationssuchasin-contextlearning,documentQA,andcodegeneration,overaseriesofpromptsa
+largeportionoftheinputcontextisfixed. Forexample,theinputcontextmaycontainsysteminstructions,documen-
+tation, sourcecode, aswellasparticularfew-shotin-contextexamplesforthetargettask. Thisfixedcontext, which
+*Equalcontribution
+1
+4202
+voN
+41
+]LC.sc[
+1v88690.1142:viXraLevel 1
+Clusters
+Level 2
+Clusters
+Keys
+Query Key
+Figure1:Ahigh-levelvisualizationofourhierarchicalclusteringapproach.Weidentifyimportantkeysforthecurrent
+query by first identifying which coarse-grained clusters are relevant (Level 1). We then refine this prediction using
+finer-grainedclustering(Level2).Finally,weidentifytheimportantkeysforthecurrentqueryandonlycomputeexact
+attentionwiththesekeys.
+is reused in successive prompts, is extremely beneficial for tailoring the model to the target application; however,
+increasingthesizeofthefixedcontextposesasignificantchallengeforinferenceefficiency.Throughoutthiswork,we
+willrefertothisportionofthepromptasthe“fixedcontext,”andwewillrefertotheportionthatcorrespondstothe
+userrequeststhatcomeinonlineasthe“userinput.” Theuserinputisappendedafterthefixedcontextandprovided
+to the model. For many long-context applications, the fixed context portion of the prompt is much longer than the
+userinputportionoftheprompt,andtheattentioncomputationforthisfixedcontextportiontypicallydominatesthe
+inferenceruntime. Inthiswork, ouraimistotakeadvantageofthefactthatthiscontextisfixedandavailableprior
+toinference. Thisallowsustooptimizetheattentiontothisfixedcontextwhenprocessingincominguserinputsand
+generatingoutputs.
+To this end, we propose SQUEEZED ATTENTION as a method to accelerate fixed context applications by accel-
+erating the attention computation. Our method, illustrated in Figure 1, accelerates inference by quickly identifying
+whichkeysinthefixedcontextareimportantforagivenquerytoken. Thisapproachinvolvesatwo-stagealgorithm.
+Inthefirststage,weclusterthekeysinthefixedcontextofflinebasedontheirsemanticsimilarityandthenrepresent
+keysfromthesameclusterusingasinglerepresentative“keycentroid”. Thisofflineclusteringenablesfastretrieval
+of important keys (i.e., those most semantically relevant to incoming query tokens) during inference. In the second
+stage,whentheuserinputisreceived,weretrievetheimportantkeysbyfirstcomparingthequerytokenswiththekey
+centroids,ratherthantheentiresetofkeys,inordertoidentifytheimportantkeyclusters. Oncetheimportantclusters
+areidentified, weretrievetheirassociatedkeysandcomputeexactattentiononlywiththosehigh-scoringkeys. Our
+method can be further extended to a hierarchical clustering and retrieval scheme, as shown in Figure 1, efficiently
+narrowingthesearchspacebyfirstleveragingcoarser-grainedclustersandthenrefiningthesearchusingfine-grained
+clusters. As we will later discuss in Section 3.4, this approach can reduce the memory and compute complexity of
+lookupstologarithmiccomplexitywithrespecttothefixedcontextlength.
+Incontrasttoexistingsolutions[46,24,14]thatidentifylessimportanttokensonceanddiscardthemthroughout
+theentiregeneration,ourmethoddynamicallyidentifiesandretrievesonlytheinformationthatissemanticallyrelevant
+to each generation step. This allows our method to preserve generation quality while reducing the number of KV
+cacheentriesloadedfrommemorybyupto8times(includingloadingkeycentroids),ashighlightedinSection6. By
+optimizingmemorybandwidthaswellascomputationalcosts,SQUEEZEDATTENTIONeffectivelyreducesoverheads
+forbothgenerationandprefillduringlong-contextinference.Specifically,ourworkmakesthefollowingcontributions
+towardacceleratinglongcontextlengthapplications:
+• Semantic-basedKeyClusteringandRetrieval: Toclusternon-consecutivekeysbytheirsemanticsimilarity,we
+perform K-means clustering offline, representing all keys within each cluster with a single “key centroid” value
+(Section 3.1). This enables efficient retrieval during inference, allowing us to identify the keys most semantically
+relevanttothequerytokensbycomparingthequeryagainstkeyclustersinsteadoftheentirekeyset(Section3.2).
+Since the number of key centroids is significantly smaller than the total number of keys, the memory overhead
+2remains minimal. Then, the exact attention scores are computed only with the retrieved keys. We additionally
+proposethehierarchicalversionofourmethod,whichcanreducethememoryandcomputationalcomplexityofper
+tokengenerationfromlineartologarithmicwithrespecttothecontextlength.
+• SystemImplementation: Torealizetheefficiencybenefitsofourapproach,wedesignefficientTritonkernelsfor
+performing the centroid comparison (Section 4.1) and computing sparse FlashAttention with only the important
+keys (Section 4.2). Combined together, our method results in 4.3× and 4.2× speedups during the prefill and de-
+codephaseswhenrunninginferencewithlongfixedcontext. Forapplicationswheresmallaccuracydegradationis
+allowed, we can achieve up to an 8× reduction with less than 0.5 point accuracy gap for the LLaMA-2-7B-32K,
+LWM-Text-Chat-1M,andLongchat-7B-v1.5-32Kmodels(Section6.3).
+• Benchmark: There is currently few long context QA benchmark datasetswhich represent applications where the
+userisaskingdifferentquestionsagainstadocument/knowledgesource. Toaddressthis, weintroducePreFixQA,
+a document QA benchmark which contains a selection of arXiv documents, each with many synthetic user input
+questionsandanswerpairsagainstafixedknowledgesource. Thisbenchmarkfacilitatesresearchintofixedcontext
+methodsbyallowingustoevaluatevarioususerinputsforeachdocument(Section5).
+• Evaluation: Weextensivelyevaluateourmethodondifferentlong-contextbenchmarksincludingLongBench[5],
+RULER [18], and PreFixQA. Particularly, on LongBench, our method preserves the full KV cache accuracy with
+3.1×KVbudgetreduction.Forapplicationsthatcantolerateasmallaccuracydegradation,SQUEEZEDATTENTION
+achievesupto8×KVbudgetreductionwithlessthan0.5pointaccuracydrop(Section6).
+2 Related Work
+2.1 Long-ContextLLMs
+With the growing popularity of long-context applications, there has been a continuous development of LLMs that
+can support context lengths exceeding 100K, and even up to 1M tokens. This includes proprietary models such as
+GPT-4-Turbo [3], Claude-2 [4] and Gemini 1.5 [15], which support context lengths of up to 128K, 200K, and 1M
+tokens, respectively. Ontheopen-sourcefront, severaleffortshavebeenmadetoextendthecontextlengthsbeyond
+the length on which the original models were trained [23, 7]. A notable work is Large World Model (LWM) [26],
+which has demonstrated extending the context length of Llama 2 [41] to 1M tokens. However, as context lengths
+increase,theKVcacheoftenbecomesacriticalbottleneck,significantlyimpactingmemoryusageandlatencyduring
+LLMinference[39,17]. Therefore,KVcachecompressionmethodshaveemergedasacriticalconcernforenabling
+efficientinferencewhenusinglong-contextmodels.
+2.2 KVCacheCompressionforLong-ContextInference
+Toenablemoreefficientlong-contextinferencebyreducingtheKVcachesize,severalmethodshavebeenproposed,
+including quantization [17, 29, 19, 27], shared KV cache across tokens [32] and layers [6], and token pruning [13].
+AnotableapproachwhichwillbediscussedinmoredetailisKVcachesparsification, whichfollowsapriorlineof
+workinattentionsparsification[38,8,44]. TherearetwogeneraldirectionswhichhavebeenpursuedforKVcache
+sparsification: KVcacheeviction,andsparselyloadingtheKVcache.
+KV Cache Eviction. KV eviction has become a widely used method for compressing the KV cache by identifying
+andremovinglessimportanttokens. Variousstrategieshavebeenproposedtodeterminetokenimportance,including
+attention score contribution [46, 35], persistent attention patterns during generation [28], token entropy [43], and
+additionalheuristic-basedpolicies[14].
+However, inusecaseswherelongcontextpromptsarefollowedbyvaryingquestions, theimportanceoftheKV
+cache for the context should be decided on the basis of its relevance to the subsequent question. To address this,
+SnapKV [24] proposes selecting KV cache entries solely based on the attention scores of the most recent prompt
+tokenstotherestoftheinputprompt. However,sincetheimportanttokensintheinputpromptaredeterminedonce
+andremainfixedthroughoutthegenerationprocess,itcannotadapttochangingtokenimportanceduringgeneration
+orinresponsetosubsequentuserinputs. InfiniPot[21]extendsthisideabyiterativelycompressingthecontextbased
+on its relevance to predefined task-specific prompts that resemble potential input questions. Nevertheless, selecting
+importanttokensofflineusingproxypromptsmaynotaccuratelyreflectfuturequeries.
+3Likewise, eviction-basedapproachesdiscardtokensandretaintheremainingonesthroughoutgeneration, poten-
+tiallyoverlookingthefactthatdiscardedtokenscouldbecomeimportantlaterintheprocess. SQUEEZEDATTENTION,
+ontheotherhand, bypassestheneedforafullKVcachelookupbyclusteringtheKVcacheandretrievingonlythe
+mostrelevantclustersthroughanefficientcentroidlookup. Thisapproachislightweightenoughtobeappliedatevery
+generationstep,therebyensuringrelevantcontextisretrievedforeveryquerytoken.
+SparseKVCacheLoading. OnepreviousdirectionthathasbeenexploredaimstostorethefullKVcache,butonly
+loadintherelevantkeysandvaluesdynamicallyduringinference. QUEST[39]clustersconsecutiveKVcacheentries
+anddynamicallyretrievesthemostrelevantclustersbasedontheirrelevancetoeachquerytokenduringgeneration.
+Another line of relevant work here is application of fast kernel summation methods [16, 42, 22, 31, 30] and in
+particularvariantsofFastMultipoleMethod(FMM)[9]whichwereoriginallyproposedtoaccelerateN-bodysimula-
+tions. InthecontextofTransformers,recentworkof[20]utilizesFMMtoclusterconsecutivepasttokensandassign
+coarser-grainedclusterstooldertokens,reducingthememoryoverheadofstoringtheentirepasttokens.However,this
+approach,aswellasQUEST[39],relyonphysicalproximityforclustering,whereasinNaturalLanguageApplications
+clusteringshouldinsteadbebasedonsemanticproximity,astokensthatarephysicallyfarapartcanbesemantically
+similar. Thisisbecausetokensthatarefarapartcanbesemanticallyrelevantandviceversa. SQUEEZEDATTENTION
+addressesthisbyclusteringtokensbasedontheirembeddingsimilarity,ensuringthatsemanticallyrelevanttokensare
+retrievedforfuturegenerations.
+Another prior line of work aims to leverage vector search methods for only loading important keys and values.
+PQCache [45] applied product quantization-based vector search to identify important keys. RetrievalAttention [25]
+uses a K-Nearest Neighbors-based vector search approach, which offloads dynamic retrieval of important keys and
+valuestotheCPU.However,thesepriorapproachesarerestrictedtothegenerationstageanddonotaccelerateprefill,
+whichiscriticaltoreducingtime-to-first-token(TTFT)latencies.
+Incontrastwithpriorworkswhichleveragevectorsearchmethods, SQUEEZED ATTENTION usesafastcentroid
+lookuptoenableaccurateretrievalofrelevantcontextsontheGPUwithoutrequiringoffloadingoperationstoCPUs,
+as in [25]. Our approach is also able to accelerate both prefill and generation. Furthermore, our method allows for
+loading more or fewer keys from different heads, depending on the number of important keys for each head. This
+approachenablesustoachievehigheraccuracywhileaggressivelyreducingthenumberofKVentries.
+3 Algorithm
+We design our method to preprocess the fixed context offline, so that at inference time we can quickly determine
+which information is important and only load this information. In Section 3.1, we discuss how we cluster the fixed
+context keys offline based on their semantic similarity and then determine a representative centroid for each cluster.
+InSection3.2,weproposeamethodtoidentifywhichclustersarethemostimportanttoretrieveforpreciseattention
+computation based on input queries during inference. Finally, in Section 3.3, we extend our algorithm to include
+multiplelevelsofcentroidsinordertoacceleratethesearchforimportantkeytokens,therebyimprovingthescalability
+ofourmethodforlongercontextlengths.
+3.1 Offline: ClusteringKeys
+Thefirststepinourmethodistopreprocessthefixedcontextkeysoffline,asoutlinedinFigure2. Wetakethefixed
+context keys and cluster them based on cosine similarity. Specifically, we use K-means clustering with normalized
+keyvectorstogroupsimilarkeystogether. Wethencomputeacentroidforeachclusterbytakingthemeanofallof
+thevectorsinthecluster. Thisclustercentroidcanbeusedasarepresentativekeytokenforalltokensinthatcluster;
+bycomparingincomingquerieswiththiscentroid,wecandeterminewhetherthetokensinthatclusterareimportant
+withoutnecessarilycomparingthemwithindividualkeys.
+Notethatthissemantic-basedclusteringapproachgroupstogethernon-consecutivekeytokens,whichcouldmake
+itmorechallengingtoefficientlyloadthekeysfrommemory. However,thesizeofeachKVcachetokenforasingle
+headinmodernLLMsistypicallylargerthan256bytesinbf16(astheheaddimensionsaretypicallygreaterthan128)
+[40, 41], which is sufficiently large to efficiently utilize memory bandwidth. Therefore, we are still able to execute
+memoryoperationsefficientlywhensparselyloadinginthenon-consecutivekeysandassociatedvaluesfrommemory.
+43 2
+0
+11
+Keys 0 1 2 3 4 5 6 7 8 9 10 11 12 13 10 1 8 5
+12 4 13
+7
+9
+6
+K-means Clustering
+C !(#) C %(#) Clustering
+Based on
+Level 2 Centroids C !(#) C ’(#) C #(#) C &(#) C %(#) C &(#) C #(#) S Se imm ia lan rt ii tc
+y
+1-Level Clustering C ’(#)
+Hierarchical Clustering
+C(%)
+!
+Level 1 Centroids C !(’) C ’(’) C #(’) C #(%)
+C(%)
+%
+Figure2:Diagramoutliningourapproachforperformingclusteringofflinewiththefixedcontext.RefertoSection3.1
+for1-levelclusteringandSection3.3forhierarchicalclustering. WeapplyK-meansclusteringtogroupsemantically
+similar key tokens, assigning a single centroid to represent each cluster. In the hierarchical approach (Section 3.3,
+demonstratinga2-levelhierarchyforclarity),thesecentroidsformtheLevel2centroids,whicharethenclusteredinto
+coarser-grainedLevel1centroidsbyrepeatingthesameprocedure.
+3.2 Online: Query-AwareKeyRetrieval
+Ideally,wewouldloadonlythekeyswhoseattentionscoresarehigh. However,whichkeyswillbehigh-scoringfor
+a given query cannot be known ahead of time, without doing a full pass over the keys. In our approach, we use the
+centroidclustertoapproximatelymeasurethe“average”attentionscoreofthekeyswithinacluster,therebyallowing
+ustoidentifyimportantkeyswithoutloadingthemall.
+Byorganizingkeysintoclusters,eachrepresentedbyasinglecentroid,wecanaccelerateinferenceforincoming
+userinputs,asillustratedinFigure3. Wefirstcomparetheinputquerytokenswitheachofthekeycentroidstoassess
+whichkeytokensarelikelytohavehighattentionscores. Toestimatetheimportanceofclusteriforquerytokenq,we
+computetheattentionestimateforthatclusteras:
+exp(qC⊤)
+S = i , (1)
+i ∑ N ·exp(qC⊤)
+j j j
+where N isthenumberofkeysincluster jandC istheclustercentroidforcluster j. Thisallowsustoassessthe
+j j
+averageimportanceofthetokensinclusteri. Iftheaverageimportanceofaclusterisaboveadesiredthreshold,we
+loadinthekeysforthatclusterandperformexactattentioncomputation;otherwise,weavoidloadingandperforming
+computationwiththesekeys.
+UsingtheSoftmaxestimateS,insteadofqC⊤,asanimportancemetricforeachclusterprovidesaneasymethodto
+i i
+controlthenumberofimportantkeysretrievedfromeachattentionhead. AsoutlinedinAppendixA.2,someattention
+headshaveamorebalanceddistributionofattentionscores,resultinginalargernumberofimportantkeys,whileothers
+haveamoreskeweddistribution, indicatingonlyafewimportantkeys. Ideally, wewanttoretrievemorekeysfrom
+headswithalargernumberofimportantkeys. SinceSoftmaxvaluesarenormalizedtosumto1,wecanapplyasingle
+global threshold across all layers and attention heads to achieve this. This allows us to automatically retrieve more
+keys from heads with balanced attention score distributions, where more S values exceed the threshold; and fewer
+i
+keysfromheadswithskeweddistributions,wherefewerS valuesexceedthethreshold. Thisapproacheliminatesthe
+i
+needformanuallyconfiguringthenumberofkeystoretrieveforeachhead. Oncewechoosethethresholdtoachieve
+thedesiredsparsitylevel,itiskeptthroughouttheprefillandgenerationstages.
+5C(#)
+!
+Query
+Level 1 Centroids C(#) C(#) C(#) C(#)
+! # % %
+C(#)
+#
+Hierarchical Retrieval
+1-Level Retrieval
+C !(%) C #(%) Retrieval
+Query Based on
+Level 2 Centroids C !(%) C #(%) C %(%) C ’(%) C &(%) C &(%) C %(%) S Se imm ia lan rt ii tc
+y
+C(%)
+’
+3 2
+0
+11
+Keys 0 1 2 3 4 5 6 7 8 9 10 11 12 13 10 1 8 Qu 5ery
+12 7 4 13
+9
+Compute Attention only with ImportantKeys 6
+Figure 3: Diagram outlining how our method operates during inference to retrieve the most relevant keys when a
+new input query is received. Refer to Section 3.2 for 1-level retrieval and Section 3.3 for hierarchical retrieval. For
+1-level retrieval, the query token is first compared against the representative centroid of each cluster to identify the
+mostrelevantclusters. Exactattentionisthencomputedonlyforthekeyswithintheseretrievedclusters,ratherthan
+acrosstheentirefixedcontext. Inourhierarchicalretrievalapproach(Section3.3,demonstratinga2-levelhierarchy
+forclarity),wefirstcomparethequerywithcoarse-grainedLevel1centroids,andthenonlycomparewithasubsetof
+thepromisingfine-grainedLevel2centroidsinordertoidentifytheimportantkeys.
+3.3 HierarchicalCentroidLookup
+ThecentroidlookupapproachoutlinedinSections3.1and3.2allowsforquicklydeterminingwhichkeysarelikely
+tobeimportantintheattentioncomputation, andthenonlycomputingattentionwiththesekeys. Aslongasweuse
+fine-grained centroids, we can have sufficient resolution to identify which keys will be important and we can retain
+accuracy. However,itisdesirabletokeepasmallernumberofcentroids,sincealargernumberofcentroidsleadsto
+anincreasedcostforcentroidlookup.
+Inordertoattaintheaccuracyimprovementsoffine-grainedcentroidlookupwhileretainingtheefficiencybenefits
+ofusingcoarse-grainedcentroids,weleverageahierarchicalcentroidlookupprocess.Figure2demonstratesour(two-
+level)hierarchicalapproachduringofflinepreprocessingofthefixedcontextkeys. Initially,usingthesameapproach
+as in Section 3.1, we cluster the keys into a larger number of centroids, referred to as Level 2 centroids. Then, we
+performanadditionalK-meansclusteringontheseLevel2centroidstoproduceasmallernumberofcoarse-grained
+centroids,referredtoasLevel1centroids.
+Duringinference,weperformahierarchicalcentroidlookupasoutlinedinFigure3. Wefirstcompareincoming
+querieswiththecoarse-grainedLevel1centroidstoquicklypruneoutunnecessarykeys. Thisinitiallookupnarrows
+downthesearch,allowingustofocusoncomparingthequerieswiththefine-grainedLevel2centroidsthatarelikely
+tobehigh-scoring.Specifically,wefirstcomparetheinputquerytokenqwitheachofthecoarse-grainedkeycentroids
+(1)
+C toassesswhichkeytokensarelikelytohavehighattentionscores:
+i
+S(1)
+=
+exp(qC
+i(1)⊤
+)
+. (2)
+i ∑ N(1) ·exp(qC(1)⊤ )
+j j j
+We then apply a threshold T to rule out low-scoring clusters at the coarse-grained level. This filtering allows us
+1
+to avoid performing any comparisons for the fine-grained Level 2 centroids for the tokens which are unlikely to be
+high-scoring. For the remaining Level 1 centroids, we expand them into their corresponding finer-grained Level 2
+6Table 1: Theoretical memory and compute complexity of the baseline (standard autoregressive generation), 1-level
+retrieval, and hierarchical retrieval for a single generation iteration. Here, L represents the context length, c is the
+numberofclustersinthe1-levelretrievalapproach,andk ≪ Listhenumberofkeysremainingafterretrieval. Inthe
+hierarchicalretrievalapproach,c′ ≪ c < Ldenotesthenumberofclustersateachhierarchicallevel. Notethatcfor
+the1-levelretrievalcannotbereducedsignificantlywithrespecttoL,whilec′ forthehierarchicalretrievalcan.
+Method Memory/ComputeComplexity
+Baseline O(L)
+1-LevelRetrieval O(c+k)wherek≪L
+HierarchicalRetrieval O(c′logL+k)wherec′,k≪L
+(2)
+centroids,C ,whicharethencomparedwiththeinputquerytokenqtoassesstheirrelevance:
+l
+exp(qC(2)⊤
+)
+S(2) = l . (3)
+l ∑ N(2) ·exp(qC(2)⊤ )
+m m m
+Since we are only considering the remaining Level 2 centroids, the denominator is also calculated based on these
+(2)
+selectedcentroids. Wethencompare S withthreshold T todecidewhichkeysshouldbeusedforexactattention
+l 2
+computation. With this hierarchical approach, we can reduce the cost of finer-grained centroid lookup while main-
+tainingitsaccuracy. Althoughwedescribea2-levelprocesshereforclarity,thismethodcanbeextendedtomultiple
+levelsofhierarchy.
+3.4 ComplexityAnalysis
+LetLdenotethecontextlength,whichcanbesubstantiallylargeinlong-promptapplications.Inthebaselineapproach
+(i.e., standard autoregressive generation), each generative step requires comparing a query token with the entire set
+of keys in the prompt, resulting in O(L) memory and compute operations per iteration (i.e. per token generation).
+If we apply 1-level retrieval, however, we can instead use c centroids to identify the relevant key clusters and then
+computeattentionusingonlyk ≪ Lretrievedkeys. ThisreducesthememoryandcomputecomplexitytoO(c+k)
+periteration. Onelimitationofthe1-levelretrievalapproachisthatitcanbechallengingtosignificantlyreducec(the
+numberofcentroids),asitwouldrequireclusteringalargenumberofkeysintoeachcluster. Thismayresultineither
+pruningkeystooaggressivelyorretrievingirrelevantkeysgroupedtogetherinthesamecluster.
+In contrast, hierarchical centroid retrieval allows for a more efficient reduction in centroids at each level of the
+hierarchy by enabling gradual pruning of keys. Suppose we use c′ ≪ c < L clusters at each hierarchical level and
+retrieve only a fraction, 0 < p < 1, of these clusters at each stage. In this setup, we requireO(logL) hierarchical
+levels to reduce the keys to the desired final count, k. Therefore, the memory and compute complexity for each
+generationiterationbecomesO(c′logL+k),reducingthecomplexityfromlineartologarithmicwithrespecttothe
+contextlength.
+4 System Implementation
+In order to realize the efficiency benefits of our method, we designed Triton [33] kernels to compute each stage of
+ourpipelineefficientlyonlineduringinference. Thefirststage(Section4.1)computesthecentroidlookupinorderto
+determine the tokens for which we must compute attention exactly, based on the algorithms discussed in Section 3.
+Thesecondstage(Section4.2)leveragesthisinformationto(i)onlyloadintheimportantkeysandto(ii)onlyperform
+the attention computation with the important keys, thereby saving both compute and memory bandwidth. For long-
+context applications with long, fixed context, the KV cache for the fixed context can be cached separately from the
+KVcachethatisdynamicallygeneratedbyincominguserinputs.
+4.1 CentroidLookup
+Thefirststageofourkernelimplementationcomparesquerytokenswiththecentroidsforthefixedcontextkeys.These
+querytokensmayincludemultipletokensfromanincominguserinputduringtheprefillstageorasingletokenduring
+7the generation stage. The kernel follows similar parallelization strategies to FlashAttention-2 [10], where we split
+acrossdifferentattentionheadsandalongthequerysequencelengthdimension. Wefirstloadablockofquerytokens
+anditerateovertheentirekeycentroidsinordertofindthemostimportantkeycentroidsaccordingtoEquation1. At
+ahighlevel,thekernelperformsaninitialpassoverthekeycentroidstocomputethedenominatorinEquation1based
+onthequery-keycentroiddotproduct. Then,ittakesasecondpassoverthecentroidstocomputeS asinEquation1,
+i
+usingthedenominatorresultsfromthefirstpass. Finally,wecompareS withatargetthresholdT,andweonlyload
+i
+thekeysinclusteri ifS > T. Detailsofhowthisprocessisappliedduringtheprefillandgenerationstageswillbe
+i
+discussedinthefollowingsubsections.
+PrefillStage.Duringprefill,wheremultiplequerytokensareavailable,wesplittheworkloadalongthequerysequence
+lengthdimensionasinFlashAttention-2[10]toattainadditionalparallelism. Sincethisprocessproducesindividual
+S values for each query token, we compute their average to obtain S¯, i.e., the averaged importance score for each
+i i
+key cluster across all query tokens. We then check whether S¯ > T to determine whether to load the keys in the
+i
+correspondingcluster. SinceS isanestimateoftheSoftmaxvalue,whichisnormalizedtosumto1,averagingacross
+i
+querytokensprovidesasimplewaytocalculatetheircombinedimportancescore.
+GenerationStage. Duringgeneration,achievingparallelismismorechallenging,aswecannotleverageparallelism
+across the dimension of the length of the query sequence. This is particularly problematic when dealing with small
+batch sizes, as in that case the only parallelism we can leverage is across different heads. To accelerate centroid
+lookup during generation, we additionally compute and store exp(qC⊤) for each cluster during the first pass over
+i
+the key centroids while we are computing the denominator D = ∑ N ·exp(qC⊤). Then, in the second pass, we
+j j j
+loadtheprecomputedexp(qC⊤)valuesandcomparethemagainst DT todeterminetheimportanceofeachcluster,
+i
+withouttheneedtoexplicitlycomputeS. Thissecondpasscanbeparallelizedacrosstheclusterdimensionforfast
+i
+comparison. AshighlightedinAppendixB,theseoptimizationsarecrucialforperformingthecentroidlookupduring
+generationwithoutsubstantiallatencyoverhead.
+4.2 SparseAttentionwithRetrievedKeys
+Once the important keys are identified through our centroid lookup, the second stage of our system implementation
+leveragesasparseFlashAttentionkerneltoattainspeedupsduringbothprefillandgenerationstages. Thisstagealso
+usessimilarparallelizationstrategiesasFlashAttention-2bysplittingworkacrossheadsandalongthesequencelength
+dimension[10]. OurkernelimplementationbuildsontopofpriorworkonTritonimplementationsforFlashAttention-
+2 [34] and for dynamic sparse FlashAttention [36]. The kernel first loads in query vectors, and then iterates over a
+tensor of key indices that need to be selectively loaded. These indices are then used to load the corresponding keys
+frommemoryandcomputeexactattention.
+Anadditionalchallengewhencomputingattentiontothefixedcontextistheimbalanceddistributionofimportant
+key tokens across different heads, which is highlighted in Figure A.2 in Appendix A.2. When using the default
+parallelizationstrategyinFlashAttention-2,ifoneheadcontainsmoreimportantkeysthantheotherheads,itwillhave
+significantlylongerruntime,hinderingspeedups. Inordertoobtainlatencybenefitsinthesescenarios,wesplitkeys
+andvaluesalongthesequence-lengthdimensionasinFlash-Decoding[11],basedonafixednumberofdesiredkeys
+and values to be computed for a single Streaming Multiprocessor (SM). This means that if there are more keys and
+values that need to be computed for a particular head (due to unbalanced sparsity for different heads), the work for
+thisheadwillbeparallelizedacrossagreaternumberofSMsintheGPU.Thekernelisdesignedintwophases,asin
+Flash-Decoding. Thefirstphasecomputesthepartialattentionoutputsforeachblockofvalidkeysandvalues. The
+secondstagemergesthepartialattentionoutputs,whilecorrectingtheoutputsusingthepartialSoftmaxdenominators
+andmaxvalues.
+5 Benchmark for Fixed Context Processing
+Despite the growing demand for long-context applications where a fixed document is used to answer multiple user
+requests(e.g.,codegenerationorlong-documentQA),thereiscurrentlynobenchmarkdesignedtotestthisscenario.
+Recent long context benchmarks, such as LongBench [5] and RULER [18], only pair each long-context input with
+asinglequestion. Thesebenchmarksdonotevaluatethehandlingofmultiplequeriesonthesamedocument,which
+presents a challenge for developing fixed context optimization methods, as it leads to a longer iteration cycle. This
+8Q: What similarity metric is used Q: What metric is used to measure
+for clustering the keys? accuracy in the custom dataset?
+User 1 User 3
+A: Cosine Similarity A: F1 Score
+Q: What model is used to Q: What clustering algorithm is
+generate question-answer pairs used to group the fixed prompt
+User 2 User 4
+for the custom dataset? keys?
+Fixed Context
+A: GPT-4-Turbo A: K-means
+Figure 4: Visualization of samples from PreFixQA. The dataset consists of a set of arXiv documents, along with a
+seriesofquestionsforeachsampledocument.
+is because the offline preprocessing step would need to be performed for every single sample instead of once per
+1
+fixedcontext,whichcouldotherwisebereusedacrossmultiplesampleswherethefixedcontextisshared. Tobridge
+thisgap,weintroduceanewbenchmarkcalledPreFixQA(Prefix-FixedQA)whichevaluatestheabilityofLLMsto
+manage multiple queries on a single long-context document. Our dataset curation pipeline consists of two phases:
+(i)collectinglongdocumentsfromarXivpapers;and(ii)generatingquestion-answerpairsbasedoneachdocument,
+whileensuringcorrectnessandconsistency,whichwillbediscussedindetailbelow.
+LongDocumentsCollection. PreFixQAisalong-documentQAbenchmarkdesignedforone-document-multi-user-
+inputscenarios. Tocollecthigh-qualitylongdocuments, wehavesampled47papersfromarXiv, eachrangingfrom
+17,000 to 200,000 characters, with an average length of 20 pages each after deleting references and appendices.
+To evaluate LLMs’ capability to understand diverse types of content, we have selected papers from various fields,
+including computer science, electrical engineering, biology, machine learning, economics, and finance. To prevent
+trainingsetcontamination,allpapersweresourcedfrom2024usingthearXivAPI[1].
+QuestionandAnswerGeneration.Togeneratemultiplequestionspereachdocument,wehaveimplementedamulti-
+stepgenerationandfilteringprocedureinspiredbytheLlama-3trainingdatagenerationapproach[12]. Toensurethat
+questionscoverdifferentsectionsofthedocumentandavoidredundantquestionsbyfocusingtooheavilyononepart,
+wedivideeachdocumentintomultiplechunks. EachchunkisthenprovidedtoGPT-4-Turbo[3]togeneratepotential
+questions that can be answered in 1-2 words. We generate questions with short answers to enable more accurate
+evaluationthroughstringcomparison.
+However, a single pass of question generation often results in low-quality question-answer pairs due to incor-
+rectness or inconsistency of the answers. To avoid this, we introduce an additional filtering process to ensure the
+correctnessandconsistencyofeachquestion-answerpair. Inthisstep,eachquestion(alongwiththespecificchunk)is
+providedtoGPT-4-Turbofiveseparatetimestoproducepotentialanswers. Wethenfilteroutquestionswithinconsis-
+tentanswers,whichtypicallyarisefromambiguityinthequestionorcontext. Furthermore,GPT-4-Turboisusedasa
+judgetoscorethecorrectnessofeachanswer,basedonthefulldocument,onascaleofzerototen. Questionswhere
+atleastthreeoutoffiveanswersscoreaboveeightarekept;otherwise,theyarediscarded. Fortheretainedquestions,
+the highest-rated answer is selected and kept in the dataset. The prompts used for dataset generation and filtering
+are provided in Appendix D. This process has yielded 1,127 high-quality question-answer pairs (24 on average per
+document)forourbenchmark,ensuringadiverseandchallengingbenchmarkforlong-documentquestion-answering.
+6 Results
+6.1 ExperimentalDetails
+We evaluate our method on a range of downstream long context length tasks. We leverage the LongBench [5] and
+RULER[18]benchmarksuitesaswellasPreFixQAforourevaluation. Acrossalltasks,whenidentifyingthe“fixed
+context” portion of the input, we isolate the context before the user input using the prompt template for each task,
+and then we apply our approach to this fixed portion of the prompt. For our single-level experiments, we set the
+number of cluster centroids to be 5% of the fixed context length, and for our hierarchical experiments we set the
+numberofLevel1centroidsandLevel2centroidstobe1%and5%ofthefixedcontextlength,respectively. Forour
+hierarchicalexperiments,wesettheLevel1thresholdsuchthat50%ofthekeyswouldberuledoutbeforeperforming
+9Table2: LongBenchevaluationresultswith SQUEEZED ATTENTION. WereportresultsacrossdifferentLongBench
+tasksfortheLlama-2-7B-32K,LWM-Text-Chat-1M,andLongchat-7b-v1.5-32Kmodels,usingbothoursingle-level
+(“Squeeze”) and hierarchical (“H-Squeeze”) lookup approaches. We also report baseline comparisons with QUEST
+[39],demonstratinghowouruseofsemanticsimilaritywhenclusteringkeysoutperformsgroupingkeyssequentially.
+WereporttheaveragescoreacrossLongBenchtasks,aswellastheaveragewithoutSamSum(“SSum”)forcomparison
+againstQUEST,whoseevaluationframeworkdoesnotsupportSamSum. WealsoincludetheKVbudget(“Budget”),
+which gives the expected percentage of the KV cache that needs to be loaded in during inference (including extra
+memorymovementforclustercentroids). AdditionalexperimentaldetailsareprovidedinAppendixC.
+Single-DocumentQA Multi-DocumentQA Summarization Few-shotLearning Code Avg.
+Config Budget NQA Qasper MFQA Hotpot 2Wiki Musique GRep
+Q
+MSum
+M
+News TREC TQA SSum RBench LCC w/oSSum All
+LLaMA-2-7B-32K
+AllKV 1 17.91 11.12 33.87 12.45 11.95 6.54 29.37 16.93 21.58 71.50 87.96 43.87 61.45 59.14 33.98 34.69
+Squeeze-70% 0.325 18.55 11.78 34.33 12.31 12.31 6.26 29.50 16.90 20.76 69.00 87.96 43.90 61.29 59.53 33.88 34.60
+QUEST 0.215 17.01 9.89 32.10 11.94 11.41 6.27 28.90 17.65 22.14 68.00 86.43 - 62.53 59.39 33.36 -
+Squeeze-80% 0.225 19.03 12.11 32.77 12.51 11.53 6.66 28.82 17.19 20.70 69.00 87.46 44.42 61.26 59.78 33.76 34.52
+QUEST 0.168 20.42 9.72 29.46 11.45 9.75 5.46 27.06 17.20 21.83 68.50 86.36 - 61.93 59.38 32.96 -
+Squeeze-90% 0.125 18.15 14.39 32.38 11.84 11.70 6.45 29.06 16.93 21.66 70.00 87.43 45.15 58.79 59.37 33.70 34.52
+H-Squeeze-90% 0.112 17.41 14.23 32.71 11.99 11.38 6.68 29.14 16.97 20.41 68.00 87.37 44.85 58.94 59.61 33.45 34.26
+LWM-Text-Chat-1M
+AllKV 1 16.27 24.36 42.00 21.63 16.70 9.10 27.57 24.71 24.48 70.50 61.70 39.59 41.77 40.72 32.42 32.94
+Squeeze-70% 0.325 16.54 24.71 42.24 21.66 15.88 9.08 27.28 24.77 24.60 70.50 60.93 39.75 41.06 40.76 32.31 32.84
+QUEST 0.215 15.24 24.57 40.68 21.57 17.02 7.93 27.29 24.86 24.45 67.00 62.14 - 45.53 43.48 32.44 -
+Squeeze-80% 0.225 16.66 24.70 41.88 21.10 15.91 9.13 27.00 24.68 24.23 70.00 60.81 39.37 42.07 41.89 32.31 32.82
+QUEST 0.168 15.37 23.33 41.45 20.26 17.39 7.85 25.88 25.06 24.43 65.00 62.54 - 46.20 43.06 32.14 -
+Squeeze-90% 0.125 16.97 24.96 41.14 20.70 16.40 9.24 27.00 24.59 23.51 71.50 59.37 39.87 44.78 43.80 32.61 33.13
+H-Squeeze-90% 0.118 16.69 24.79 40.38 20.78 16.21 8.91 25.02 24.77 22.34 70.50 58.23 39.40 44.31 43.34 32.02 32.55
+LongChat-7B-v1.5-32K
+AllKV 1 20.82 28.95 43.06 32.79 24.18 14.09 30.67 22.83 26.09 66.50 83.45 41.25 53.20 56.64 38.71 38.89
+Squeeze-70% 0.325 20.93 29.18 43.00 33.02 23.61 14.55 31.13 22.93 26.25 66.50 83.60 40.90 54.64 56.93 38.94 39.08
+QUEST 0.215 19.33 31.51 41.65 31.79 23.25 12.58 31.09 22.84 26.87 67.50 84.33 - 53.57 55.37 38.59 -
+Squeeze-80% 0.225 20.57 29.64 42.80 33.06 23.63 15.27 31.31 23.21 26.17 65.50 83.87 41.28 52.83 57.17 38.85 39.02
+QUEST 0.168 18.03 30.21 37.83 31.78 21.03 11.21 30.52 22.84 26.47 63.50 84.71 - 51.50 55.82 37.34 -
+Squeeze-90% 0.125 18.60 29.86 42.21 35.71 23.12 14.31 31.61 22.79 26.17 65.50 78.85 41.22 51.57 56.95 38.25 38.46
+H-Squeeze-90% 0.122 18.86 30.51 42.25 35.42 20.88 13.85 30.85 22.84 25.71 65.50 78.50 40.96 51.89 57.20 38.02 38.23
+thefine-grainedLevel2lookup. FormeasuringaccuracywithPreFixQA,weuseF1Scoretocalculatethesimilarity
+scorebetweentheoutputsandthegroundtruth(asisusedinLongBenchforsingle-documentQAtasks[5]). Weuse
+32K as the maximum context length throughout our evaluation, and we truncate longer inputs for both LongBench
+andPreFixQA.
+6.2 AccuracyEvaluationResults
+6.2.1 LongBench
+Inordertovalidateourmethod,weperformevaluationonlong-contextdatasetsfromLongBench[5],acomprehensive
+multi-taskbenchmarkforlong-contextunderstanding. LongBenchcontainsabroadsetoftasksthatcoverarangeof
+key long-context applications including Single and Multi-Document QA, Few-shot Learning, Summarization, and
+Code Completion. We evaluate our approach on the non-synthetic English language tasks in Longbench. Table
+2 provides evaluation of our method on LongBench for the LLaMA-2-7B-32K [2], LWM-Text-Chat-1M [26], and
+Longchat-7B-v1.5-32K models [23]. We also provide baseline comparisons with QUEST [39]. To ensure a fair
+comparison, we set the token budget for their method dynamically for each input sample to match our approach.
+AdditionaldetailsforthebaselineconfigurationareprovidedinAppendixC.
+TheresultsshowthatourmethodprovidessimilaraccuracyasthefullKVcachebaselineonlongcontext-length
+10Table3:RULERevaluationresultswithSQUEEZEDATTENTION.WereportresultsacrossdifferentRULERtasksfor
+theLWM-Text-Chat-1Mmodelusing32Kcontextlengthforevaluation. WealsoreporttheKVbudget(“Budget”),
+whichgivestheexpectedpercentageoftheKVcachethatneedstobeloadedinduringinferenceforeachconfiguration.
+Our resultsshow thatour methodis able toretain theaccuracy ofthe baseline model, even withaggressive sparsity
+settings.
+Config Budget Niah1 Niah2 Niah3 MKey1 MKey2 MKey3 MValue MQuery VT CWE FWE QA1 QA2 Average
+AllKV 1 100.0 100.0 99.4 100.0 99.6 96.4 45.6 35.3 58.4 9.7 66.7 63.2 43.6 70.6
+Squeeze-70% 0.325 100.0 100.0 99.2 100.0 99.6 93.2 43.8 37.4 57.7 8.4 65.8 60.2 42.0 69.8
+Squeeze-90% 0.125 100.0 100.0 98.6 100.0 99.4 81.8 42.1 36.0 51.4 9.7 65.1 57.8 41.6 68.0
+Table4:PreFixQAevaluationresultswithSQUEEZEDATTENTION.Wereportresultsusingoursingle-levelapproach
+(“Squeeze”) and with our hierarchical lookup-based approach (“H-Squeeze”). LLaMA-2, LWM, and LongChat are
+LLaMA-2-7B-32K,LWM-Text-Chat-1M,andLongChat-7B-v1.5-32K,respectively.
+Config LLaMA-2 LWM LongChat
+AllKV 43.47 14.92 24.13
+Squeeze-70% 42.14 14.45 23.79
+Squeeze-90% 36.95 14.25 23.94
+H-Squeeze-90% 37.05 14.12 23.71
+tasks,whileofferingsignificantefficiencyimprovementintermsofreductioninKVcacheloadingandattentioncom-
+putation. Acrossallthreemodels,ourmethodmaintainsfullKVcacheaccuracywithlessthan0.11pointdegradation
+at 70% sparsity, reducing the KV budget by 3.1×. Even at a more aggressive 90% sparsity, which reduces the KV
+budgetby8×,ourmethodonlyintroducesasmallaccuracydegradationofwithin0.5points. Notethatourmethod’s
+accuracyalsomatchesanidealizedbaseline,wherefullattentioniscomputedwithallkeysbeforeretainingonlythe
+highest-scoringones,asfurtherdiscussedinAppendixE.Thisdemonstratesthatourmethodcaneffectivelyidentify
+andretrieveonlythemostrelevantkeys(i.e.,thosethatyieldhighattentionscores)withoutloadingtheentirekeys.
+Furthermore,ourmethodoutperformstheQUESTbaseline,withapronouncedaccuracygapofupto∼1pointfor
+moreaggressivesparsitysettings. Thishighlightstheadvantageofsemantic-basedclustering,whichallowsformore
+aggressiveKVcachesparsitybyloadingonlytheimportantkeyswithoutlosingcriticalinformation. Additionally,we
+include results for our hierarchical lookup approach with 90% sparsity, demonstrating how our hierarchical method
+hasloweroverheadfromthecentroidlookupwithminoraccuracylossrelativetoperformingasingle-levellookup.
+6.2.2 RULER
+WealsopresentanevaluationforourmethodontheRULERbenchmark[18]inTable3,whichisasyntheticbench-
+markdesignedtoprovideacomprehensiveevaluationoflong-contextcapabilitiesoflanguagemodels.Thebenchmark
+consistsof13tasksgroupedintofourcategories: Retrieval,Multi-HopTracing,Aggregation,andQuestionAnswer-
+ing. WeusethedefaultRULERconfigurationwith500samplestoevaluateourmethod,andweevaluateonRULER
+using the LWM-Text-Chat-1M model [26]. The results on RULER demonstrate how our method provides similar
+accuracyasthebaselineonlongcontext-lengthtasks.
+6.2.3 PreFixQA
+WepresentevaluationforourmethodonthisdatasetinTable4usingtheLLaMA-2-7B-32K,Longchat-7B-v1.5-32K,
+andLWM-Text-Chat-1Mmodels[2,23,26]. Theresultsdemonstratehowourmethodprovidessimilaraccuracyas
+thebaselineforfixedcontextuse-cases,whilesignificantlycompressingthefixedcontextthatneedstobedynamically
+loadedduringinference.
+6.3 SystemsResults
+6.3.1 ExperimentDetails
+Inordertobenchmarkourkernelimplementationsforlongcontextlengthinference,weusedsampletextfromthePG-
+19languagemodelingdataset[37],andappliedourclusteringmethodtoderivecentroidstousewhenbenchmarking.
+111.9X 1.8X 2.1X
+2.6X 2.6X 3.0X
+4.2X 4.3X 4.2X
+Figure5: KernelimplementationlatencyresultsforFlashAttentionbaselineaswellasfor SQUEEZED ATTENTION
+with70%,80%,and90%sparsitysettings. Wereportlatencyresultsforprefill(with1Kand4Kinputlength)aswell
+asforgenerationwithasingleinputtoken. LatencyresultsarenormalizedtotheFlashAttentionbaselineruntimefor
+prefill(andtoourTritonFlashDecodingbaselineforgeneration)forthesameinputlength.
+WeusedPG-19datasincelanguagemodelingdataallowedustosegmentthefixedcontextandinputintothedesired
+lengths for measuring latency. Using real data ensured that we had a realistic sparsity distribution across different
+headsandlayers. Weranclusteringofflineusingoffloadingtocollectdatawithacontextlengthof512K,andloaded
+thisinonelayeratatimeinordertocollectmeasurements. Wereporttheaverageruntimeacrossalllayersinallour
+experimentalresults.
+Forprefill,webenchmarkedourTritonkernelimplementationsusingtriton.testing.do benchwith100
+warmup runs and 500 measurement runs. For generation, we used 50 measurement runs for 100 different input
+query tokens, and averaged the runtime across all of these runs. We use the H100 NVL hardware platform for
+our experiments. We benchmarked the end-to-end runtime for our centroid lookup and sparse FlashAttention ker-
+nels (and include the runtime of Pytorch code for setting up arguments for our kernels). For prefill, we compared
+the performance of our implementation with the FlashAttention-2 implementation provided through the PyTorch
+scaled dot product attention API. For generation, we implemented a Triton FlashDecoding kernel opti-
+mizedforsingle-batchinferencetoserveasastrongerbaseline.
+6.3.2 Results
+Figure5showsthelatencyfortheFlashAttentionbaselineaswellasforSQUEEZEDATTENTIONwith70%,80%,and
+90% sparsity with 512K context length. We set the number of centroids to be 5% of the context length. We report
+resultsforgeneration(oneinputtoken)aswellasprefillwith1Kand4Kinputtokens,andwenormalizethelatency
+tothebaselinelatencyforeachinputsize. Theseresultsshowthebenefitsofourmethodforacceleratinglongcontext
+length inference, with 4.3× / 4.2× speedups demonstrated for the prefill and decode phases. This shows how our
+approachisflexibleandcanacceleratebothprefillandgenerationstages. Additionalresultsforcontextlength128K
+areprovidedinAppendixF.
+7 Conclusion
+In this work, we propose SQUEEZED ATTENTION as a method for accelerating attention in long context-length ap-
+plications. Our method groups the keys and uses representative centroids for each group to quickly identify which
+keys are important for the attention operation. For fixed context applications, we can cluster the keys offline us-
+ing K-means. Online during inference, we first compare the new input query with the representative centroids, and
+thenonlycomputeexactattentionfortheseimportantkeys. Ourmethodcanbeextendedtothehierarchicalretrieval
+scheme,whichcanreducethememoryandcomputecomplexityoflookupstologarithmiccomplexitywithrespectto
+thefixedcontextlength. SQUEEZED ATTENTION isabletoprovide4.3×/4.2×speedupsduringprefillanddecode
+12phases for long context inference, while maintaining accuracy. Additionally, we outline how our algorithm can be
+extended using a hierarchical centroid lookup, allowing us to achieve the accuracy of fine-grained centroid lookups
+while maintaining the efficiency of coarse-grained centroids, thereby improving the scalability of our approach for
+longercontextlengths. OurapproachaccelerateslongcontextlengthLLMinferencewithfixedcontextapplications
+whilemaintainingaccuracy.
+Acknowledgements
+We are grateful for the insightful discussions with Dhairya Malhotra. We acknowledge gracious support from the
+FuriosaAIteamincludingJihoonYoon,SuyeolLee,andHyungIlKoo,aswellasfromIntel,Apple,andNVIDIA.We
+also appreciate the support from Microsoft through their Accelerating Foundation Model Research, including great
+supportfromSeanKuno. Furthermore,weappreciatesupportfromGoogleCloud,theGoogleTRCteam,andspecif-
+ically Jonathan Caton, and Prof. David Patterson. Prof. Keutzer’s lab is sponsored by the Intel corporation, Intel
+One-API,IntelVLABteam,theIntelOne-APIcenterofexcellence,aswellasfundingthroughBDDandBAIR.We
+appreciategreatfeedbackandsupportfromEllickChan,SaurabhTangri,AndresRodriguez,andKitturGanesh. Se-
+hoonKimwouldliketoacknowledgethesupportfromtheKoreaFoundationforAdvancedStudies(KFAS).Michael
+W.MahoneywouldalsoliketoacknowledgeaJ.P.MorganChaseFacultyResearchAwardaswellastheDOE,NSF,
+and ONR. This work was supported by the Director, Office of Science, Office of Advanced Scientific Computing
+Research, of the U.S. Department of Energy under Contract No. DE-AC02-05CH11231. Our conclusions do not
+necessarilyreflectthepositionorthepolicyofoursponsors,andnoofficialendorsementshouldbeinferred.
+References
+[1] arxivapiuser’smanual. https://info.arxiv.org/help/api/index.html. Accessed:2023-10-13.
+[2] togethercomputer/llama-2-7b-32k,2023.
+[3] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo
+Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint
+arXiv:2303.08774,2023.
+[4] Anthropic. Claude2: https://www.anthropic.com/news/claude-2,2023.
+[5] YushiBai,XinLv,JiajieZhang,HongchangLyu,JiankaiTang,ZhidianHuang,ZhengxiaoDu,XiaoLiu,Aohan
+Zeng, Lei Hou, et al. Longbench: A bilingual, multitask benchmark for long context understanding. arXiv
+preprintarXiv:2308.14508,2023.
+[6] WilliamBrandon,MayankMishra,AniruddhaNrusimha,RameswarPanda,andJonathanRaganKelly.Reducing
+transformerkey-valuecachesizewithcross-layerattention. arXivpreprintarXiv:2405.12981,2024.
+[7] YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,andJiayaJia. Longlora: Efficient
+fine-tuningoflong-contextlargelanguagemodels. arXivpreprintarXiv:2309.12307,2023.
+[8] RewonChild,ScottGray,AlecRadford,andIlyaSutskever.Generatinglongsequenceswithsparsetransformers.
+arXivpreprintarXiv:1904.10509,2019.
+[9] RonaldCoifman,VladimirRokhlin,andStephenWandzura. Thefastmultipolemethodforthewaveequation:
+Apedestrianprescription. IEEEAntennasandPropagationmagazine,35(3):7–12,1993.
+[10] Tri Dao. Flashattention-2: Faster attention with better parallelism and work partitioning. arXiv preprint
+arXiv:2307.08691,2023.
+[11] Tri Dao, Daniel Haziza, Francisco Massa, and Grigory Sisov. Flash-decoding for long-context inference:
+https://crfm.stanford.edu/2023/10/12/flashdecoding.html,2023.
+13[12] Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,
+Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd of models. arXiv preprint
+arXiv:2407.21783,2024.
+[13] Qichen Fu, Minsik Cho, Thomas Merth, Sachin Mehta, Mohammad Rastegari, and Mahyar Najibi. Lazyllm:
+Dynamictokenpruningforefficientlongcontextllminference. arXivpreprintarXiv:2407.14057,2024.
+[14] Suyu Ge, Yunan Zhang, Liyuan Liu, Minjia Zhang, Jiawei Han, and Jianfeng Gao. Model tells you what to
+discard: Adaptivekvcachecompressionforllms. arXivpreprintarXiv:2310.01801,2023.
+[15] Google. Gemini 1.5 https://blog.google/technology/ai/
+google-gemini-next-generation-model-february-2024,2023.
+[16] AlexanderGrayandAndrewMoore. N-body’problemsinstatisticallearning. Advancesinneuralinformation
+processingsystems,13,2000.
+[17] ColemanHooper,SehoonKim,HivaMohammadzadeh,MichaelWMahoney,YakunSophiaShao,KurtKeutzer,
+and Amir Gholami. Kvquant: Towards 10 million context length llm inference with kv cache quantization.
+AdvancesinNeuralInformationProcessingSystems,2024.
+[18] Cheng-PingHsieh,SimengSun,SamuelKriman,ShantanuAcharya,DimaRekesh,FeiJia,andBorisGinsburg.
+Ruler: What’s the real context size of your long-context language models? arXiv preprint arXiv:2404.06654,
+2024.
+[19] Hao Kang, Qingru Zhang, Souvik Kundu, Geonhwa Jeong, Zaoxing Liu, Tushar Krishna, and Tuo Zhao.
+Gear: An efficient kv cache compression recipefor near-lossless generative inference of llm. arXiv preprint
+arXiv:2403.05527,2024.
+[20] Yanming Kang, Giang Tran, and Hans De Sterck. Fast multipole attention: A divide-and-conquer attention
+mechanismforlongsequences. arXivpreprintarXiv:2310.11960,2023.
+[21] Minsoo Kim, Kyuhong Shim, Jungwook Choi, and Simyung Chang. Infinipot: Infinite context processing on
+memory-constrainedllms. arXivpreprintarXiv:2410.01518,2024.
+[22] Dongryeol Lee, Andrew Moore, and Alexander Gray. Dual-tree fast gauss transforms. Advances in Neural
+InformationProcessingSystems,18,2005.
+[23] Dacheng Li, Rulin Shao Shao, Anze Xie, Ying Sheng, Lianmin Zheng, Joseph Gonzalez, Ion Stoica, Xuezhe
+Ma,andHaoZhang. Howlongcanopen-sourcellmstrulypromiseoncontextlength?,June2023.
+[24] YuhongLi, YingbingHuang, BowenYang, BharatVenkitesh, AcyrLocatelli, HanchenYe, TianleCai, Patrick
+Lewis, and Deming Chen. Snapkv: Llm knows what you are looking for before generation. arXiv preprint
+arXiv:2404.14469,2024.
+[25] DiLiu,MengChen,BaotongLu,HuiqiangJiang,ZhenhuaHan,QianxiZhang,QiChen,ChengruidongZhang,
+Bailu Ding, Kai Zhang, et al. Retrievalattention: Accelerating long-context llm inference via vector retrieval.
+arXivpreprintarXiv:2409.10516,2024.
+[26] Hao Liu, Wilson Yan, Matei Zaharia, and Pieter Abbeel. World model on million-length video and language
+withringattention. arXivpreprintarXiv:2402.08268,2024.
+[27] Ruikang Liu, Haoli Bai, Haokun Lin, Yuening Li, Han Gao, Zhengzhuo Xu, Lu Hou, Jun Yao, and Chun
+Yuan. Intactkv: Improving large language model quantization by keeping pivot tokens intact. arXiv preprint
+arXiv:2403.01241,2024.
+[28] ZichangLiu,AdityaDesai,FangshuoLiao,WeitaoWang,VictorXie,ZhaozhuoXu,AnastasiosKyrillidis,and
+Anshumali Shrivastava. Scissorhands: Exploiting the persistence of importance hypothesis for llm kv cache
+compressionattesttime. AdvancesinNeuralInformationProcessingSystems,36,2024.
+14[29] ZiruiLiu, JiayiYuan, HongyeJin, ShaochenZhong, ZhaozhuoXu, VladimirBraverman, BeidiChen, andXia
+Hu. Kivi: Atuning-freeasymmetric2bitquantizationforkvcache. arXivpreprintarXiv:2402.02750,2024.
+[30] WilliamBMarch,BoXiao,andGeorgeBiros. Askit: Approximateskeletonizationkernel-independenttreecode
+inhighdimensions. SIAMJournalonScientificComputing,37(2):A1089–A1110,2015.
+[31] Vlad Morariu, Balaji Srinivasan, Vikas C Raykar, Ramani Duraiswami, and Larry S Davis. Automatic online
+tuningforfastgaussiansummation. Advancesinneuralinformationprocessingsystems,21,2008.
+[32] Piotr Nawrot, Adrian Łan´cucki, Marcin Chochowski, David Tarjan, and Edoardo M Ponti. Dynamic memory
+compression: Retrofittingllmsforacceleratedinference. arXivpreprintarXiv:2403.09636,2024.
+[33] OpenAI. Introducing triton: Open-source gpu programming for neural networks: https://openai.com/
+index/triton/,2021.
+[34] OpenAI. https://github.com/triton-lang/triton/blob/main/python/tutorials/06-fused-attention.py,2024.
+[35] MatanelOren,MichaelHassid,YossiAdi,andRoySchwartz. Transformersaremulti-staternns. arXivpreprint
+arXiv:2401.06104,2024.
+[36] MatteoPagliardini,DanielePaliotta,MartinJaggi,andFranc¸oisFleuret. Fastattentionoverlongsequenceswith
+dynamicsparseflashattention. AdvancesinNeuralInformationProcessingSystems,36:59808–59831,2023.
+[37] Jack W Rae, Anna Potapenko, Siddhant M Jayakumar, Chloe Hillier, and Timothy P Lillicrap. Compressive
+transformersforlong-rangesequencemodelling.arxivpreprint,2019. URLhttps://arxiv.org/abs,1911.
+[38] Aurko Roy, Mohammad Saffar, Ashish Vaswani, and David Grangier. Efficient content-based sparse attention
+withroutingtransformers. TransactionsoftheAssociationforComputationalLinguistics,9:53–68,2021.
+[39] Jiaming Tang, Yilong Zhao, Kan Zhu, Guangxuan Xiao, Baris Kasikci, and Song Han. Quest: Query-aware
+sparsityforefficientlong-contextllminference. arXivpreprintarXiv:2406.10774,2024.
+[40] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timothe´eLacroix,Bap-
+tisteRozie`re,NamanGoyal,EricHambro,FaisalAzhar,etal. LLaMA:Openandefficientfoundationlanguage
+models. arXivpreprintarXiv:2302.13971,2023.
+[41] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,NikolayBashlykov,
+SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfoundationandfine-tunedchatmodels.
+arXivpreprintarXiv:2307.09288,2023.
+[42] Yang, Duraiswami, and Gumerov. Improved fast gauss transform and efficient kernel density estimation. In
+ProceedingsninthIEEEinternationalconferenceoncomputervision,pages664–671.IEEE,2003.
+[43] YaoYao,ZuchaoLi,andHaiZhao. Sirllm: Streaminginfiniteretentivellm. arXivpreprintarXiv:2405.12528,
+2024.
+[44] Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti, Santiago Ontanon,
+Philip Pham, Anirudh Ravula, Qifan Wang, Li Yang, et al. Big bird: Transformers for longer sequences. Ad-
+vancesinneuralinformationprocessingsystems,33:17283–17297,2020.
+[45] HailinZhang,XiaodongJi,YilinChen,FangchengFu,XupengMiao,XiaonanNie,WeipengChen,andBinCui.
+Pqcache: Productquantization-basedkvcacheforlongcontextllminference. arXivpreprintarXiv:2407.12820,
+2024.
+[46] Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song, Yuandong
+Tian, Christopher Re´, Clark Barrett, et al. H2o: Heavy-hitter oracle for efficient generative inference of large
+languagemodels. AdvancesinNeuralInformationProcessingSystems,36,2024.
+15A Additional Analysis
+A.1 t-SNEVisualizationofKeysandTheirClusters
+Level 1 Centroids Level 1 Centroids
+Level 2 Centroids Level 2 Centroids
+Keys Keys
+Query Query
+FigureA.1: t-SNEvisualizationofkeyembeddingsandtheirLevel1and2clustersfromLLaMA-2-7B-32Konthe
+TREC benchmark (two attention heads, with index 24 and 25, from layer 0). For clarity, only the top 15 Level 1
+clustersnearesttothequeryareshown.
+FigureA.1illustratest-SNEplotsofkeyembeddingsandtheirLevel1and2clusters. Ascanbeseen,whilethe
+coarser Level 2 clusters offer a rough grouping of the keys, the finer Level 1 clusters allow for a more detailed and
+accuraterepresentationwithineachcluster.
+A.2 AttentionScoreSkewnessAnalysis
+Top 1% Cumulative Attention Score
+0 0.2 0.54 1.0 0.95 0.99 1.0 0.96 0.8 0.87 0.96 0.84 0.99 0.98 0.98 0.9 0.96 0.97 0.88 0.99 0.99 0.93 0.89 0.98 0.98 0.98 0.92 0.97 0.98 0.99 0.98 0.94 0.96
+0.08 0.36 0.95 1.0 0.76 0.89 0.9 0.94 0.98 0.99 0.86 0.76 0.94 0.95 0.64 0.91 0.55 0.96 0.85 0.87 0.98 0.91 0.98 0.87 0.88 0.99 0.99 0.99 0.99 0.99 0.93 0.94
+0.04 0.86 1.0 0.99 0.9 0.95 0.9 0.87 0.99 0.98 0.68 0.74 0.81 0.8 0.92 0.58 0.8 0.98 0.97 0.96 0.99 0.96 0.99 0.98 0.99 0.95 0.97 0.94 0.95 0.95 0.96 0.91
+0.14 0.22 0.91 1.0 0.98 0.99 1.0 0.98 0.81 0.95 0.99 0.95 0.97 0.87 0.74 0.97 0.84 0.97 0.99 0.99 0.94 0.83 0.92 0.99 0.92 0.95 0.95 0.97 0.95 0.92 0.98 0.65
+0.11 0.47 0.99 0.99 0.96 0.99 0.95 0.87 0.79 0.88 0.96 0.81 0.81 0.81 0.87 0.96 0.76 0.82 0.82 0.95 0.98 0.91 0.98 0.99 0.98 0.99 0.97 0.92 0.94 0.98 1.0 0.42
+5 0.05 0.13 1.0 1.0 0.73 0.91 0.98 0.95 0.63 0.99 0.99 0.81 0.93 0.64 0.79 0.46 0.8 0.96 0.99 0.97 0.91 0.89 0.99 0.99 0.91 0.96 0.97 0.99 0.96 0.93 0.97 0.92
+0.06 0.53 0.92 0.95 0.99 0.96 0.89 0.8 0.88 0.98 0.87 0.69 0.99 0.98 0.95 0.92 0.58 0.86 1.0 0.99 0.98 0.99 0.96 0.99 0.99 0.93 0.93 0.97 0.95 0.99 0.99 0.93
+0.05 0.45 1.0 0.97 0.95 0.76 0.95 0.9 0.9 0.99 0.85 0.92 0.89 0.59 0.56 0.93 0.92 0.97 0.99 0.95 0.92 0.99 0.93 0.94 0.88 0.66 0.97 0.83 0.92 0.99 0.93 0.96
+0.23 0.13 1.0 0.85 0.98 1.0 0.85 0.98 0.92 0.87 0.92 0.92 0.82 0.9 0.67 0.95 0.99 0.95 0.99 0.93 0.99 0.96 0.97 0.97 0.87 0.98 0.98 0.96 0.97 0.99 0.95 0.96
+0.05 0.37 0.97 0.95 0.99 0.99 0.79 0.97 0.94 0.97 0.98 0.54 0.84 0.61 0.69 0.82 0.94 0.98 0.93 0.98 0.98 0.97 0.9 0.95 0.98 0.98 0.99 0.97 0.94 0.95 0.93 0.91
+10 0.05 0.42 0.99 0.99 0.99 0.99 0.99 0.93 0.93 0.96 0.88 0.8 0.74 0.93 0.94 0.8 0.8 0.86 0.91 0.94 0.87 0.94 0.97 0.99 0.99 0.98 0.91 0.99 0.97 0.96 0.95 0.37
+0.08 0.18 1.0 1.0 0.99 1.0 0.98 1.0 0.99 0.71 0.95 0.95 0.88 0.92 0.86 0.82 0.99 0.89 0.98 0.97 0.89 0.96 0.97 0.94 0.96 0.88 0.96 1.0 0.97 1.0 0.98 0.6
+0.23 0.25 1.0 0.99 0.79 0.95 0.68 0.8 0.94 0.71 0.48 0.9 0.98 0.98 0.86 0.71 0.99 0.82 0.95 0.67 0.96 0.99 0.79 0.99 0.69 0.97 0.94 0.95 1.0 0.93 0.96 0.88
+0.03 0.35 0.99 0.99 0.87 0.96 0.81 0.98 0.97 0.77 0.82 0.82 0.82 0.94 0.74 0.98 0.92 0.81 0.83 0.96 0.98 0.95 0.96 0.96 0.97 1.0 0.96 0.99 0.56 0.93 0.99 1.0
+0.08 0.3 0.99 1.0 0.99 0.99 0.99 0.77 0.91 0.93 0.72 0.84 0.9 0.96 0.89 0.8 0.94 0.93 0.99 0.88 0.96 0.96 0.96 0.98 0.95 1.0 0.94 0.99 0.8 0.88 0.91 0.87
+15 0.29 0.45 1.0 0.99 0.99 0.89 0.89 0.97 0.99 0.99 0.8 0.83 0.44 0.95 0.51 0.92 0.97 0.98 0.95 0.71 0.97 0.96 0.99 0.98 0.94 0.96 0.95 0.99 0.91 0.82 0.86 0.97
+0.06 0.46 1.0 0.99 0.83 0.98 0.82 1.0 0.99 0.97 0.96 0.99 0.92 0.94 0.44 0.91 0.97 0.85 0.96 0.95 0.96 0.94 0.96 0.97 0.97 0.88 0.93 0.99 0.98 0.89 0.99 0.72
+0.03 0.18 1.0 0.94 0.95 0.95 0.79 0.98 0.99 0.93 0.99 0.67 0.89 0.78 0.91 0.93 0.83 0.98 1.0 0.99 0.84 0.99 0.81 0.97 0.95 0.98 0.94 0.98 0.87 0.98 0.93 0.87
+0.3 0.22 0.99 0.99 0.99 0.99 0.95 0.99 0.92 0.9 0.83 0.58 0.69 0.88 0.66 0.96 0.94 0.8 0.98 0.98 0.83 0.99 0.96 1.0 0.99 0.91 0.86 0.97 0.95 0.96 0.76 0.98
+0.44 0.56 0.99 0.98 0.99 0.99 0.99 0.95 0.96 0.99 0.93 0.77 0.84 0.5 0.92 0.84 0.5 0.9 0.99 0.91 0.99 0.99 0.93 0.98 0.99 0.96 1.0 0.98 0.99 0.83 0.99 0.9
+20 0.03 0.18 0.99 0.99 0.94 0.93 0.45 0.96 0.98 0.89 0.94 0.99 0.97 0.83 0.86 0.97 0.91 0.94 0.98 0.95 0.88 0.99 0.98 0.97 0.97 0.96 0.96 0.94 0.83 0.96 0.94 0.92
+0.05 0.27 0.91 0.96 0.9 0.61 0.75 0.76 0.87 0.98 0.97 0.69 0.95 0.96 0.88 0.92 0.93 0.99 0.98 0.98 0.91 0.98 0.99 0.92 0.91 0.94 0.93 0.97 0.97 0.87 0.97 0.95
+0.06 0.8 0.88 1.0 0.99 0.97 0.96 0.94 0.48 0.9 0.98 0.62 0.93 0.93 0.98 0.98 0.95 0.83 0.99 1.0 0.84 0.98 0.92 0.94 0.99 0.82 0.85 0.91 0.98 0.95 0.99 0.99
+0.04 0.25 0.74 0.97 0.99 0.52 0.98 0.92 0.89 0.45 0.9 0.89 0.95 0.8 0.89 0.95 0.95 0.97 0.92 0.98 0.99 0.99 0.96 0.96 0.93 0.99 0.91 0.99 0.97 0.98 0.98 0.98
+0.07 0.41 1.0 0.99 0.98 1.0 0.99 0.98 0.92 0.98 0.96 0.91 0.97 0.93 0.72 0.75 0.64 0.9 0.99 1.0 0.98 0.99 0.96 0.95 0.93 0.97 0.95 0.99 0.96 0.99 0.86 0.83
+25 0.63 0.37 0.96 0.94 0.99 0.96 0.67 0.99 0.65 0.36 0.99 0.93 0.85 0.94 0.89 0.99 0.98 0.97 0.95 0.98 0.96 0.95 0.92 0.99 0.96 0.95 0.95 0.98 0.97 0.99 0.93 0.87
+0.13 0.23 0.92 0.96 1.0 0.99 0.99 0.98 0.75 0.84 0.95 0.55 0.51 0.87 0.88 0.58 0.92 0.96 0.73 0.99 0.99 0.93 0.93 1.0 0.94 0.97 0.96 0.95 0.99 0.81 0.78 0.68
+0.04 0.68 1.0 0.96 0.99 0.94 0.94 0.94 0.98 0.99 0.98 0.99 0.98 0.86 0.9 0.93 0.98 0.96 0.9 0.99 0.97 0.94 0.93 0.95 0.99 0.88 0.91 0.92 0.97 0.98 0.9 0.57
+0.09 0.41 0.98 0.75 0.99 0.95 0.95 0.58 0.85 0.98 0.92 0.62 0.3 0.98 0.93 0.89 0.97 0.98 0.99 0.98 0.7 0.95 0.98 0.98 1.0 0.92 0.44 0.98 0.99 0.97 0.95 0.88
+0.35 0.34 1.0 0.99 1.0 0.98 1.0 0.87 0.99 0.67 0.85 0.97 0.99 0.98 0.72 0.74 0.78 0.98 0.97 0.99 0.97 0.96 0.98 0.81 0.83 0.92 0.97 0.99 1.0 0.89 0.95 0.97
+30 0.06 0.49 1.0 1.0 0.97 0.98 0.89 0.96 1.0 0.87 0.66 0.69 0.91 0.92 0.99 0.94 0.65 0.94 0.84 0.98 0.84 0.83 0.96 0.97 0.93 0.95 0.5 0.98 1.0 0.88 0.93 0.93
+0.04 0.4 0.99 0.68 0.99 0.84 0.91 0.97 0.97 0.97 0.93 0.85 0.99 0.92 0.84 0.93 0.97 0.95 0.87 0.94 0.93 0.93 0.93 0.97 0.98 0.96 0.97 0.98 0.99 0.96 0.86 0.82
+0 5 10 15 20 25 30
+Layer Index
+Figure A.2: Cumulative attention scores for the top 1% highest scoring attention values across different heads and
+layersinLLaMA-2-7B-32KforasinglesampleontheTRECbenchmark.
+FigureA.2illustratesthecumulativeattentionscoresforthetop1%highestattentionvalueswithinthesamemodel.
+Ahighervalue(uptoamaximumof1)indicatesthattheattentionheadhasasharper,moreskeweddistribution,while
+16
+xednI
+daeHa lower value indicates a flatter distribution of attention scores. This plot demonstrates how the attention heads in
+thefirsttwolayersoftheLLaMA-2-7B-32Kmodel,aswellasasubsetoftheheadsateachoftheremaininglayers,
+haveaflatterdistributionofattentionscores,andthereforeweneedtoloadinmorekeysforaccuratecomputationof
+attention.
+B Generation Centroid Lookup Kernel Ablation
+Weprovideablationsforourcentroidlookupkernelimplementationforgeneration. Specifically, weablatetheben-
+efits of our single-pass optimization, as well as the improvements from parallelizing along the KV sequence length
+dimensioninordertoacceleratethecentroidlookupduringgeneration. TableB.1showstheresultsforthisablation,
+demonstratinghowtheseoptimizationsallowSQUEEZEDATTENTIONtoachievegreaterspeedupsduringgeneration.
+Table B.1: Ablation for our centroid lookup kernel implementation during generation with sequence length 512K,
+showingthenormalizedlatencyrelativetothebaselineTritonFlashDecodingkernel. Weshowthebenefitsofincor-
+poratingoursingle-passoptimization,aswellasthegainsfromsplittingalongtheKVdimensionasinFlashDecoding
+[11].TheseresultshighlighttheimportanceofourlookupkerneloptimizationsforattainingspeedupswithSQUEEZED
+ATTENTIONduringgeneration.
+Configuration FlashDecodingBaseline CentroidLookup +Single-PassOptimization +Split-KVOptimization
+NormalizedLatency 1 0.29 0.22 0.12
+C Experimental Details
+KVBudgetComputation.WereportKVbudgetestimatesthroughouttheevaluationbasedontheconfiguredsparsity
+threshold and percentage of centroids used. Note that the KV budget does not include performing recomputation
+with the same key centroid (as our current kernel implementation for prefill loads the key centroid twice to avoid
+materializingintermediatetensors). Additionally,duetoourcalibrationprocedure(whichsetsasinglethresholdfor
+both prefill and generation), the KV cache budget may be slightly higher than expected during prefill, and slightly
+lowerthanexpectedduringgeneration. Thisoccurssinceaveragingtheattentiontothecentroidsacrossquerytokens
+flattenstheattentiondistribution,whichleadstopreservingmorekeytokensduringprefill. Also,withthehierarchical
+method, the portion of KV tokens that are loaded may deviate further from the expected value from calibration due
+tothepotentialforincorrectlyfilteringoutimportantkeyswhencomparingwiththeLevel1centroidsaswellasdue
+to not loading all of the Level 2 keys when computing the denominator in Equation 3. For our hierarchical lookup
+experiments,wethereforeprofiledtheKVcachebudgetestimatesreportedinourevaluation.
+BaselineMethods.QUEST[39]usesafixedtokenbudgetacrossallinputsampleswhenevaluatingonLongBench.In
+ordertoperformafaircomparisonwithourmethod,wesetthetokenbudgetfortheirapproachtobeafixedpercentage
+of the length of each sample. We dynamically set their token budget to be a percentage of the fixed context length
+(roundeduptothenearestmultipleof16). Sinceourmethodonlyapproximatesattentiontothefixed-contextportion
+oftheinput,weadjustthisdynamicallycomputedtokenbudgetusingthefullinputlengthforthesampleaswellasthe
+maximum generation length for the target task. This adjustment ensures that the achieved compression ratio for the
+fixedcontextwiththeirmethodiscomparablewithourapproach. Notethatthisadjustmentalsoaccountsforthe100
+tokensattheendofthefixedcontextthatweuseforcalibrationpurposesandthereforeretainexactlywithourmethod.
+For QUEST comparisons, we also leave the first two layers uncompressed to match their default configuration. We
+use90%and95%sparsitysettingsfortheirmethodtoobtainthetwoconfigurationsreportedinthepaper.
+Implementation Details. Similar to the numerically stable implementation of Softmax, where the maximum value
+is subtracted from all inputs, our centroid lookup approach during the generation stage (Section 4.1) also subtracts
+the maximum value from all inputs while computing the denominator D. Then, when comparing exp(qC⊤) to the
+i
+threshold DT, the maximum value correction can similarly be accounted for by scaling the threshold DT using the
+exponentialofthemaximumvalueratherthanbyscalingexp(qC⊤)downbythisvalue.
+i
+17D Data Curation Prompts
+Below we provide the GPT-4-Turbo [3] prompts that were used to generate and filter high-quality question-answer
+pairsforourcustombenchmarkPreFixQA.
+D.1 DatasetCurationPromptsforQuestionGeneration
+System: You are a helpful assistant tasked with generating very
+specific, unambiguous, short-answer questions based on a provided
+Document. The goal is to create high-quality synthetic data. Ensure
+the following:
+1. The question must be fact-based and directly answerable from the text
+of the provided Document and section of the paper.
+2. The question should not be vague, subjective, or open to
+interpretation.
+3. Focus on creating concise, precise questions that yield a 1-2 word
+answer.
+4. Questions should be relevant to the section of the paper and avoid
+overly broad phrasing.
+5. Avoid generating questions where the answer is too complex or
+requires long explanations.
+User: Based on the section of the paper from the given document which is
+an arxiv paper generate one short-answer question that asks for specific
+information retrievable directly from the section of the paper. The
+answer must be 1-2 words only.
+Follow the format of this example:
+Example: Question: What type of buffer is integrated with
+warp-specialization in FlashAttention-3? Use this section of the paper
+as the context: "Given section". Do not output the answer; Just the
+question.
+D.2 DatasetCurationPromptsforAnswerGeneration
+System: You are a helpful assistant designed to generate accurate and
+specific short answers from a provided section of the paper and Document.
+Ensure the following:
+1. The answer must be concise (1-2 words).
+2. The answer must be directly retrieved from the provided text.
+3. If the section of the paper does not contain the information
+necessary to answer the question, respond with: ’The document does not
+contain the answer to the question.’.
+4. Avoid providing additional commentary, and only output the answer.
+User: Given the section of the paper below from an arXiv paper, generate
+a concise (1-2 words) answer to the following question. Retrieve the
+answer from the paper and the provided paragraph. Pay close attention to
+the document and retrieve the right answer. Output the answer only and
+not the question or anything else.
+Follow the format of this example:
+18Example: Question: What type of buffer is integrated with
+warp-specialization in FlashAttention-3? Answer: circular SMEM
+buffer. Here is the section of the paper: "Given Section". Question:
+"Question". Answer:
+D.3 DatasetCurationPrompts-Filtering
+System: Please act as an impartial judge and evaluate the quality of the
+question and answer pairs provided. You will be assessing them based on
+the provided document. Your evaluation should emphasize the following
+criteria:
+1. Correctness: Is the answer factually accurate and grounded in the
+document?
+2. Agreement: Does the answer directly address the question and provide
+a relevant response?
+3. Confidence: Does the answer confidently engage with the question,
+even if the Document does not contain the exact information?
+Important considerations for rating:
+- Rate vague or overly general questions lower, especially if they lack
+specificity or do not make sense in the context of the document.
+- Rate answers where the model, dataset, or method is unclear or missing
+details lower.
+- If the answer states that the information is not in the document,
+confirm by reviewing the document. If the information is indeed missing,
+rate the answer highly. If it is present, rate the answer lower.
+- Avoid focusing on questions about appendix numbers, or formatting
+details (like section names).
+- Avoid asking questions that have 2 possible answers. if there are 2
+possible answers and only one is provided, rate the answers low.
+- If there are questions that are taken from the ’References’ and
+’Acknowledgments’ sections, rate the answers low.
+For each answer, provide a rating on a scale from 1 to 10 based on its
+quality.
+User: The question is "Question" and the answers are "Answers". Make
+sure to give the rating for each answer in the answers list. Please
+output your rating in the following format:
+Question: "Question" Answer: [Answer1]- Rating: [[5]] Answer:
+[Answer2]- Rating: [[8]] ...
+E Comparison with Ideal Lookup
+TableE.1providescomparisonswithabaselineusinganidealizedlookup. Forthe“Ideal”baselinecomparisons,we
+firstcomputeattentionfromtheuserinputquerytokenstoallofthefixedcontextkeys. Wethenselectthekeyswhose
+attention scores are above the configured threshold, and compute exact attention using only these keys. This serves
+asanupperboundontheattainableaccuracyforagivensparsitypercentage,sinceitletsusidentifythehigh-scoring
+tokensexactlybeforecomputingattentionusingthesetokens.Forthisidealizedbaseline,wealsocalibrateforaglobal
+threshold across all layers to allow this approach to adaptively retain more or fewer keys for different heads, which
+allowsustomakeafaircomparisonbetweenourmethodandthisidealizedbaseline.
+19Table E.1: Ablation showing the accuracy of SQUEEZED ATTENTION compared with an idealized baseline. We
+report LongBench evaluation results for the Llama-2-7B-32K model, including the average score across tasks. We
+alsoincludetheKVbudgetforourmethod(“Budget”),whichgivesthepercentageoftheKVcachethatneedstobe
+loadedinduringinference(includingextramemorymovementforclustercentroids). Ourresultsdemonstratethatour
+centroidlookupmethodattainssimilaraccuracytotheidealizedbaselineforthesamelevelofsparsityacrossdifferent
+LongBenchtasks.
+Single-DocumentQA Multi-DocumentQA Summarization Few-shotLearning Code
+Config Budget NQA Qasper MFQA Hotpot 2Wiki Musique GRep
+Q
+MSum
+M
+News TREC TQA SSum RBench LCC Avg.
+AllKV 1 17.91 11.12 33.87 12.45 11.95 6.54 29.37 16.93 21.58 71.50 87.96 43.87 61.45 59.14 34.69
+Ideal-70% 0.3 18.28 11.25 34.13 12.56 12.13 6.57 29.12 16.99 21.37 70.00 87.79 43.59 62.01 59.36 34.65
+Squeeze-70% 0.325 18.55 11.78 34.33 12.31 12.31 6.26 29.50 16.90 20.76 69.00 87.96 43.90 61.29 59.53 34.60
+Ideal-90% 0.1 17.65 11.77 33.89 12.67 11.86 6.04 29.02 16.79 23.22 69.00 87.23 44.33 57.82 60.17 34.39
+Squeeze-90% 0.125 18.15 14.39 32.38 11.84 11.70 6.45 29.06 16.93 21.66 70.00 87.43 45.15 58.79 59.37 34.52
+F Kernel Benchmarking for 128K Sequence Length
+FigureF.1showsthelatencyfortheFlashAttentionbaselineaswellasfor SQUEEZED ATTENTION with70%,80%,
+and90%sparsitywith128kcontextlength,withthenumberofcentroidssettobe5%ofthecontextlength. Wereport
+resultsforgenerationaswellasprefillwith1Kand4Kinputtokens,andwereportthelatencyforeachconfiguration
+normalizedtothebaselinelatencyforthecorrespondinginputsize. Forprefill,weobserve4.2×speedupswith90%
+sparsity, which is comparable with our speedups reported for 512K. For generation, we observe reduced speedups,
+observing 2.5× speedups with 90% sparsity, relative to the FlashDecoding baseline implementation. The reduced
+speedupsinthisregimeareduetogreateroverheadswiththecentroidlookupkernelforshortersequencelengths.
+1.9X 1.9X 1.6X
+2.6X 2.6X 2.0X
+4.0X 4.2X 2.5X
+FigureF.1: KernelimplementationlatencyresultsforFlashAttentionbaselineaswellasforSQUEEZEDATTENTION
+with70%,80%,and90%sparsitysettings. Wereportlatencyresultsforprefill(with1Kand4Kinputlength)aswell
+asforgenerationwithasingleinputtoken. LatencyresultsarenormalizedtotheFlashAttentionbaselineruntimefor
+prefill(andtoourTritonFlashDecodingbaselineforgeneration)forthesameinputlength.
+G Limitations
+Oneofthelimitationsofourworkisthatboththesparsitythresholdandthenumberofcentroidsusedarehyperparam-
+eters.Furthermore,thedegreeofsparsitythatisattainablewithoutaccuracydegradationisalsodependentontheinput
+contextandthetypeoftask. Ourworkcouldthereforebeextendedbydevelopinganautomatedwayofconfiguring
+20these hyperparameters depending on the target accuracy level and the input context. Our approach also focuses on
+accelerating fixed context applications, which limits its use for applications where the full context is only available
+online. Futureworkcanbedonetoacceleratetheinitialofflineclusteringstepinordertoallowourmethodtobeused
+inonlineuse-cases.
+21
